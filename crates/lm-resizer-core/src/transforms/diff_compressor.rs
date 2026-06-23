@@ -37,7 +37,8 @@
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
-use std::time::Instant;
+// Monotonic shim: real `std::time::Instant` on native, no-op on wasm32.
+use crate::monotonic::Instant;
 
 use md5::{Digest, Md5};
 use regex::Regex;

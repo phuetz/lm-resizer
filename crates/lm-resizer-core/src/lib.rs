@@ -4,6 +4,7 @@ pub mod auth_mode;
 pub mod cache_control;
 pub mod ccr;
 pub mod compression_policy;
+mod monotonic;
 pub mod relevance;
 pub mod signals;
 // Token counting (tiktoken / HF tokenizers) is native-only and reached only by

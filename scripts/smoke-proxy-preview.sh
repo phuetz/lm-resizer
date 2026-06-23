@@ -42,4 +42,31 @@ response="$(curl -fsS \
 printf '%s' "$response" | grep -q '"mode":"preview"'
 printf '%s' "$response" | grep -q '"compression"'
 printf '%s' "$response" | grep -q '"request"'
+
+# Real compression assertion: a noisy `tool` message (large uniform JSON array)
+# must be compressed by the provider-aware live-zone path (bytes_saved > 0),
+# not merely echoed back. This exercises the actual /v1 compression seam over
+# HTTP, not just the envelope shape.
+noisy_req="$(node -e '
+  const rows = Array.from({length: 60}, (_, i) => ({id: i, name: "item-" + i, status: "ok", score: 100}));
+  process.stdout.write(JSON.stringify({
+    model: "gpt-4o",
+    messages: [
+      {role: "user", content: "summarize the results"},
+      {role: "assistant", content: "calling tool"},
+      {role: "tool", tool_call_id: "t1", content: JSON.stringify(rows)},
+    ],
+  }));
+')"
+noisy_resp="$(curl -fsS -H 'content-type: application/json' -d "$noisy_req" "http://$bind/v1/chat/completions")"
+printf '%s' "$noisy_resp" | node -e '
+  const d = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+  const saved = d.compression && d.compression.bytes_saved;
+  if (!(saved > 0)) {
+    console.error("expected provider-aware live-zone compression, bytes_saved=" + saved);
+    process.exit(1);
+  }
+  console.error("live-zone compression saved " + saved + " bytes over HTTP");
+'
+
 printf '%s\n' "proxy preview smoke passed at http://$bind"

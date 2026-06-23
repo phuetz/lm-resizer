@@ -24,6 +24,13 @@ export async function initLmResizerWasm(input) {
   }
 
   function writeBytes(bytes) {
+    // Zero-length input needs no allocation: the Rust ABI treats a null pointer
+    // with length 0 as an empty string. (lm_resizer_alloc(0) returns null by
+    // design, so calling it here would spuriously look like an allocation
+    // failure — this is the empty-`query` path.)
+    if (bytes.length === 0) {
+      return 0;
+    }
     const ptr = exports.lm_resizer_alloc(bytes.length);
     if (!ptr) {
       throw new Error("lm_resizer_alloc returned null");

@@ -343,7 +343,8 @@ impl SmartCrusher {
     /// - `strategy`: combined strategy info from all crushed arrays
     ///   (or `"passthrough"`).
     pub fn crush(&self, content: &str, query: &str, bias: f64) -> CrushResult {
-        let start = std::time::Instant::now();
+        // Monotonic shim: real Instant on native, no-op on wasm (panics otherwise).
+        let start = crate::monotonic::Instant::now();
         let (compressed, was_modified, info) = self.smart_crush_content(content, query, bias);
         let strategy = if info.is_empty() {
             "passthrough".to_string()
