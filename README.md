@@ -1,8 +1,33 @@
 # lm-resizer
 
-Rust-native context compression for LLM agents.
+Rust-native context compression for Claude Code, Codex, and LLM agents.
 
 Website: <https://phuetz.github.io/lm-resizer/>
+
+`lm-resizer` is designed to be used alongside **Claude Code**, **Codex**, and
+other coding agents that spend a large part of their context window on raw tool
+output. Its purpose is simple: **save tokens and preserve useful context by
+removing or offloading data the model does not need to reason well**.
+
+When an agent runs commands such as `cargo test`, `npm test`, `git diff`, `rg`,
+linters, package managers, or provider/API calls, the raw output often contains
+thousands of repeated, low-value, or structurally noisy lines. Sending all of
+that to the LLM wastes tokens, fills the context window, and can hide the real
+error. `lm-resizer` filters and compresses that output before it reaches the
+agent, while keeping important failures, file paths, summaries, and recovery
+links visible.
+
+Use it as a context-budget layer for agent workflows:
+
+- **Claude Code and Codex hooks**: capture noisy tool output after commands run
+  and record compressed savings data.
+- **`lm-resizer exec`**: wrap commands so agents receive filtered output instead
+  of raw logs.
+- **MCP tools**: expose compression, retrieval, and stats to compatible agents.
+- **HTTP/proxy mode**: compress OpenAI/Anthropic-compatible provider payloads
+  before previewing or forwarding them.
+- **CCR recovery**: offload bulky data locally and retrieve the original output
+  when the agent really needs the full evidence.
 
 This repository is a standalone Rust-only context compression engine. It keeps the
 useful primitives local and dependency-light at runtime:
