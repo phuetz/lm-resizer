@@ -122,10 +122,10 @@ const STRATEGY_DIFF_COMPRESSOR: &str = "diff_compressor";
 /// Strategy tag emitted when SourceCompressor rewrote a source-code block.
 const STRATEGY_SOURCE_COMPRESSOR: &str = "source_compressor";
 
-/// Empty query context passed to compressors that take a relevance
-/// query string. PR-B3 dispatcher does not yet plumb the user's last
-/// prompt through; PR-F3 will.
-const EMPTY_QUERY: &str = "";
+/// Maximum number of bytes of the user's latest message used as the relevance
+/// query for scoring-aware compressors. Long prompts are truncated — the head
+/// carries the intent, and the compressors only need a relevance signal.
+const MAX_QUERY_BYTES: usize = 512;
 /// Default relevance bias passed to scoring-aware compressors. Mirrors
 /// the OSS-default behaviour ("no bias").
 const DEFAULT_BIAS: f64 = 0.0;
@@ -713,6 +713,9 @@ pub fn compress_anthropic_live_zone_with_ccr(
     // produced compressed output; the byte-threshold gate filters
     // sub-threshold content first.
     let tokenizer = get_tokenizer(model);
+    // Relevance query: bias compression toward what the user asked in this
+    // (the latest) user message, instead of compressing blind.
+    let query = relevance_query_from_message(&messages[target_idx]);
 
     for slot in plan {
         let outcome = match slot.kind {
@@ -733,6 +736,7 @@ pub fn compress_anthropic_live_zone_with_ccr(
                 let outcome: BlockOutcome = compress_one_block(
                     &content_text,
                     detected.content_type,
+                    &query,
                     content_byte_range,
                     target_idx,
                     Some(slot.block_index),
@@ -751,6 +755,7 @@ pub fn compress_anthropic_live_zone_with_ccr(
                 compress_one_block(
                     &content_text,
                     detected.content_type,
+                    &query,
                     content_byte_range,
                     target_idx,
                     None,
@@ -822,9 +827,61 @@ pub fn compress_anthropic_live_zone_with_ccr(
 ///    (note: tokens, not bytes, drive the gate).
 /// 4. Otherwise record the replacement and tag `Compressed`.
 #[allow(clippy::too_many_arguments)]
+/// Extract a relevance query from a chat message's user-authored text, so the
+/// scoring-aware compressors (SmartCrusher, search) bias toward what the user
+/// actually asked instead of compressing blind. Handles string content and
+/// content arrays (`text` / `input_text` / `output_text` parts); ignores
+/// tool-result / image blocks. Truncated to [`MAX_QUERY_BYTES`].
+fn relevance_query_from_message(message: &Value) -> String {
+    let Some(content) = message.get("content") else {
+        return String::new();
+    };
+    let mut text = String::new();
+    match content {
+        Value::String(s) => text.push_str(s),
+        Value::Array(items) => {
+            for item in items {
+                let ty = item.get("type").and_then(Value::as_str).unwrap_or("");
+                if ty == "text" || ty == "input_text" || ty == "output_text" {
+                    if let Some(t) = item.get("text").and_then(Value::as_str) {
+                        if !text.is_empty() {
+                            text.push(' ');
+                        }
+                        text.push_str(t);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    truncate_on_char_boundary(text.trim(), MAX_QUERY_BYTES)
+}
+
+/// Latest `role: "user"` message's question text among `messages` (or empty).
+fn latest_user_query(messages: &[Value]) -> String {
+    messages
+        .iter()
+        .rev()
+        .find(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+        .map(relevance_query_from_message)
+        .unwrap_or_default()
+}
+
+fn truncate_on_char_boundary(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
+}
+
 fn compress_one_block(
     content_text: &str,
     content_type: ContentType,
+    query: &str,
     content_byte_range: (usize, usize),
     message_index: usize,
     block_index: Option<usize>,
@@ -850,7 +907,7 @@ fn compress_one_block(
         };
     }
 
-    match dispatch_compressor(content_text, content_type) {
+    match dispatch_compressor(content_text, content_type, query) {
         DispatchResult::NoOp { content_type } => BlockOutcome {
             message_index,
             block_index,
@@ -1330,7 +1387,7 @@ enum DispatchResult {
 /// - `SourceCode` → SourceCompressor
 /// - `PlainText` → no-op (PR-B4 wires Kompress)
 /// - `Html` → no-op (no compressor)
-fn dispatch_compressor(text: &str, content_type: ContentType) -> DispatchResult {
+fn dispatch_compressor(text: &str, content_type: ContentType, query: &str) -> DispatchResult {
     if text.is_empty() {
         return DispatchResult::NoOp {
             content_type: content_type.as_str(),
@@ -1343,7 +1400,7 @@ fn dispatch_compressor(text: &str, content_type: ContentType) -> DispatchResult 
             // too (confidence 0.8). SmartCrusher's `crush` is safe to
             // call on those — it parses, finds no compressible
             // arrays, and returns the input.
-            let result = smart_crusher().crush(text, EMPTY_QUERY, DEFAULT_BIAS);
+            let result = smart_crusher().crush(text, query, DEFAULT_BIAS);
             if !result.was_modified {
                 return DispatchResult::NoOp {
                     content_type: content_type.as_str(),
@@ -1367,7 +1424,7 @@ fn dispatch_compressor(text: &str, content_type: ContentType) -> DispatchResult 
             }
         }
         ContentType::SearchResults => {
-            let (result, _stats) = search_compressor().compress(text, EMPTY_QUERY, DEFAULT_BIAS);
+            let (result, _stats) = search_compressor().compress(text, query, DEFAULT_BIAS);
             if result.compressed == result.original {
                 return DispatchResult::NoOp {
                     content_type: content_type.as_str(),
@@ -1379,7 +1436,7 @@ fn dispatch_compressor(text: &str, content_type: ContentType) -> DispatchResult 
             }
         }
         ContentType::GitDiff => {
-            let result = diff_compressor().compress(text, EMPTY_QUERY);
+            let result = diff_compressor().compress(text, query);
             if result.compressed == text {
                 return DispatchResult::NoOp {
                     content_type: content_type.as_str(),
@@ -1950,11 +2007,14 @@ pub fn compress_openai_chat_live_zone(
     let mut block_outcomes: Vec<BlockOutcome> = Vec::with_capacity(all_slots.len());
     let mut replacements: Vec<Replacement> = Vec::new();
 
+    // Relevance query: the latest user message biases tool-output compression.
+    let query = latest_user_query(messages);
     for (msg_idx, slot) in all_slots {
         let detected = detect_content_type(&slot.content_text);
         let outcome = compress_one_block(
             &slot.content_text,
             detected.content_type,
+            &query,
             slot.content_byte_range,
             msg_idx,
             slot.block_index,
@@ -2272,6 +2332,88 @@ mod openai_chat_tests {
             .expect("user block recorded");
         assert_eq!(user_block.message_index, 2);
     }
+
+    #[test]
+    fn relevance_query_extracts_user_text() {
+        // String content.
+        assert_eq!(
+            relevance_query_from_message(&json!({"role": "user", "content": "fix the parser"})),
+            "fix the parser"
+        );
+        // Array content: text parts joined; tool_result / image ignored.
+        let msg = json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "why did"},
+                {"type": "tool_result", "content": "huge noisy blob"},
+                {"type": "image_url", "image_url": {"url": "data:..."}},
+                {"type": "text", "text": "it fail"},
+            ]
+        });
+        assert_eq!(relevance_query_from_message(&msg), "why did it fail");
+        // Truncation to MAX_QUERY_BYTES.
+        let long = "x".repeat(MAX_QUERY_BYTES + 50);
+        let got = relevance_query_from_message(&json!({"role": "user", "content": long}));
+        assert_eq!(got.len(), MAX_QUERY_BYTES);
+    }
+
+    #[test]
+    fn latest_user_query_picks_last_user_message() {
+        let messages = vec![
+            json!({"role": "user", "content": "first question"}),
+            json!({"role": "assistant", "content": "an answer"}),
+            json!({"role": "user", "content": "second question"}),
+            json!({"role": "tool", "tool_call_id": "t", "content": "result"}),
+        ];
+        assert_eq!(latest_user_query(&messages), "second question");
+        assert_eq!(latest_user_query(&[]), "");
+    }
+
+    #[test]
+    fn query_aware_retains_query_relevant_row() {
+        // A large tool-output array; one row carries a distinctive UUID. When
+        // the user's question references that UUID, the query-aware path must
+        // retain that row (it is a query anchor) through compression.
+        let needle = "550e8400-e29b-41d4-a716-446655440000";
+        let mut arr = String::from("[");
+        for i in 0..200 {
+            if i > 0 {
+                arr.push(',');
+            }
+            if i == 137 {
+                arr.push_str(&format!(
+                    r#"{{"id":{i},"ref":"{needle}","note":"the target row"}}"#
+                ));
+            } else {
+                arr.push_str(&format!(
+                    r#"{{"id":{i},"ref":"r{i}","note":"filler row {i}"}}"#
+                ));
+            }
+        }
+        arr.push(']');
+        let b = body(json!({
+            "messages": [
+                {"role": "user", "content": format!("please explain ref {needle}")},
+                {"role": "assistant", "content": "calling tool"},
+                {"role": "tool", "tool_call_id": "t1", "content": arr},
+            ]
+        }));
+        let out = compress_openai_chat_live_zone(&b, AuthMode::Payg, "gpt-4o").unwrap();
+        let compressed = match &out {
+            LiveZoneOutcome::Modified { new_body, .. } => new_body.get().to_string(),
+            LiveZoneOutcome::NoChange { .. } => panic!("expected compression of a 200-row array"),
+        };
+        // The query-relevant row survived compression.
+        assert!(
+            compressed.contains(needle),
+            "query-relevant row (anchor {needle}) must be retained under query-aware compression"
+        );
+        // And it actually compressed (output smaller than the raw body).
+        assert!(
+            compressed.len() < b.len(),
+            "tool output should be compressed"
+        );
+    }
 }
 
 // ─── OpenAI Responses live-zone dispatcher (Phase C PR-C3) ────────────
@@ -2444,6 +2586,8 @@ pub fn compress_openai_responses_live_zone(
     let mut block_outcomes: Vec<BlockOutcome> = Vec::with_capacity(all_slots.len());
     let mut replacements: Vec<Replacement> = Vec::new();
 
+    // Relevance query: the latest user message biases tool-output compression.
+    let query = latest_user_query(items);
     for (msg_idx, slot) in all_slots {
         // Output items must clear the response-output floor BEFORE the
         // per-content-type threshold even runs. This is on top of the
@@ -2465,6 +2609,7 @@ pub fn compress_openai_responses_live_zone(
         let outcome = compress_one_block(
             &slot.content_text,
             detected.content_type,
+            &query,
             slot.content_byte_range,
             msg_idx,
             slot.block_index,
