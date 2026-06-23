@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>lm-resizer — context compression for AI coding agents</title>
-<meta name="description" content="A Rust-native context compression layer for Claude Code, Codex and MCP agents. Compress logs, diffs, JSON and provider payloads while keeping raw output recoverable." />
+<title>lm-resizer — less noise, more useful context for Claude Code and Codex</title>
+<meta name="description" content="A Rust-native context compression layer for Claude Code, Codex and MCP agents. Save tokens by filtering noisy logs, diffs, JSON and provider payloads while keeping raw output recoverable." />
 <meta property="og:title" content="lm-resizer" />
-<meta property="og:description" content="Compress noisy agent context into useful signal for Claude Code, Codex, MCP and OpenAI/Anthropic-compatible proxy workflows." />
+<meta property="og:description" content="Help Claude Code and Codex waste fewer tokens on noisy tool output. Compress logs, diffs, JSON and provider payloads while keeping full evidence recoverable." />
 <meta property="og:type" content="website" />
 <style>
   :root{
@@ -102,6 +102,7 @@
     <div class="brand"><span class="mark">&gt;_</span> lm-resizer <span class="version">0.1.0</span></div>
     <nav>
       <a href="#why">Why</a>
+      <a href="#together">Together</a>
       <a href="#agents">Agents</a>
       <a href="#proxy">Proxy / MCP</a>
       <a href="#start">Quick start</a>
@@ -112,11 +113,11 @@
   <main>
     <section class="hero" style="border-top:0">
       <div>
-        <h1>Compress noise.<br><span class="grad">Keep signal.</span></h1>
-        <p class="sub"><b>lm-resizer is a Rust-native context compression layer for Claude Code, Codex and MCP agents.</b> It filters noisy tool output, compresses provider payloads, and keeps the raw data recoverable when the agent needs it.</p>
+        <h1>Less noise.<br><span class="grad">More useful context.</span></h1>
+        <p class="sub"><b>lm-resizer helps Claude Code and Codex spend fewer tokens on raw logs and more context on reasoning.</b> It filters noisy tool output, compresses provider payloads, and keeps the raw data recoverable when the agent needs it.</p>
         <div class="signal">
-          <div><b>Less context</b><span>logs, diffs, JSON</span></div>
-          <div><b>Better answers</b><span>errors stay visible</span></div>
+          <div><b>Fewer tokens</b><span>logs, diffs, JSON</span></div>
+          <div><b>Clearer signal</b><span>errors stay visible</span></div>
           <div><b>Local first</b><span>no telemetry</span></div>
           <div><b>Agent ready</b><span>Codex · Claude · MCP</span></div>
         </div>
@@ -170,18 +171,25 @@
     </section>
 
     <section id="why">
-      <h2>Why it pays off for your LLM</h2>
-      <p class="lead">AI coding agents burn context on terminal output, logs, repeated errors, large JSON, diffs and provider envelopes. lm-resizer keeps the important signal visible while moving bulk data into recoverable local storage.</p>
+      <h2>Why readers should care</h2>
+      <p class="lead">AI coding agents are only as useful as the context they can still see. If the window is full of repeated logs, long diffs and raw JSON, the model has less room left for the actual reasoning. lm-resizer keeps the important signal visible while moving bulk data into recoverable local storage.</p>
       <div class="grid3">
-        <div class="card"><div class="icon">01</div><h3>Preserve the important lines</h3><p>Errors, warnings, file paths, failing tests and actionable next steps remain visible instead of being buried in raw logs.</p></div>
-        <div class="card"><div class="icon">02</div><h3>Recover the full output</h3><p>Large or failed command output can be saved locally and referenced through CCR, so compression does not mean losing evidence.</p></div>
-        <div class="card"><div class="icon">03</div><h3>Works where agents work</h3><p>Use it as a CLI wrapper, MCP server, Codex/Claude hook helper, local proxy, C ABI or WASM package.</p></div>
+        <div class="card"><div class="icon">01</div><h3>Make failures readable</h3><p>Errors, warnings, file paths, failing tests and next steps stay visible instead of being buried in raw logs.</p></div>
+        <div class="card"><div class="icon">02</div><h3>Save context without losing proof</h3><p>Large or failed command output can be saved locally and referenced through CCR, so compression does not mean losing evidence.</p></div>
+        <div class="card"><div class="icon">03</div><h3>Fit real agent workflows</h3><p>Use it as a CLI wrapper, MCP server, Codex/Claude hook helper, local proxy, C ABI or WASM package.</p></div>
       </div>
     </section>
 
-    <section>
+    <section id="together">
+      <h2>Built to pair with Code Explorer</h2>
+      <p class="lead">Code Explorer gives the agent a queryable map of the repository. lm-resizer protects the agent's working context while commands, tools and model providers produce noise. Together, they make a stronger story: know the codebase, then keep the execution loop clean.</p>
+      <div class="grid3" style="margin-bottom:18px">
+        <div class="card"><h3>Code Explorer</h3><p>Answers structural questions: where is the logic, what calls this, what changes if this symbol moves?</p></div>
+        <div class="card"><h3>lm-resizer</h3><p>Filters the noisy outputs produced while the agent tests, searches, builds, reviews and calls providers.</p></div>
+        <div class="card"><h3>Code Buddy toolchain</h3><p>A practical direction for agentic coding: map the repo, preserve context, orchestrate the work.</p></div>
+      </div>
       <h2>Agent alone vs. agent with lm-resizer</h2>
-      <p class="lead">Code Explorer gives the agent a map of the repository. lm-resizer protects the agent's working context while commands, tools and model providers produce noise.</p>
+      <p class="lead">The point is not only to compress text. The point is to make Claude Code and Codex easier to trust because the prompt contains less waste and more useful evidence.</p>
       <table>
         <thead><tr><th>Workflow</th><th>Without lm-resizer</th><th>With lm-resizer</th></tr></thead>
         <tbody>
@@ -247,9 +255,10 @@ cargo build --release
     </section>
 
     <section id="about">
-      <h2>Part of the Code Buddy toolchain</h2>
+      <h2>Part of a visible agent-tooling story</h2>
       <div class="about">
         <p><b>lm-resizer is the context-budget layer.</b> Code Explorer maps the codebase, Code Buddy orchestrates coding work, and lm-resizer keeps command output, diffs, logs and provider payloads small enough for agents to use effectively.</p>
+        <p>Created by <b>Patrice Huetz</b> as part of a practical toolchain for developers who want AI agents to work on real repositories, not just demos.</p>
         <p>Built in Rust, local-first, Apache-2.0 licensed, and designed for real Claude Code, Codex and MCP workflows.</p>
       </div>
     </section>

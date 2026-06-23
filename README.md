@@ -1,15 +1,16 @@
 # lm-resizer
 
-Rust-native context compression for Claude Code, Codex, and LLM agents.
+Make **Claude Code** and **Codex** work with less noise, fewer wasted tokens,
+and more useful context.
 
 Website: <https://phuetz.github.io/lm-resizer/>
 
 French README: [README.fr.md](README.fr.md)
 
-`lm-resizer` is designed to be used alongside **Claude Code**, **Codex**, and
-other coding agents that spend a large part of their context window on raw tool
-output. Its purpose is simple: **save tokens and preserve useful context by
-removing or offloading data the model does not need to reason well**.
+`lm-resizer` is designed for a practical agent problem: Claude Code, Codex, and
+MCP agents spend a surprising amount of their context window on raw tool output.
+Its purpose is simple: **save tokens and preserve useful context by removing,
+compressing, or offloading data the model does not need to reason well**.
 
 When an agent runs commands such as `cargo test`, `npm test`, `git diff`, `rg`,
 linters, package managers, or provider/API calls, the raw output often contains
@@ -18,6 +19,20 @@ that to the LLM wastes tokens, fills the context window, and can hide the real
 error. `lm-resizer` filters and compresses that output before it reaches the
 agent, while keeping important failures, file paths, summaries, and recovery
 links visible.
+
+## Why this exists
+
+`lm-resizer` is part of a broader toolchain for making coding agents usable on
+large real-world repositories:
+
+- **Code Explorer** gives the agent a queryable map of the codebase.
+- **lm-resizer** protects the agent from wasting context on noisy execution
+  output.
+- **Code Buddy** orchestrates the coding workflow.
+
+The goal is not just compression. The goal is a cleaner, easier-to-explain way
+to work with Claude Code and Codex: give the agent structure, remove low-value
+noise, and keep the full evidence recoverable when needed.
 
 Use it as a context-budget layer for agent workflows:
 

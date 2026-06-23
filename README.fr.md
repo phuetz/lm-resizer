@@ -1,18 +1,22 @@
 # lm-resizer
 
-Compression de contexte Rust-native pour **Claude Code**, **Codex** et les
-agents LLM.
+Faire travailler **Claude Code** et **Codex** avec moins de bruit, moins de
+tokens, et plus de contexte utile.
 
 Site : <https://phuetz.github.io/lm-resizer/>
 
 Version anglaise : [README.md](README.md)
 
-`lm-resizer` est conçu pour être utilisé avec **Claude Code**, **Codex** et les
-agents compatibles MCP qui consomment une grande partie de leur fenêtre de
-contexte avec des sorties d’outils brutes. Sa vocation est simple :
-**économiser des tokens et préserver le contexte utile en supprimant,
-compressant ou offloadant les données dont le modèle n’a pas besoin pour bien
-raisonner**.
+`lm-resizer` est né d’un problème très concret : quand on utilise Claude Code,
+Codex ou un agent MCP sur un vrai dépôt, une grande partie de la fenêtre de
+contexte part dans des logs, des sorties de tests, des diffs, des résultats
+`rg`, des JSON énormes et des lignes répétitives.
+
+Le modèle finit par lire trop de bruit et pas assez de signal.
+
+La vocation de `lm-resizer` est simple : **économiser des tokens et préserver le
+contexte utile en supprimant, compressant ou offloadant les données dont le
+modèle n’a pas besoin pour raisonner**.
 
 Quand un agent exécute `cargo test`, `npm test`, `git diff`, `rg`, des linters,
 des package managers ou des appels provider/API, la sortie contient souvent des
@@ -21,6 +25,22 @@ Envoyer tout cela au LLM gaspille des tokens, remplit la fenêtre de contexte et
 peut cacher la vraie erreur. `lm-resizer` filtre et compresse cette sortie avant
 qu’elle n’arrive à l’agent, tout en gardant visibles les erreurs importantes,
 les chemins de fichiers, les résumés et les liens de récupération.
+
+## Pourquoi j’ai créé ce projet
+
+Je construis une suite d’outils pour rendre les agents de code réellement
+utilisables sur des dépôts importants :
+
+- **Code Explorer** pour donner à l’agent une carte du code ;
+- **lm-resizer** pour éviter que l’agent gaspille son contexte ;
+- **Code Buddy** pour orchestrer le travail d’agent.
+
+L’objectif n’est pas de faire un outil de plus. L’objectif est de rendre les
+sessions Claude Code et Codex plus lisibles, plus longues, plus fiables, et plus
+faciles à expliquer à d’autres développeurs.
+
+Si vous avez déjà vu un agent perdre le fil parce qu’il a avalé 20 000 lignes de
+logs inutiles, `lm-resizer` répond exactement à ce problème.
 
 ## Ce que lm-resizer apporte
 
@@ -85,6 +105,16 @@ L’intérêt de les faire fonctionner ensemble est simple :
 - les grosses sorties restent récupérables via CCR au lieu d’être perdues ;
 - Claude Code et Codex peuvent travailler plus longtemps sur un gros dépôt sans
   reconstruire la compréhension du projet à chaque étape.
+
+En résumé :
+
+> **Code Explorer aide l’agent à comprendre le dépôt. lm-resizer aide l’agent à
+> ne pas se noyer dans ce que le dépôt produit.**
+
+Ce duo est particulièrement intéressant pour montrer publiquement une approche
+plus industrielle des agents de code : on ne se contente pas de demander au LLM
+de “deviner”, on lui donne une carte du projet et on filtre ce qui pollue son
+raisonnement.
 
 ## Usages principaux
 
