@@ -1,4 +1,4 @@
-# @lm-resizer/wasm
+# @phuetz/lm-resizer
 
 Minimal JavaScript wrapper around the lm-resizer WASM ABI.
 
@@ -17,7 +17,7 @@ The build script copies `lm_resizer_wasm.wasm` next to this package's
 
 ```js
 import { readFile } from "node:fs/promises";
-import { initLmResizerWasm } from "@lm-resizer/wasm";
+import { initLmResizerWasm } from "@phuetz/lm-resizer";
 
 const bytes = await readFile("lm_resizer_wasm.wasm");
 const lm = await initLmResizerWasm(bytes);

@@ -1,6 +1,6 @@
 # Release Checklist
 
-Use this checklist before publishing `@lm-resizer/wasm` or attaching binary
+Use this checklist before publishing `@phuetz/lm-resizer` or attaching binary
 archives to a release.
 
 ## Required Evidence
@@ -23,7 +23,7 @@ archives to a release.
 ## Publish Approval
 
 - [ ] Confirm the version is the intended public version.
-- [ ] Confirm the package name is `@lm-resizer/wasm`.
+- [ ] Confirm the package name is `@phuetz/lm-resizer`.
 - [ ] Confirm the npm access level is public.
 - [ ] Confirm the approver accepts publishing the tarball shown by dry-run.
 - [ ] Confirm either npm trusted publishing is configured for
@@ -61,7 +61,7 @@ POSIX shell:
 GitHub Actions:
 
 1. Open the `Publish WASM Package` workflow.
-2. Run it manually with `confirm_package=@lm-resizer/wasm`.
+2. Run it manually with `confirm_package=@phuetz/lm-resizer`.
 3. Set `confirm_version` to the intended package version.
 4. Approve the `npm-production` environment deployment.
 5. Prefer npm trusted publishing/OIDC. `NPM_TOKEN` remains supported as a

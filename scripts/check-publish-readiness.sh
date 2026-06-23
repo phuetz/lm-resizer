@@ -15,7 +15,7 @@ version="$(node -e "console.log(require('$package_json').version)")"
 npm_version="$(node -e "console.log(require('$evidence').npm_version)")"
 tarballs="$(node -e "console.log((require('$evidence').wasm_tarballs || []).join(','))")"
 
-[ "$name" = "@lm-resizer/wasm" ] || { printf >&2 '%s\n' "unexpected npm package name: $name"; exit 1; }
+[ "$name" = "@phuetz/lm-resizer" ] || { printf >&2 '%s\n' "unexpected npm package name: $name"; exit 1; }
 [ -n "$version" ] || { printf >&2 '%s\n' "missing npm package version"; exit 1; }
 [ "$npm_version" = "$version" ] || {
   printf >&2 '%s\n' "release evidence npm_version $npm_version does not match package.json $version"
