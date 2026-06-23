@@ -4,6 +4,8 @@ Rust-native context compression for Claude Code, Codex, and LLM agents.
 
 Website: <https://phuetz.github.io/lm-resizer/>
 
+French README: [README.fr.md](README.fr.md)
+
 `lm-resizer` is designed to be used alongside **Claude Code**, **Codex**, and
 other coding agents that spend a large part of their context window on raw tool
 output. Its purpose is simple: **save tokens and preserve useful context by
