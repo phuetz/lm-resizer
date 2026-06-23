@@ -7,30 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  release-check:
-    name: release check (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            shell: bash
-            check: ./scripts/check-release.sh
-            package: ./scripts/package-release.sh
-            artifact_paths: |
-              dist/release-evidence.json
-              dist/*.tgz
-              dist/*.tar.gz
-          - os: windows-latest
-            shell: pwsh
-            check: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-release.ps1
-            package: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1
-            artifact_paths: |
-              dist/release-evidence.json
-              dist/*.tgz
-              dist/*.zip
-
+  release-check-linux:
+    name: release check (ubuntu-latest)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,16 +25,54 @@ jobs:
           node-version: "22"
 
       - name: Release check
-        shell: ${{ matrix.shell }}
-        run: ${{ matrix.check }}
+        shell: bash
+        run: ./scripts/check-release.sh
 
       - name: Package release
-        shell: ${{ matrix.shell }}
-        run: ${{ matrix.package }}
+        shell: bash
+        run: ./scripts/package-release.sh
 
       - name: Upload release evidence
         uses: actions/upload-artifact@v4
         with:
-          name: release-evidence-${{ matrix.os }}
-          path: ${{ matrix.artifact_paths }}
+          name: release-evidence-ubuntu-latest
+          path: |
+            dist/release-evidence.json
+            dist/*.tgz
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  release-check-windows:
+    name: release check (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Release check
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-release.ps1
+
+      - name: Package release
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-windows-latest
+          path: |
+            dist/release-evidence.json
+            dist/*.tgz
+            dist/*.zip
           if-no-files-found: error
