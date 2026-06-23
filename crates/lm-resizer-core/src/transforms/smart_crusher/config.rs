@@ -101,6 +101,13 @@ pub struct SmartCrusherConfig {
     /// means the discriminator is too granular (e.g. an ID column).
     /// Mirrors `CompactConfig::max_buckets`. Default 8.
     pub compaction_max_buckets: usize,
+    /// Optional **token budget** (opt-in). When `Some(b)`, `crush_array`
+    /// operates in budget mode: it forces the lossy/sampling path so the
+    /// kept rows fit ~`b` tokens, bypassing the lossless-keep-all and the
+    /// "skip unsafe data" safety gate — because under a hard budget we must
+    /// drop rows, and the relevance query decides which survive. `None`
+    /// (default) preserves the exact prior behavior (lossless-first, safe).
+    pub budget_tokens: Option<usize>,
 }
 
 impl Default for SmartCrusherConfig {
@@ -132,6 +139,7 @@ impl Default for SmartCrusherConfig {
             compaction_max_flatten_inner_keys: 6,
             compaction_min_buckets: 2,
             compaction_max_buckets: 8,
+            budget_tokens: None,
         }
     }
 }

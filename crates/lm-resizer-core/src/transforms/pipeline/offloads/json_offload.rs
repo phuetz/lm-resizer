@@ -121,7 +121,20 @@ impl OffloadTransform for JsonOffload {
         ctx: &CompressionContext,
         store: &dyn CcrStore,
     ) -> Result<OffloadOutput, TransformError> {
-        let result = self.crusher.crush(content, &ctx.query, 0.0);
+        // Budget mode: when the caller set a token budget, run a
+        // budget-configured crusher so it samples rows down to fit (the
+        // relevance query decides which survive). Otherwise use the
+        // preconfigured crusher (lossless-first, no budget — unchanged).
+        let result = match ctx.token_budget {
+            Some(budget) => {
+                let cfg = SmartCrusherConfig {
+                    budget_tokens: Some(budget),
+                    ..SmartCrusherConfig::default()
+                };
+                SmartCrusher::new(cfg).crush(content, &ctx.query, 0.0)
+            }
+            None => self.crusher.crush(content, &ctx.query, 0.0),
+        };
         if !result.was_modified {
             return Err(TransformError::skipped(
                 NAME,

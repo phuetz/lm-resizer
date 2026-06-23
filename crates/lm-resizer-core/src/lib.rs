@@ -68,10 +68,33 @@ impl LmResizer {
 
     /// Compress text using the same default transform stack as the CLI.
     pub fn compress(&self, content: &str, query: impl Into<String>) -> CompressionReport {
+        self.compress_with(content, query.into(), None)
+    }
+
+    /// Like [`compress`](Self::compress) but with a **token budget**: under
+    /// budget pressure the pipeline forces lossy row-dropping to fit, and the
+    /// `query` biases which rows survive (relevant rows kept, the rest dropped
+    /// and recoverable via CCR). With a large/None budget this matches
+    /// `compress`.
+    pub fn compress_to_budget(
+        &self,
+        content: &str,
+        query: impl Into<String>,
+        budget_tokens: usize,
+    ) -> CompressionReport {
+        self.compress_with(content, query.into(), Some(budget_tokens))
+    }
+
+    fn compress_with(
+        &self,
+        content: &str,
+        query: String,
+        token_budget: Option<usize>,
+    ) -> CompressionReport {
         let detection = detect_content_type(content);
         let ctx = CompressionContext {
-            query: query.into(),
-            token_budget: None,
+            query,
+            token_budget,
         };
         let result = self
             .pipeline

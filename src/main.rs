@@ -56,6 +56,10 @@ enum Commands {
         /// User query used by relevance-aware compressors.
         #[arg(short, long, default_value = "")]
         query: String,
+        /// Token budget: force lossy row-dropping so the output fits ~N tokens,
+        /// keeping the rows most relevant to --query. Omit for lossless-first.
+        #[arg(long)]
+        token_budget: Option<usize>,
         /// Emit JSON metadata instead of raw compressed text.
         #[arg(long)]
         json: bool,
@@ -994,12 +998,20 @@ async fn main() -> Result<()> {
         Commands::Compress {
             input,
             query,
+            token_budget,
             json,
             store,
         } => {
             let input_text = read_input(input.as_deref()).await?;
             let store = open_store(store)?;
-            let report = compress_text(&input_text, &query, store.as_ref())?;
+            let pipeline = build_pipeline();
+            let report = compress_text_with_pipeline(
+                &input_text,
+                &query,
+                store.as_ref(),
+                &pipeline,
+                token_budget,
+            )?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -1585,7 +1597,7 @@ fn build_pipeline() -> CompressionPipeline {
 
 fn compress_text(content: &str, query: &str, store: &dyn CcrStore) -> Result<CompressReport> {
     let pipeline = build_pipeline();
-    compress_text_with_pipeline(content, query, store, &pipeline)
+    compress_text_with_pipeline(content, query, store, &pipeline, None)
 }
 
 fn compress_text_with_pipeline(
@@ -1593,11 +1605,12 @@ fn compress_text_with_pipeline(
     query: &str,
     store: &dyn CcrStore,
     pipeline: &CompressionPipeline,
+    token_budget: Option<usize>,
 ) -> Result<CompressReport> {
     let detection = detect_content_type(content);
     let ctx = CompressionContext {
         query: query.to_string(),
-        token_budget: None,
+        token_budget,
     };
     let result = pipeline.run(content, detection.content_type, &ctx, store);
     Ok(CompressReport {
@@ -5388,7 +5401,7 @@ fn compress_batch_file(
     match std::fs::read_to_string(path)
         .with_context(|| format!("could not read {}", path.display()))
         .and_then(|content| {
-            let report = compress_text_with_pipeline(&content, query, store, pipeline)?;
+            let report = compress_text_with_pipeline(&content, query, store, pipeline, None)?;
             let output_path = if let Some(write_dir) = write_dir {
                 let file_name = path
                     .file_name()
@@ -7348,7 +7361,8 @@ fn compress_json_payload(
                     if let Value::String(text) = child {
                         stats.fields_seen += 1;
                         if text.len() >= 512 {
-                            let report = compress_text_with_pipeline(text, "", store, pipeline)?;
+                            let report =
+                                compress_text_with_pipeline(text, "", store, pipeline, None)?;
                             stats.original_bytes += report.original_bytes;
                             stats.compressed_bytes += report.compressed_bytes;
                             stats.bytes_saved += report.bytes_saved;

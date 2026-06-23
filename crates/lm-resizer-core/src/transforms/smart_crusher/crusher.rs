@@ -652,9 +652,18 @@ impl SmartCrusher {
         };
         let adaptive_k = compute_optimal_k(&item_str_refs, bias, 3, max_k);
 
-        // Tier-1 boundary: array already small enough — passthrough,
-        // nothing to compact, nothing to drop.
-        if items.len() <= adaptive_k {
+        // Budget mode (opt-in via `config.budget_tokens`): the surviving row
+        // count is whatever fits the budget — the budget is the authority,
+        // overriding adaptive_k / max_items_after_crush. `None` keeps the
+        // exact prior behavior.
+        let budget = self.config.budget_tokens;
+        let effective_max_items = match budget {
+            Some(b) => rows_fitting_token_budget(&item_strings, b),
+            None => adaptive_k,
+        };
+
+        // Tier-1 boundary: array already fits — passthrough, nothing to drop.
+        if items.len() <= effective_max_items {
             return CrushArrayResult {
                 items: items.to_vec(),
                 strategy_info: "none:adaptive_at_limit".to_string(),
@@ -681,7 +690,12 @@ impl SmartCrusher {
                 } else {
                     0.0
                 };
-                if savings_ratio >= self.config.lossless_min_savings_ratio {
+                // In budget mode, lossless only wins if its rendering also
+                // fits the budget; otherwise fall through to lossy sampling.
+                let lossless_fits_budget = budget.map_or(true, |b| {
+                    rendered.len() <= b.saturating_mul(BYTES_PER_TOKEN)
+                });
+                if savings_ratio >= self.config.lossless_min_savings_ratio && lossless_fits_budget {
                     let kind = compaction_kind_str(&c);
                     return CrushArrayResult {
                         items: items.to_vec(), // nothing dropped
@@ -703,23 +717,28 @@ impl SmartCrusher {
         // **No data is lost** — "lossy" here means "compressed view
         // inline; full payload retrievable via CCR cache."
 
-        let effective_max_items = adaptive_k;
-        let analysis = self.analyzer.analyze_array(items);
+        let mut analysis = self.analyzer.analyze_array(items);
 
         // Crushability gate: not safe to crush → passthrough, no CCR.
+        // Under an explicit budget we MUST sample to fit, so instead of
+        // bailing we force SmartSample — first/last anchors plus the
+        // relevance query decide which rows survive.
         if analysis.recommended_strategy == CompressionStrategy::Skip {
-            let reason = match &analysis.crushability {
-                Some(c) => format!("skip:{}", c.reason),
-                None => String::new(),
-            };
-            return CrushArrayResult {
-                items: items.to_vec(),
-                strategy_info: reason,
-                ccr_hash: None,
-                dropped_summary: String::new(),
-                compacted: None,
-                compaction_kind: None,
-            };
+            if budget.is_none() {
+                let reason = match &analysis.crushability {
+                    Some(c) => format!("skip:{}", c.reason),
+                    None => String::new(),
+                };
+                return CrushArrayResult {
+                    items: items.to_vec(),
+                    strategy_info: reason,
+                    ccr_hash: None,
+                    dropped_summary: String::new(),
+                    compacted: None,
+                    compaction_kind: None,
+                };
+            }
+            analysis.recommended_strategy = CompressionStrategy::SmartSample;
         }
 
         let plan = self.planner().create_plan(
@@ -979,6 +998,30 @@ fn estimate_array_bytes(item_strings: &[String]) -> usize {
     let payload: usize = item_strings.iter().map(|s| s.len()).sum();
     let separators = item_strings.len().saturating_sub(1);
     payload + separators + 2
+}
+
+/// Coarse bytes-per-token estimate (matches the project's `bytes / 4` token
+/// accounting elsewhere). Used to convert a token budget to a byte budget
+/// without pulling a tokenizer into the (wasm-safe) hot path.
+const BYTES_PER_TOKEN: usize = 4;
+
+/// Number of leading rows whose cumulative serialized size fits within
+/// `budget_tokens` (≈ `budget_tokens * BYTES_PER_TOKEN` bytes). Always ≥ 1 so
+/// budget mode never asks for an empty result. This is the row target that
+/// budget-mode `crush_array` samples down to; the relevance query then decides
+/// *which* rows fill those slots.
+fn rows_fitting_token_budget(item_strings: &[String], budget_tokens: usize) -> usize {
+    let budget_bytes = budget_tokens.saturating_mul(BYTES_PER_TOKEN);
+    let mut acc = 0usize;
+    let mut k = 0usize;
+    for s in item_strings {
+        acc += s.len() + 1; // +1 ≈ separator
+        if acc > budget_bytes {
+            break;
+        }
+        k += 1;
+    }
+    k.max(1)
 }
 
 /// Serialize `[v0, v1, ...]` once into the canonical JSON form used by
