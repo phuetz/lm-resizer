@@ -11,11 +11,32 @@
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 
 use dashmap::DashMap;
 
 use crate::ccr::{CcrStore, DEFAULT_CAPACITY, DEFAULT_TTL};
+
+// `std::time::Instant::now()` panics on `wasm32-unknown-unknown` (no monotonic
+// clock). The wasm host is per-call and short-lived, so TTL expiry is moot:
+// this zero-cost stand-in makes `elapsed()` always `0`, so entries never
+// time-expire (capacity eviction still applies). The rest of the store code is
+// identical on both targets.
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy)]
+struct Instant;
+
+#[cfg(target_arch = "wasm32")]
+impl Instant {
+    fn now() -> Self {
+        Instant
+    }
+    fn elapsed(&self) -> Duration {
+        Duration::ZERO
+    }
+}
 
 /// In-memory CCR store backed by [`DashMap`] for sharded concurrent
 /// access.

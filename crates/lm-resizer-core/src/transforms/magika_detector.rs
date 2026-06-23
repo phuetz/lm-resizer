@@ -17,7 +17,28 @@ pub enum MagikaDetectorError {
 }
 
 pub fn magika_detect(content: &str) -> Result<ContentType, MagikaDetectorError> {
+    // When the `magika` feature is compiled in AND explicitly enabled at
+    // runtime, use the real ONNX model; on any failure fall back to the
+    // deterministic detector. Without the feature/flag, detection is purely
+    // deterministic (the default — no ONNX runtime loaded).
+    #[cfg(all(feature = "magika", not(target_arch = "wasm32")))]
+    {
+        if magika_enabled() {
+            if let Some(content_type) = crate::transforms::magika_onnx::detect_with_onnx(content) {
+                return Ok(content_type);
+            }
+        }
+    }
     Ok(detect_local(content))
+}
+
+/// True when `LM_RESIZER_ENABLE_MAGIKA` is set to `1`/`true`. Gates the opt-in
+/// ONNX detection path so it never loads the model unless asked.
+#[cfg(all(feature = "magika", not(target_arch = "wasm32")))]
+fn magika_enabled() -> bool {
+    std::env::var("LM_RESIZER_ENABLE_MAGIKA")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }
 
 fn detect_local(content: &str) -> ContentType {

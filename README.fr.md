@@ -311,6 +311,12 @@ Endpoints principaux :
 - `POST /v1/messages`
 - routes Bedrock et Vertex compatibles preview/forwarding
 
+Les routes `/v1/*` utilisent une **compression « live-zone » spécifique au provider** :
+les routes OpenAI chat/responses et Anthropic messages passent par les dispatchers
+dédiés de `lm-resizer-core::transforms::live_zone` (ciblant les derniers blocs
+tool/user et préservant les marqueurs de cache provider), au lieu du parcours de
+champs générique réservé aux autres routes.
+
 Avec `--upstream <base-url>` ou `LM_RESIZER_UPSTREAM`, la requête compressée est
 transmise au provider amont. Sans upstream, le serveur renvoie une prévisualisation
 du payload compressé et des statistiques de compression.
@@ -346,6 +352,10 @@ L’ABI minimale expose :
 - `lm_resizer_alloc(len)`
 - `lm_resizer_free(ptr, len)`
 
+`lm_resizer_compress_json` exécute le **pipeline complet par défaut** (SmartCrusher
+JSON, compression log/diff/source, offload CCR) — l’ABI C natif comme le build WASM,
+identique à celui du CLI (ce n’est pas une simple minification).
+
 Le header C est disponible ici : [include/lm_resizer.h](include/lm_resizer.h).
 Le wrapper WASM/npm est dans [packages/wasm](packages/wasm).
 
@@ -359,13 +369,21 @@ vérifier localement le package sans publier.
 - Pas de runtime Python requis.
 - Les stores CCR, tee et statistiques sont locaux.
 - Les filtres projet doivent être vérifiés et approuvés.
-- La classification ML Magika/ONNX est désactivée par défaut.
+- La classification ML Magika/ONNX est **optionnelle et désactivée par défaut**
+  (détection déterministe locale, sans runtime ONNX ni modèle).
 
-Pour activer explicitement la classification optionnelle :
+Pour activer la vraie classification ONNX, il faut **compiler avec la feature
+`magika`** *et* poser le flag à l’exécution (sinon le flag est sans effet) :
 
 ```bash
-LM_RESIZER_ENABLE_MAGIKA=1 lm-resizer ml-status --json
+cargo build --release --features magika
+LM_RESIZER_ENABLE_MAGIKA=1 lm-resizer ml-status --json   # -> "active (ort runtime, bundled Magika model)"
 ```
+
+Cela utilise le crate officiel [`magika`](https://crates.io/crates/magika) de
+Google (modèle `standard_v3_3` embarqué, Apache-2.0). En cas d’erreur du modèle,
+la détection retombe sur le détecteur déterministe. ONNX = natif uniquement
+(jamais compilé dans le build WASM).
 
 Voir aussi [SECURITY.md](SECURITY.md).
 

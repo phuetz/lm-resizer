@@ -9,6 +9,9 @@
 pub mod in_memory;
 #[cfg(feature = "redis")]
 pub mod redis;
+// The SQLite backend links bundled C SQLite and cannot target wasm32; the wasm
+// build uses the in-memory store exclusively.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod sqlite;
 
 use std::path::PathBuf;
@@ -20,6 +23,7 @@ use crate::ccr::CcrStore;
 #[cfg(feature = "redis")]
 pub use self::redis::RedisCcrStore;
 pub use in_memory::InMemoryCcrStore;
+#[cfg(not(target_arch = "wasm32"))]
 pub use sqlite::SqliteCcrStore;
 
 /// Operator-visible configuration for the CCR backend. Mirrors the
@@ -65,6 +69,7 @@ impl CcrBackendConfig {
 #[derive(Debug, Error)]
 pub enum CcrBackendInitError {
     /// SQLite open / schema-create failed.
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("ccr sqlite backend init failed: {0}")]
     Sqlite(#[from] rusqlite::Error),
     /// Redis open / PING failed (the smoke-test in `RedisCcrStore::open`).
@@ -113,6 +118,7 @@ pub fn from_config(config: &CcrBackendConfig) -> Result<Box<dyn CcrStore>, CcrBa
             );
             Ok(Box::new(store))
         }
+        #[cfg(not(target_arch = "wasm32"))]
         CcrBackendConfig::Sqlite { path, ttl_seconds } => {
             let store = SqliteCcrStore::open(path, *ttl_seconds)?;
             tracing::info!(
@@ -124,6 +130,13 @@ pub fn from_config(config: &CcrBackendConfig) -> Result<Box<dyn CcrStore>, CcrBa
             );
             Ok(Box::new(store))
         }
+        // No bundled SQLite on wasm32 — loud failure rather than silent
+        // fallback (the wasm host uses the in-memory store directly).
+        #[cfg(target_arch = "wasm32")]
+        CcrBackendConfig::Sqlite { .. } => Err(CcrBackendInitError::UnsupportedBackend {
+            backend: "sqlite",
+            feature: "native",
+        }),
         #[cfg(feature = "redis")]
         CcrBackendConfig::Redis {
             url,

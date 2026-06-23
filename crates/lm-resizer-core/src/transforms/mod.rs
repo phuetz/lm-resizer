@@ -20,10 +20,19 @@ pub mod anchor_selector;
 pub mod content_detector;
 pub mod detection;
 pub mod diff_compressor;
+// The live-zone dispatcher depends on `crate::tokenizer` (native-only), so it
+// is excluded from wasm32 builds; the wasm `compress` path never uses it.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod live_zone;
 pub mod log_compressor;
 pub mod magika_detector;
+// Real ONNX detection (Google's `magika` crate) — opt-in feature, native-only.
+#[cfg(all(feature = "magika", not(target_arch = "wasm32")))]
+pub mod magika_onnx;
 pub mod pipeline;
+// `recommendations` (the learn/discover feature) reuses `live_zone::AuthMode`
+// and is not on the wasm `compress` path — native-only.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod recommendations;
 pub mod safety;
 pub mod search_compressor;
@@ -39,11 +48,12 @@ pub use detection::detect;
 pub use diff_compressor::{
     DiffCompressionResult, DiffCompressor, DiffCompressorConfig, DiffCompressorStats,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use live_zone::{
-    compress_anthropic_live_zone, compress_openai_chat_live_zone,
-    compress_openai_responses_live_zone, summarize_openai_responses_no_change_reason, AuthMode,
-    BlockAction, BlockOutcome, CompressionManifest, ExclusionReason, LiveZoneError,
-    LiveZoneOutcome,
+    compress_anthropic_live_zone, compress_anthropic_live_zone_with_ccr,
+    compress_openai_chat_live_zone, compress_openai_responses_live_zone,
+    summarize_openai_responses_no_change_reason, AuthMode, BlockAction, BlockOutcome,
+    CompressionManifest, ExclusionReason, LiveZoneError, LiveZoneOutcome,
 };
 pub use log_compressor::{
     LogCompressionResult, LogCompressor, LogCompressorConfig, LogCompressorStats, LogFormat,
@@ -55,6 +65,7 @@ pub use pipeline::{
     JsonMinifier, JsonOffload, LogOffload, LogTemplate, OffloadOutput, OffloadTransform,
     PipelineConfig, PipelineResult, ReformatOutput, ReformatTransform, TransformError,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use recommendations::{Recommendation, RecommendationStore, RECOMMENDATIONS_PATH_ENV_VAR};
 pub use safety::{tool_pair_indices, ToolPair};
 pub use search_compressor::{

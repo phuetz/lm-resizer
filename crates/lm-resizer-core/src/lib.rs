@@ -6,9 +6,16 @@ pub mod ccr;
 pub mod compression_policy;
 pub mod relevance;
 pub mod signals;
+// Token counting (tiktoken / HF tokenizers) is native-only and reached only by
+// the live-zone dispatcher — never on the wasm `compress` path. See Cargo.toml.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tokenizer;
 pub mod transforms;
 
+// The C ABI (and its `c_char`/`CString` imports) is native-only: the wasm32
+// ABI lives in the `lm-resizer-wasm` crate and would otherwise collide with
+// these `#[no_mangle]` symbols at link time.
+#[cfg(not(target_arch = "wasm32"))]
 use std::ffi::{c_char, CString};
 use std::sync::Arc;
 
@@ -113,6 +120,12 @@ pub fn hello() -> &'static str {
 /// The returned pointer must be released with [`lm_resizer_string_free`].
 /// This function is intentionally allocator-neutral for C and WASM hosts:
 /// callers pass raw bytes plus lengths, and receive an owned UTF-8 JSON string.
+///
+/// # Safety
+/// `content_ptr`/`query_ptr` must each point to `*_len` initialized bytes, or
+/// be null with the corresponding length `0`. The returned pointer must be
+/// freed exactly once with [`lm_resizer_string_free`].
+#[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn lm_resizer_compress_json(
     content_ptr: *const u8,
@@ -125,6 +138,11 @@ pub unsafe extern "C" fn lm_resizer_compress_json(
 }
 
 /// Free strings returned by lm-resizer C/WASM ABI functions.
+///
+/// # Safety
+/// `ptr` must have been returned by [`lm_resizer_compress_json`] and not yet
+/// freed; passing any other pointer is undefined behavior.
+#[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn lm_resizer_string_free(ptr: *mut c_char) {
     if !ptr.is_null() {
@@ -133,6 +151,7 @@ pub unsafe extern "C" fn lm_resizer_string_free(ptr: *mut c_char) {
 }
 
 /// Allocate a byte buffer from lm-resizer's allocator for WASM hosts.
+#[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub extern "C" fn lm_resizer_alloc(len: usize) -> *mut u8 {
     let mut buffer = Vec::<u8>::with_capacity(len);
@@ -142,6 +161,11 @@ pub extern "C" fn lm_resizer_alloc(len: usize) -> *mut u8 {
 }
 
 /// Free a byte buffer allocated by [`lm_resizer_alloc`].
+///
+/// # Safety
+/// `ptr`/`len` must come from a prior [`lm_resizer_alloc`] call and not be
+/// freed more than once.
+#[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn lm_resizer_free(ptr: *mut u8, len: usize) {
     if !ptr.is_null() {
@@ -149,6 +173,7 @@ pub unsafe extern "C" fn lm_resizer_free(ptr: *mut u8, len: usize) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn ffi_compress_json(
     content_ptr: *const u8,
     content_len: usize,
@@ -167,6 +192,7 @@ fn ffi_compress_json(
     serde_json::to_string(&report).unwrap_or_else(|err| ffi_error_json(err.to_string()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 unsafe fn ffi_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str, String> {
     if len == 0 {
         return Ok("");
@@ -178,6 +204,7 @@ unsafe fn ffi_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str, String> {
         .map_err(|err| format!("input is not valid UTF-8: {err}"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn ffi_error_json(error: impl AsRef<str>) -> String {
     serde_json::to_string(&serde_json::json!({
         "error": error.as_ref()
@@ -185,6 +212,7 @@ fn ffi_error_json(error: impl AsRef<str>) -> String {
     .unwrap_or_else(|_| "{\"error\":\"serialization failed\"}".to_string())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn c_string_ptr(value: String) -> *mut c_char {
     match CString::new(value) {
         Ok(value) => value.into_raw(),

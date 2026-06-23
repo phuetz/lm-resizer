@@ -36,6 +36,13 @@ repository.workspace = true
 authors.workspace = true
 description = "Rust-native context compression layer for LLM agents."
 
+[features]
+default = []
+# Real ONNX content detection (Google's `magika` crate). Forwards to
+# `lm-resizer-core`. Off by default; even when compiled in, detection requires
+# `LM_RESIZER_ENABLE_MAGIKA=1` at runtime. See lm-resizer-core/Cargo.toml.
+magika = ["lm-resizer-core/magika"]
+
 [dependencies]
 anyhow = { workspace = true }
 axum = { workspace = true }

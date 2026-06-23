@@ -83,9 +83,21 @@ There is no Python runtime, Python package manifest, or versioned Python helper
 script in this repository. Build, test, MCP, CLI, and proxy surfaces are Cargo
 and Rust binaries only.
 
-ML-backed content classification is disabled by default. The normal path uses
-deterministic local detection; set `LM_RESIZER_ENABLE_MAGIKA=1` only when you
-explicitly want to load the optional ONNX classifier.
+ML-backed content classification is **opt-in and off by default**. The normal
+path uses deterministic local detection (no ONNX runtime, no model). To enable
+real ONNX classification, build with the `magika` feature **and** set
+`LM_RESIZER_ENABLE_MAGIKA=1` at runtime:
+
+```bash
+cargo build --release --features magika
+LM_RESIZER_ENABLE_MAGIKA=1 lm-resizer ml-status   # -> "active (ort runtime, bundled Magika model)"
+```
+
+This uses Google's official [`magika`](https://crates.io/crates/magika) crate
+(bundled `standard_v3_3` model, Apache-2.0). Without the build feature the flag
+is a no-op and detection stays deterministic; on any model/runtime error the
+ONNX path falls back to deterministic detection. ONNX detection is native-only
+(it is never compiled into the wasm build).
 
 ## Build
 
@@ -319,7 +331,9 @@ minimal exported ABI is:
 - `lm_resizer_free(ptr, len)`
 
 `lm_resizer_compress_json` returns a null-terminated JSON `CompressionReport`
-or `{ "error": "..." }`. See [docs/ABI.md](docs/ABI.md).
+or `{ "error": "..." }`. Both the native C ABI and the WASM build run the **full
+default pipeline** (JSON SmartCrusher, log/diff/source compression, CCR offload)
+— the same one the CLI uses, not a reduced minifier. See [docs/ABI.md](docs/ABI.md).
 The C header is [include/lm_resizer.h](include/lm_resizer.h). The npm-style
 WASM wrapper is under [packages/wasm](packages/wasm); build the `.wasm` artifact
 with `scripts/build-wasm.sh` / `scripts/build-wasm.ps1` and a local npm tarball
@@ -347,10 +361,14 @@ Endpoints:
 - `POST /v1/projects/:project/locations/:location/publishers/:publisher/models/*model_method`
 - `POST /v1beta/projects/:project/locations/:location/publishers/:publisher/models/*model_method`
 
-The `/v1/*` routes compress OpenAI/Anthropic-compatible request payloads first. With
-`--upstream <base-url>` or `LM_RESIZER_UPSTREAM`, the compressed request is
-forwarded to the upstream provider. Without an upstream, the server returns a
-preview containing the compressed request and compression stats.
+The `/v1/*` routes use **provider-aware live-zone compression**: the
+OpenAI chat/responses and Anthropic messages routes are compressed by the
+dedicated dispatchers in `lm-resizer-core::transforms::live_zone`, which target
+the latest tool/user blocks and preserve provider cache markers (rather than the
+generic field walk used for other routes). With `--upstream <base-url>` or
+`LM_RESIZER_UPSTREAM`, the compressed request is forwarded to the upstream
+provider. Without an upstream, the server returns a preview containing the
+compressed request and compression stats.
 Bedrock and Vertex route shapes are also accepted for preview/forwarding. Use
 `--provider bedrock` with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
 optional `AWS_SESSION_TOKEN`, and `AWS_REGION` / `AWS_DEFAULT_REGION` for
@@ -388,8 +406,12 @@ Done in Rust:
 - bidirectional upstream WebSocket bridging for `/v1/*` when `--upstream` is set
 - gzip/deflate request and response decompression in proxy preview/forwarding
 - non-JSON `/v1/*` upload preview/forwarding without compression
+- provider-aware live-zone compression wired into the proxy for the OpenAI
+  chat/responses and Anthropic messages routes (generic field-walk fallback for
+  other routes)
 - high-level Rust API via `LmResizer`
-- minimal C/WASM ABI for non-Rust hosts
+- minimal C/WASM ABI for non-Rust hosts — the WASM build runs the full default
+  pipeline (not a reduced minifier)
 - public C header and prebuilt npm-style WASM wrapper package artifact
 - npm publish scripts for the WASM package, gated by `NPM_TOKEN` / `npm login`
 - npm publish dry-run scripts for approval checks without credentials
@@ -406,6 +428,9 @@ Done in Rust:
 - native Codex/Claude hook config generation plus a non-blocking Rust hook
   handler for PostToolUse command-output savings records
 - local image inspection, transcript filler cleanup, and ML classifier status
+- optional ONNX content detection via Google's `magika` crate (opt-in
+  `--features magika` + `LM_RESIZER_ENABLE_MAGIKA=1`; bundled `standard_v3_3`
+  model, deterministic fallback)
 - lightweight `eval` harness over session/log fixtures
 - direct proxy launcher env mapping for Claude Code, Codex, Cursor, OpenCode,
   OpenClaw, Aider, and Copilot

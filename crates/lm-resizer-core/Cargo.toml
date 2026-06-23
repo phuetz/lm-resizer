@@ -16,11 +16,10 @@ serde_json = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-tiktoken-rs = "0.11"
-# `tokenizers` is the HuggingFace pure-Rust tokenizer crate. Default features
-# pull in `onig` for the BPE pre-tokenizer regex; that vendors oniguruma so it
-# builds without a system dep on macOS/Linux.
-tokenizers = "0.22"
+# `tiktoken-rs` + `tokenizers` (token counting) are native-only: they are only
+# reached via the `tokenizer` module and the live-zone dispatcher, neither of
+# which is on the wasm `compress` path. Declared in the wasm32-excluded table
+# below so the crate builds for `wasm32-unknown-unknown` (onig/oniguruma is C).
 # `md5` for the CCR cache_key. Python's compression_store hashes the original
 # diff with MD5 truncated to 24 hex chars; we must match byte-for-byte.
 md-5 = "0.10"
@@ -60,12 +59,9 @@ unidiff = "0.4"
 # Default features (std, perf-literal) keep the build small.
 aho-corasick = "1"
 # `rayon` powers the pipeline orchestrator's parallel reformat-vs-bloat
-# evaluation: while a worker thread runs the structural reformat passes,
-# another set of threads run the per-offload bloat estimators in parallel.
-# Reformat completion + all bloat estimates need to be ready before the
-# orchestrator can decide which offloads to actually execute, so two-phase
-# join semantics (`rayon::join` + `par_iter`) are exactly what we need.
-rayon = "1"
+# evaluation. It is native-only (no threads on `wasm32-unknown-unknown`);
+# the orchestrator falls back to a serial path under `cfg(target_arch =
+# "wasm32")` (same result, no parallelism). Declared in the native table below.
 # `toml` reads the default pipeline configuration shipped at
 # `config/pipeline.toml`. The defaults embed via `include_str!` so a
 # stock binary needs no external file; production deployments override
@@ -79,13 +75,9 @@ toml = "0.8"
 # hex via `lm-resizer/ccr/tool_injection.py` regex. Pure-Rust by default,
 # no system dep, no SIMD-feature-gated flag (the crate auto-detects).
 blake3 = "1"
-# `rusqlite` for the SQLite-backed CCR store (the production default).
-# `bundled` builds SQLite from source so deploys do not need a system
-# libsqlite3 — matters for Lambda / container builds where the host
-# image may lag behind. Sub-1 MB binary cost. WAL is enabled at
-# connection-open time (see `ccr/backends/sqlite.rs`); no extra feature
-# flags required.
-rusqlite = { version = "0.32", features = ["bundled"] }
+# `rusqlite` (bundled SQLite) backs the production CCR store. It compiles C
+# and cannot target `wasm32-unknown-unknown`, so it lives in the native-only
+# table below; the wasm build uses the in-memory CCR store exclusively.
 # `redis` for the optional multi-worker CCR backend. Cfg-gated behind
 # the `redis` feature so deploys that don't need it pay no compile
 # cost. Default features include the sync `Connection` API used in
@@ -103,9 +95,27 @@ http = "1"
 # the local compression surface and can still load tokenizer JSON bytes/files,
 # but it does not perform Hub downloads from the module.
 hf-hub = { version = "0.4", default-features = false, features = ["ureq", "rustls-tls"] }
+# Native-only deps (excluded from wasm32 builds — see notes in `[dependencies]`).
+rayon = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tiktoken-rs = "0.11"
+# `tokenizers` default features pull in `onig` (vendors oniguruma, builds
+# without a system dep on macOS/Linux); C, so native-only.
+tokenizers = "0.22"
+# Optional ONNX content detection (feature `magika`). Google's official crate
+# bundles the `standard_v3_3` model; `ort` is its inference runtime, pinned to
+# the exact version `magika` requires. ONNX = native-only.
+magika = { version = "1.1.0", optional = true }
+ort = { version = "=2.0.0-rc.12", optional = true }
 
 [features]
 default = []
+# Real ONNX content detection via Google's official `magika` crate (bundled
+# `standard_v3_3` model). Off by default to keep the base build light and
+# dependency-free of the ONNX runtime. When compiled in, detection still
+# requires `LM_RESIZER_ENABLE_MAGIKA=1` at runtime; otherwise the deterministic
+# detector is used. Native-only (no ONNX runtime on wasm32).
+magika = ["dep:magika", "dep:ort", "ort/download-binaries"]
 # Compile in the Redis CCR backend. Enable for multi-worker deployments
 # that want a shared CCR store with no sticky-session at the LB. The
 # SQLite backend (always compiled) is the production default for

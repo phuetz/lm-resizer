@@ -54,6 +54,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 use crate::ccr::CcrStore;
@@ -124,9 +125,16 @@ impl CompressionPipeline {
         // worker threads when work is plentiful; it serializes them on
         // the calling thread when not. The pipeline doesn't care
         // which way it falls; correctness is the same.
+        #[cfg(not(target_arch = "wasm32"))]
         let (reformat_acc, bloat_scores) = rayon::join(
             || self.run_reformats(content, reformats),
             || self.estimate_bloats(content, offloads),
+        );
+        // wasm32 has no threads: run the two phases serially. Same result.
+        #[cfg(target_arch = "wasm32")]
+        let (reformat_acc, bloat_scores) = (
+            self.run_reformats(content, reformats),
+            self.estimate_bloats(content, offloads),
         );
 
         let mut steps: Vec<String> = reformat_acc.steps;
@@ -257,10 +265,17 @@ impl CompressionPipeline {
     /// Run every offload's bloat estimator in parallel. Returns scores
     /// in the same order as the input slice.
     fn estimate_bloats(&self, content: &str, offloads: &[Arc<dyn OffloadTransform>]) -> Vec<f32> {
-        offloads
-            .par_iter()
-            .map(|o| o.estimate_bloat(content))
-            .collect()
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            offloads
+                .par_iter()
+                .map(|o| o.estimate_bloat(content))
+                .collect()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            offloads.iter().map(|o| o.estimate_bloat(content)).collect()
+        }
     }
 
     pub fn config(&self) -> &PipelineConfig {

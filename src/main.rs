@@ -17,8 +17,13 @@ use clap::{Parser, Subcommand, ValueEnum};
 use flate2::read::{GzDecoder, ZlibDecoder};
 use futures_util::{SinkExt, StreamExt};
 use lm_resizer_core::ccr::{from_config, CcrBackendConfig, CcrStore, InMemoryCcrStore};
+use lm_resizer_core::compute_frozen_count;
 use lm_resizer_core::default_pipeline;
-use lm_resizer_core::transforms::{detect_content_type, CompressionContext, CompressionPipeline};
+use lm_resizer_core::transforms::{
+    compress_anthropic_live_zone_with_ccr, compress_openai_chat_live_zone,
+    compress_openai_responses_live_zone, detect_content_type, AuthMode, CompressionContext,
+    CompressionManifest, CompressionPipeline, LiveZoneOutcome,
+};
 use rayon::prelude::*;
 use regex::{Regex, RegexSet};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -3803,18 +3808,30 @@ fn analyze_voice_transcript(text: &str) -> VoiceReport {
 }
 
 fn ml_status_report() -> MlStatusReport {
-    let magika_enabled = std::env::var("LM_RESIZER_ENABLE_MAGIKA")
+    // Whether the ONNX detection path is compiled in (the `magika` feature).
+    let magika_compiled = cfg!(feature = "magika");
+    // Whether the operator asked for it at runtime.
+    let flag_set = std::env::var("LM_RESIZER_ENABLE_MAGIKA")
         .ok()
         .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+    // ONNX actually runs only when both are true.
+    let magika_enabled = magika_compiled && flag_set;
     MlStatusReport {
         magika_enabled,
-        magika_model: env_first(&["LM_RESIZER_MAGIKA_MODEL", "MAGIKA_MODEL"]),
-        onnx_runtime: if magika_enabled {
-            "configured externally".to_string()
+        magika_model: if magika_compiled {
+            Some("standard_v3_3 (bundled via the `magika` crate)".to_string())
         } else {
-            "disabled".to_string()
+            env_first(&["LM_RESIZER_MAGIKA_MODEL", "MAGIKA_MODEL"])
         },
-        hot_path: "deterministic local detection unless Magika is explicitly enabled".to_string(),
+        onnx_runtime: match (magika_compiled, flag_set) {
+            (true, true) => "active (ort runtime, bundled Magika model)".to_string(),
+            (true, false) => "compiled in; set LM_RESIZER_ENABLE_MAGIKA=1 to activate".to_string(),
+            (false, _) => {
+                "not compiled in (build with `--features magika` for ONNX detection)".to_string()
+            }
+        },
+        hot_path: "deterministic local detection unless Magika is compiled in and enabled"
+            .to_string(),
     }
 }
 
@@ -6257,9 +6274,14 @@ async fn proxy_or_preview(
     let stream_requested = body.get("stream").and_then(Value::as_bool).unwrap_or(false)
         || is_streaming_proxy_path(path);
     let store = open_store(Some(state.store_path.clone()))?;
-    let pipeline = build_pipeline();
     let mut stats = ProxyCompressionStats::default();
-    compress_json_payload(&mut body, store.as_ref(), &pipeline, &mut stats)?;
+    // Provider-aware live-zone compression for the JSON chat/messages/responses
+    // routes; fall back to the generic field-walk for everything else (Bedrock,
+    // Vertex, /model/:id/invoke, unknown routes) or when the dispatcher errors.
+    if !try_live_zone_compress(path, &mut body, store.as_ref(), &mut stats) {
+        let pipeline = build_pipeline();
+        compress_json_payload(&mut body, store.as_ref(), &pipeline, &mut stats)?;
+    }
     stats.provider_cache_policy = provider_cache_policy(state.provider).to_string();
 
     if let Some(upstream) = &state.upstream {
@@ -7347,6 +7369,121 @@ fn compress_json_payload(
     Ok(())
 }
 
+/// Run the provider-aware live-zone dispatcher for the JSON chat routes.
+///
+/// Returns `true` when the live-zone path handled the body (a successful
+/// `Modified`/`NoChange` outcome) — `body` and `stats` are updated in place.
+/// Returns `false` when the route has no live-zone dispatcher (Bedrock,
+/// Vertex, `/model/:id/invoke`, streaming, unknown) or the dispatcher errored,
+/// so the caller falls back to the generic field-walk compressor.
+fn try_live_zone_compress(
+    path: &str,
+    body: &mut Value,
+    store: &dyn CcrStore,
+    stats: &mut ProxyCompressionStats,
+) -> bool {
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let original = match serde_json::to_vec(body) {
+        Ok(bytes) => bytes,
+        Err(_) => return false,
+    };
+    // Auth-mode detection is not wired into the proxy yet (PR-F2); the
+    // dispatchers currently treat every request as `Payg`.
+    let outcome = if path.ends_with("/v1/chat/completions") {
+        compress_openai_chat_live_zone(&original, AuthMode::Payg, &model)
+    } else if path.ends_with("/v1/responses") {
+        compress_openai_responses_live_zone(&original, AuthMode::Payg, &model)
+    } else if path.ends_with("/v1/messages") {
+        let frozen = compute_frozen_count(body);
+        compress_anthropic_live_zone_with_ccr(
+            &original,
+            frozen,
+            AuthMode::Payg,
+            &model,
+            Some(store),
+        )
+    } else {
+        return false;
+    };
+
+    match outcome {
+        Ok(LiveZoneOutcome::Modified { new_body, manifest }) => {
+            let compressed = new_body.get().to_string();
+            match serde_json::from_str::<Value>(&compressed) {
+                Ok(value) => *body = value,
+                // The dispatcher emitted invalid JSON (should be unreachable);
+                // fall back rather than forward a broken body.
+                Err(_) => return false,
+            }
+            record_live_zone_stats(
+                stats,
+                &manifest,
+                original.len(),
+                compressed.len(),
+                &compressed,
+            );
+            true
+        }
+        Ok(LiveZoneOutcome::NoChange { manifest }) => {
+            record_live_zone_stats(stats, &manifest, original.len(), original.len(), "");
+            true
+        }
+        Err(err) => {
+            // Recoverable: log and let the caller fall back to the generic
+            // field-walk compressor. Never on stdout (MCP/JSON-RPC purity is
+            // irrelevant here, but stderr keeps proxy logs clean either way).
+            eprintln!("lm-resizer: live-zone dispatch failed for {path}: {err}; using generic compression");
+            false
+        }
+    }
+}
+
+/// Populate `ProxyCompressionStats` from a live-zone `CompressionManifest`
+/// plus the pre/post body byte sizes. `compressed_body` is scanned for
+/// `<<ccr:HASH>>` recovery markers (empty string when nothing changed).
+fn record_live_zone_stats(
+    stats: &mut ProxyCompressionStats,
+    manifest: &CompressionManifest,
+    original_bytes: usize,
+    compressed_bytes: usize,
+    compressed_body: &str,
+) {
+    stats.fields_seen += manifest.block_outcomes.len();
+    stats.fields_compressed += manifest.transforms_applied().len();
+    stats.original_bytes += original_bytes;
+    stats.compressed_bytes += compressed_bytes;
+    stats.bytes_saved += original_bytes.saturating_sub(compressed_bytes);
+    stats.cache_keys.extend(extract_ccr_keys(compressed_body));
+}
+
+/// Extract `<<ccr:HASH>>` recovery-marker hashes from a compressed body.
+/// The marker format mirrors `lm-resizer-core`'s CCR injection: a 24-char
+/// hex hash. Used only for proxy observability stats.
+fn extract_ccr_keys(body: &str) -> Vec<String> {
+    let mut keys = Vec::new();
+    let mut rest = body;
+    while let Some(start) = rest.find("<<ccr:") {
+        let after = &rest[start + "<<ccr:".len()..];
+        if let Some(end) = after.find(">>") {
+            let hash: String = after[..end]
+                .chars()
+                .take_while(|c| c.is_ascii_hexdigit())
+                .collect();
+            if !hash.is_empty() {
+                keys.push(hash);
+            }
+            rest = &after[end + 2..];
+        } else {
+            break;
+        }
+    }
+    keys
+}
+
 fn should_compress_json_string(key: &str) -> bool {
     matches!(
         key,
@@ -7435,6 +7572,60 @@ command = "node"
         assert!(filtered.contains("src/a.rs:1:match one"));
         assert!(!filtered.contains("src/a.rs:3:match three"));
         assert!(filtered.contains("omitted 1 low-signal lines"));
+    }
+
+    #[test]
+    fn live_zone_compresses_openai_chat_tool_payload() {
+        // A noisy `role: "tool"` message holding a large uniform-schema JSON
+        // array is exactly what the provider-aware OpenAI chat dispatcher
+        // (SmartCrusher) should compress — not the generic field-walk.
+        let rows: Vec<Value> = (0..60)
+            .map(|i| json!({"id": i, "name": format!("item-{i}"), "status": "ok", "score": 100}))
+            .collect();
+        let tool_content = serde_json::to_string(&Value::Array(rows)).unwrap();
+        assert!(
+            tool_content.len() > 512,
+            "fixture must exceed live-zone byte floor"
+        );
+        let mut body = json!({
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "user", "content": "summarize the results"},
+                {"role": "assistant", "content": "calling tool"},
+                {"role": "tool", "tool_call_id": "t1", "content": tool_content},
+            ]
+        });
+        let store = InMemoryCcrStore::new();
+        let mut stats = ProxyCompressionStats::default();
+        let handled = try_live_zone_compress("/v1/chat/completions", &mut body, &store, &mut stats);
+        assert!(handled, "live-zone should handle /v1/chat/completions");
+        assert!(
+            stats.fields_seen > 0,
+            "should record at least one block outcome"
+        );
+        assert!(
+            stats.bytes_saved > 0,
+            "noisy uniform JSON in the tool message should compress (provider-aware)"
+        );
+    }
+
+    #[test]
+    fn live_zone_skips_non_chat_routes() {
+        // Bedrock/Vertex/model-invoke/unknown routes have no provider-aware
+        // dispatcher → the caller must fall back to the generic compressor.
+        let mut body = json!({"model": "anthropic.claude", "input": "hi"});
+        let store = InMemoryCcrStore::new();
+        let mut stats = ProxyCompressionStats::default();
+        let handled = try_live_zone_compress(
+            "/model/anthropic.claude/invoke",
+            &mut body,
+            &store,
+            &mut stats,
+        );
+        assert!(
+            !handled,
+            "non-live-zone routes must fall back to generic compression"
+        );
     }
 
     #[test]

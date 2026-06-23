@@ -12,3 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 serde_json = { workspace = true }
+# The real compression pipeline. Core is wasm32-compatible: its native-only
+# deps (rusqlite/rayon/tokenizers/ort) are excluded for wasm32 and the
+# orchestrator falls back to a serial path. See lm-resizer-core/Cargo.toml.
+lm-resizer-core = { path = "../lm-resizer-core" }
