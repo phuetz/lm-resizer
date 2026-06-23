@@ -38,10 +38,11 @@ biaiser la rétention vers les lignes pertinentes à la question en cours quand 
 doit abandonner quelque chose.
 
 **Agnostique au provider, validé en réel.** lm-resizer se place devant n'importe
-quelle API compatible OpenAI/Anthropic. Vérifié end-to-end (2026-06-23) avec
-**Mistral** (`api.mistral.ai`, vraie clé) et **Ollama** (local, `$0`) : une sortie
-d'outil bruyante a été compressée par le proxy et le modèle amont a répondu à
-travers lui. Tout autre provider compatible OpenAI/Anthropic passe par le même chemin.
+quelle API compatible OpenAI/Anthropic. Vérifié end-to-end (2026-06-23) devant
+**Mistral, Ollama (local, `$0`), DeepSeek, OpenRouter et xAI/Grok** — vraies clés :
+la requête est compressée par le proxy et le modèle amont répond à travers lui
+(pour Mistral, une sortie d'outil bruyante a fondu ~5,8 Ko→2,8 Ko puis le modèle a répondu).
+Tout autre provider compatible OpenAI/Anthropic passe par le même chemin.
 
 ## Pourquoi j’ai créé ce projet
 

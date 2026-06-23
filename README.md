@@ -31,10 +31,11 @@ retention toward the rows relevant to the user's current question when it must
 drop anything.
 
 **Provider-agnostic, validated live.** lm-resizer sits in front of any
-OpenAI/Anthropic-compatible API. Verified end-to-end (2026-06-23) with
-**Mistral** (`api.mistral.ai`, real key) and **Ollama** (local, `$0`): a noisy
-tool payload was compressed by the proxy and the upstream model answered through
-it. Any other OpenAI/Anthropic-compatible provider works via the same path.
+OpenAI/Anthropic-compatible API. Verified end-to-end (2026-06-23) in front of
+**Mistral, Ollama (local, `$0`), DeepSeek, OpenRouter and xAI/Grok** — real keys:
+a request is compressed by the proxy and the upstream model answers through it
+(for Mistral, a noisy tool payload shrank ~5.8KB→2.8KB then the model replied).
+Any other OpenAI/Anthropic-compatible provider works via the same path.
 
 ## Why this exists
 
