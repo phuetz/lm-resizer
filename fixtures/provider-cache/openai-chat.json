@@ -1,0 +1,9 @@
+{
+  "model": "gpt-test",
+  "messages": [
+    {
+      "role": "user",
+      "content": "__LARGE_JSON_ARRAY__"
+    }
+  ]
+}

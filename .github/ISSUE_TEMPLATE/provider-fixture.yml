@@ -1,0 +1,42 @@
+name: Provider fixture
+description: Contribute a sanitized OpenAI, Anthropic, Bedrock, or Vertex payload
+title: "Provider fixture: "
+labels: ["provider-fixture"]
+body:
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - openai
+        - anthropic
+        - bedrock
+        - vertex
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Scenario
+      description: Describe the request shape and cache/compression behavior this fixture should lock.
+    validations:
+      required: true
+  - type: textarea
+    id: sanitizer
+    attributes:
+      label: Sanitizer command
+      description: Paste the sanitize-provider-fixture command used to produce the fixture.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checks
+      options:
+        - label: I reviewed the fixture and removed secrets, private prompts, customer data, and account identifiers.
+          required: true
+        - label: The fixture preserves the provider envelope and relevant cache markers.
+          required: true
+        - label: The release check or targeted provider fixture test passes locally.
+          required: true

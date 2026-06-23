@@ -1,0 +1,17 @@
+{
+  "model": "claude-test",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "__LARGE_JSON_ARRAY__",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    }
+  ]
+}

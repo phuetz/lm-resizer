@@ -1,0 +1,44 @@
+name: Custom command filter
+description: Propose a reusable command-output filter or init-filters profile improvement
+title: "Filter: "
+labels: ["filter"]
+body:
+  - type: input
+    id: command
+    attributes:
+      label: Command family
+      placeholder: "terraform plan, pytest, kubectl describe, ..."
+    validations:
+      required: true
+  - type: textarea
+    id: noisy_output
+    attributes:
+      label: Representative noisy output
+      description: Provide sanitized output or a minimal inline test case.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected retained signal
+      description: Explain what the filter must preserve after compression.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: Paste verify-filters output or the command you used.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I tested this first as a project-local `.lm-resizer/filters.toml` rule.
+          required: true
+        - label: The proposed behavior is reusable beyond one private project.
+          required: false

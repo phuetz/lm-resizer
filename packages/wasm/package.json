@@ -1,0 +1,30 @@
+{
+  "name": "@lm-resizer/wasm",
+  "version": "0.1.0",
+  "description": "Minimal WebAssembly wrapper for lm-resizer-core.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phuetz/lm-resizer.git",
+    "directory": "packages/wasm"
+  },
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "scripts": {
+    "pack:local": "npm pack --pack-destination ../../dist",
+    "publish:dry-run": "npm publish --access public --dry-run",
+    "publish:public": "npm publish --access public"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "lm_resizer_wasm.wasm"
+  ],
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  }
+}

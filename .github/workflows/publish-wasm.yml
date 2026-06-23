@@ -1,0 +1,78 @@
+name: Publish WASM Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_package:
+        description: "Type @lm-resizer/wasm to confirm the package being published"
+        required: true
+        type: string
+      confirm_version:
+        description: "Expected package version, for example 0.1.0"
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: publish @lm-resizer/wasm
+    runs-on: ubuntu-latest
+    environment: npm-production
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Validate confirmation
+        shell: bash
+        run: |
+          test "${{ inputs.confirm_package }}" = "@lm-resizer/wasm"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Update npm for trusted publishing
+        shell: bash
+        run: npm install -g npm@latest
+
+      - name: Verify version
+        shell: bash
+        run: |
+          actual="$(node -e "console.log(require('./packages/wasm/package.json').version)")"
+          test "$actual" = "${{ inputs.confirm_version }}"
+
+      - name: Release check
+        shell: bash
+        run: ./scripts/check-release.sh
+
+      - name: Package release
+        shell: bash
+        run: ./scripts/package-release.sh
+
+      - name: Publish package
+        shell: bash
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TRUSTED_PUBLISHING: "1"
+          NPM_PROVENANCE: "1"
+        run: ./scripts/publish-wasm.sh
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-publish-evidence-${{ inputs.confirm_version }}
+          path: |
+            dist/release-evidence.json
+            dist/*.tgz
+            dist/*.tar.gz
+          if-no-files-found: error

@@ -1,0 +1,55 @@
+﻿{
+    "generated_at_utc":  "2026-06-23T05:15:19.1674250Z",
+    "version":  "0.1.0",
+    "cargo_versions":  {
+                           "root":  "0.1.0",
+                           "core":  "0.1.0",
+                           "wasm":  "0.1.0"
+                       },
+    "npm_version":  "0.1.0",
+    "wasm_tarballs":  [
+                          "lm-resizer-wasm-0.1.0.tgz"
+                      ],
+    "binary_archives":  [
+                            "lm-resizer-0.1.0-windows-x86_64.zip"
+                        ],
+    "provider_cache_fixtures":  [
+                                    "anthropic-messages.json",
+                                    "bedrock-anthropic.json",
+                                    "openai-chat.json",
+                                    "vertex-gemini.json"
+                                ],
+    "checksums":  [
+                      "SHA256SUMS"
+                  ],
+    "release_checklist":  "docs/RELEASE.md",
+    "contribution_docs":  [
+                              "CONTRIBUTING.md",
+                              "SECURITY.md"
+                          ],
+    "github_templates":  [
+                             ".github/ISSUE_TEMPLATE/provider-fixture.yml",
+                             ".github/ISSUE_TEMPLATE/custom-filter.yml",
+                             ".github/dependabot.yml"
+                         ],
+    "release_checks":  [
+                           "cargo fmt --check",
+                           "cargo test --release",
+                           "cargo check --release",
+                           "cargo check --release --examples",
+                           "cargo build --release",
+                           "scripts/smoke-proxy-preview.ps1",
+                           "scripts/check-wasm-package.ps1",
+                           "scripts/publish-wasm.ps1 -DryRun",
+                           "scripts/generate-checksums.ps1",
+                           "scripts/check-publish-readiness.ps1"
+                       ],
+    "publish_commands":  {
+                             "dry_run":  "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-wasm.ps1 -DryRun",
+                             "real_publish":  "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-wasm.ps1"
+                         },
+    "publication_requires":  [
+                                 "npm trusted publishing for .github/workflows/publish-wasm.yml or NPM_TOKEN/npm login fallback",
+                                 "release approval for npm publish --access public --provenance"
+                             ]
+}
