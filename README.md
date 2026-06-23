@@ -20,6 +20,16 @@ error. `lm-resizer` filters and compresses that output before it reaches the
 agent, while keeping important failures, file paths, summaries, and recovery
 links visible.
 
+**Why this matters even with large context windows.** Bigger windows (200K, 1M+)
+don't make noisy output free — they make it *expensive in three ways*: **cost**
+(you pay per token, every turn), **latency** (more tokens = slower responses),
+and **attention dilution** — models reason worse when the signal is buried in
+noise ("lost in the middle"). `lm-resizer` is about **signal density**, not
+fitting under a size limit: keep what the agent needs to reason, drop the rest,
+keep the full output recoverable. It can also compress **query-aware** — biasing
+retention toward the rows relevant to the user's current question when it must
+drop anything.
+
 ## Why this exists
 
 `lm-resizer` is part of a broader toolchain for making coding agents usable on
@@ -67,6 +77,7 @@ useful primitives local and dependency-light at runtime:
 - content detection
 - JSON minification
 - JSON array SmartCrusher offload
+- query-aware row retention (bias what survives toward the user's question)
 - log template compression
 - log offload
 - diff offload

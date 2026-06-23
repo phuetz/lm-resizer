@@ -26,6 +26,17 @@ peut cacher la vraie erreur. `lm-resizer` filtre et compresse cette sortie avant
 qu’elle n’arrive à l’agent, tout en gardant visibles les erreurs importantes,
 les chemins de fichiers, les résumés et les liens de récupération.
 
+**Pourquoi ça compte même avec de grandes fenêtres de contexte.** Des fenêtres
+plus grandes (200K, 1M+) ne rendent pas le bruit gratuit — il reste coûteux sur
+trois axes : le **coût** (on paie au token, à chaque tour), la **latence** (plus
+de tokens = réponses plus lentes) et la **dilution d’attention** (le modèle
+raisonne moins bien quand le signal est noyé — « lost in the middle »).
+`lm-resizer` vise la **densité de signal**, pas le fait de tenir sous une limite
+de taille : garder ce dont l’agent a besoin, retirer le reste, et conserver la
+sortie complète récupérable. Il peut aussi compresser de façon **query-aware** :
+biaiser la rétention vers les lignes pertinentes à la question en cours quand il
+doit abandonner quelque chose.
+
 ## Pourquoi j’ai créé ce projet
 
 Je construis une suite d’outils pour rendre les agents de code réellement
