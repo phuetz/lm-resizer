@@ -2,6 +2,8 @@
 
 Rust-native context compression for LLM agents.
 
+Website: <https://phuetz.github.io/lm-resizer/>
+
 This repository is a standalone Rust-only context compression engine. It keeps the
 useful primitives local and dependency-light at runtime:
 

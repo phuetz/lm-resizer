@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>lm-resizer — context compression for AI coding agents</title>
+<meta name="description" content="A Rust-native context compression layer for Claude Code, Codex and MCP agents. Compress logs, diffs, JSON and provider payloads while keeping raw output recoverable." />
+<meta property="og:title" content="lm-resizer" />
+<meta property="og:description" content="Compress noisy agent context into useful signal for Claude Code, Codex, MCP and OpenAI/Anthropic-compatible proxy workflows." />
+<meta property="og:type" content="website" />
+<style>
+  :root{
+    --bg:#071017; --bg2:#0c1721; --panel:#111d28; --panel2:#0d1720;
+    --border:#243848; --border2:#315168;
+    --t0:#f6fbff; --t1:#d3e2ed; --t2:#91a7b8; --t3:#638092;
+    --cyan:#2ec7ff; --green:#7ee083; --amber:#f8b545; --red:#ff6b6b;
+    --shadow:0 24px 70px rgba(0,0,0,.34);
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--t1);font-family:var(--sans);line-height:1.6;
+    background-image:
+      linear-gradient(180deg,rgba(46,199,255,.08),transparent 440px),
+      radial-gradient(ellipse 70% 38% at 72% 10%,rgba(126,224,131,.12),transparent 58%);
+  }
+  body{overflow-x:hidden}
+  a{color:var(--cyan);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 24px}
+  header{display:flex;align-items:center;justify-content:space-between;padding:19px 0;border-bottom:1px solid rgba(36,56,72,.78)}
+  .brand{display:flex;align-items:center;gap:12px;color:var(--t0);font-weight:820;font-size:20px;letter-spacing:-.02em}
+  .mark{width:30px;height:30px;border:1px solid var(--border2);border-radius:7px;display:grid;place-items:center;color:var(--cyan);
+    font-family:var(--mono);font-weight:800;background:#08121a}
+  .version{font-family:var(--mono);font-size:12px;color:var(--t2);border:1px solid var(--border);border-radius:7px;padding:3px 8px}
+  nav a{color:var(--t2);font-size:14px;margin-left:22px}
+  .hero{display:grid;grid-template-columns:minmax(0,.86fr) minmax(520px,1.14fr);gap:54px;align-items:center;padding:68px 0 42px}
+  .hero>*{min-width:0}
+  h1{font-size:clamp(44px,6vw,78px);line-height:1.02;margin:0 0 18px;color:var(--t0);letter-spacing:-.045em}
+  h1 .grad{background:linear-gradient(95deg,var(--cyan),var(--green));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:clamp(17px,2.2vw,21px);color:var(--t1);max-width:640px;margin:0 0 28px}
+  .signal{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:rgba(13,23,32,.72);max-width:620px}
+  .signal div{padding:12px 14px;border-right:1px solid var(--border);font-size:13px}
+  .signal div:last-child{border-right:0}
+  .signal b{display:block;color:var(--t0);font-size:13px;margin-bottom:1px}
+  .signal span{color:var(--t3)}
+  .cta{display:flex;gap:14px;flex-wrap:wrap;margin-top:28px}
+  .btn{display:inline-flex;align-items:center;gap:10px;padding:12px 20px;border-radius:8px;font-weight:740;font-size:15px}
+  .btn.primary{background:var(--cyan);color:#031018;box-shadow:0 14px 38px rgba(46,199,255,.22)}
+  .btn.primary:hover{text-decoration:none;filter:brightness(1.06)}
+  .btn.ghost{border:1px solid var(--border2);color:var(--t0);background:rgba(13,23,32,.72)}
+  .btn.ghost:hover{text-decoration:none;border-color:var(--cyan)}
+  .pipeline{background:linear-gradient(180deg,rgba(17,29,40,.95),rgba(8,17,25,.98));border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:20px;max-width:100%}
+  .pipeline-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .pipeline-title{font-family:var(--mono);font-size:12px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em}
+  .dots{display:flex;gap:6px}
+  .dots i{width:9px;height:9px;border-radius:50%;display:block;background:var(--border2)}
+  .flow{display:grid;grid-template-columns:1fr 76px 1fr;gap:16px;align-items:center}
+  .terminal{background:#061018;border:1px solid var(--border);border-radius:10px;padding:15px;min-height:270px;font-family:var(--mono);font-size:13px;color:var(--t2);overflow:hidden}
+  .terminal strong{color:var(--t0);font-weight:700}
+  .terminal .green{color:var(--green)} .terminal .cyan{color:var(--cyan)} .terminal .amber{color:var(--amber)} .terminal .red{color:var(--red)}
+  .terminal hr{border:0;border-top:1px solid var(--border);margin:12px 0}
+  .compressor{height:210px;border:1px solid rgba(126,224,131,.7);border-radius:12px;display:grid;place-items:center;text-align:center;color:var(--green);
+    background:rgba(126,224,131,.06);font-family:var(--mono)}
+  .compressor b{display:block;color:var(--t0);font-size:22px}
+  .arrow{font-size:34px;color:var(--t2);text-align:center;margin-top:10px}
+  .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+  .metric{border:1px solid var(--border);border-radius:10px;padding:12px;background:rgba(7,16,23,.72)}
+  .metric b{display:block;color:var(--t0);font-family:var(--mono);font-size:18px}
+  .metric span{font-size:12px;color:var(--t2)}
+  section{padding:48px 0;border-top:1px solid var(--border)}
+  h2{font-size:clamp(25px,3.5vw,36px);line-height:1.14;margin:0 0 10px;color:var(--t0);letter-spacing:-.025em}
+  .lead{color:var(--t2);max-width:800px;margin:0 0 24px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+  .card{background:rgba(17,29,40,.86);border:1px solid var(--border);border-radius:10px;padding:22px}
+  .card h3{margin:0 0 7px;color:var(--t0);font-size:17px}
+  .card p{margin:0;color:var(--t2);font-size:14px}
+  .card .icon{font-family:var(--mono);font-size:24px;color:var(--cyan);margin-bottom:12px}
+  table{width:100%;border-collapse:collapse;font-size:14px;display:block;overflow-x:auto}
+  th,td{padding:12px 13px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
+  thead th{color:var(--t3);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  td.good{color:var(--green);font-weight:760}
+  pre{margin:0;background:#061018;border:1px solid var(--border);border-radius:10px;padding:17px 18px;overflow-x:auto;
+    font-family:var(--mono);font-size:13.5px;color:var(--t1)}
+  code{font-family:var(--mono)}
+  pre .c{color:var(--t3)} pre .k{color:var(--cyan)} pre .g{color:var(--green)}
+  .works{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .works span{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:13px;color:var(--t1)}
+  .about{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:24px}
+  .about p{margin:0 0 10px}
+  footer{border-top:1px solid var(--border);padding:28px 0 44px;text-align:center;color:var(--t3);font-size:13px}
+  @media(max-width:980px){.hero{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.flow>*{min-width:0}.compressor{height:auto;padding:18px}.arrow{transform:rotate(90deg)}}
+  @media(max-width:740px){nav{display:none}.signal,.grid3,.grid2,.metrics{grid-template-columns:1fr}.signal div{border-right:0;border-bottom:1px solid var(--border)}.signal div:last-child{border-bottom:0}.wrap{padding:0 18px}.hero{padding-top:42px;gap:34px}.pipeline{padding:14px;overflow:hidden}.terminal{min-height:auto;overflow-x:auto}.terminal,.compressor{font-size:12.5px}h1{font-size:clamp(38px,13vw,50px);overflow-wrap:anywhere}.sub{font-size:17px}.btn{width:100%;justify-content:center}.cta{display:grid;grid-template-columns:1fr 1fr}.cta .btn{width:auto}}
+  @media(max-width:420px){.cta{grid-template-columns:1fr}h1{font-size:42px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="mark">&gt;_</span> lm-resizer <span class="version">0.1.0</span></div>
+    <nav>
+      <a href="#why">Why</a>
+      <a href="#agents">Agents</a>
+      <a href="#proxy">Proxy / MCP</a>
+      <a href="#start">Quick start</a>
+      <a href="https://github.com/phuetz/lm-resizer">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" style="border-top:0">
+      <div>
+        <h1>Compress noise.<br><span class="grad">Keep signal.</span></h1>
+        <p class="sub"><b>lm-resizer is a Rust-native context compression layer for Claude Code, Codex and MCP agents.</b> It filters noisy tool output, compresses provider payloads, and keeps the raw data recoverable when the agent needs it.</p>
+        <div class="signal">
+          <div><b>Less context</b><span>logs, diffs, JSON</span></div>
+          <div><b>Better answers</b><span>errors stay visible</span></div>
+          <div><b>Local first</b><span>no telemetry</span></div>
+          <div><b>Agent ready</b><span>Codex · Claude · MCP</span></div>
+        </div>
+        <div class="cta">
+          <a class="btn primary" href="#start">&gt;_ Quick start</a>
+          <a class="btn ghost" href="https://github.com/phuetz/lm-resizer">View on GitHub</a>
+        </div>
+      </div>
+
+      <div class="pipeline" aria-label="Context compression pipeline preview">
+        <div class="pipeline-head">
+          <div class="pipeline-title">Context compression pipeline</div>
+          <div class="dots"><i></i><i></i><i></i></div>
+        </div>
+        <div class="flow">
+          <div class="terminal">
+            <strong>Noisy input</strong><br>
+            <span class="green">INFO</span> running cargo test<br>
+            <span class="cyan">DEBUG</span> cache miss abc123<br>
+            <span class="amber">WARN</span> repeated stack trace<br>
+            <span class="red">ERROR</span> expected `}` at line 87<br>
+            ...<br>
+            1,284 repeated lines<br>
+            huge provider JSON payload<br>
+            diff noise and search output
+          </div>
+          <div>
+            <div class="compressor"><div><b>&gt;_</b>filter<br>score<br>offload</div></div>
+            <div class="arrow">→</div>
+          </div>
+          <div class="terminal">
+            <strong>Compressed output</strong><br>
+            <span class="green">SUMMARY</span><br>
+            Parser failure in src/parser/mod.rs at line 87.<br>
+            <hr>
+            <span class="green">RELEVANT CONTEXT</span><br>
+            85 let item = parse_item(tokens)?;<br>
+            86 items.push(item);<br>
+            87 // expected `}`<br>
+            <hr>
+            <span class="green">RECOVERY</span><br>
+            [full output: ccr://sha256/...]
+          </div>
+        </div>
+        <div class="metrics">
+          <div class="metric"><b>Rust</b><span>single local binary</span></div>
+          <div class="metric"><b>CCR</b><span>retrieve originals</span></div>
+          <div class="metric"><b>0 telemetry</b><span>local by default</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="why">
+      <h2>Why it pays off for your LLM</h2>
+      <p class="lead">AI coding agents burn context on terminal output, logs, repeated errors, large JSON, diffs and provider envelopes. lm-resizer keeps the important signal visible while moving bulk data into recoverable local storage.</p>
+      <div class="grid3">
+        <div class="card"><div class="icon">01</div><h3>Preserve the important lines</h3><p>Errors, warnings, file paths, failing tests and actionable next steps remain visible instead of being buried in raw logs.</p></div>
+        <div class="card"><div class="icon">02</div><h3>Recover the full output</h3><p>Large or failed command output can be saved locally and referenced through CCR, so compression does not mean losing evidence.</p></div>
+        <div class="card"><div class="icon">03</div><h3>Works where agents work</h3><p>Use it as a CLI wrapper, MCP server, Codex/Claude hook helper, local proxy, C ABI or WASM package.</p></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Agent alone vs. agent with lm-resizer</h2>
+      <p class="lead">Code Explorer gives the agent a map of the repository. lm-resizer protects the agent's working context while commands, tools and model providers produce noise.</p>
+      <table>
+        <thead><tr><th>Workflow</th><th>Without lm-resizer</th><th>With lm-resizer</th></tr></thead>
+        <tbody>
+          <tr><td>Shell commands</td><td>Raw output floods the prompt</td><td class="good">Filtered output plus raw recovery hint</td></tr>
+          <tr><td>Build failures</td><td>Useful errors buried in repeated logs</td><td class="good">Failures, files and next steps stay visible</td></tr>
+          <tr><td>Large JSON / diffs</td><td>Context gets consumed by structure noise</td><td class="good">Minified, summarized or offloaded safely</td></tr>
+          <tr><td>Claude / Codex sessions</td><td>Every session invents its own filtering habits</td><td class="good">Shared local compression rules and hooks</td></tr>
+          <tr><td>Provider proxying</td><td>Payloads go upstream as-is</td><td class="good">OpenAI, Anthropic, Bedrock and Vertex shapes can be previewed or forwarded</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="agents">
+      <h2>Connect Claude Code, Codex and MCP agents</h2>
+      <p class="lead">Install project instructions or native hook configs, then route noisy tool output through a consistent local compression layer.</p>
+      <div class="grid2">
+        <pre><span class="c"># Native hook configs for Claude Code and Codex</span>
+<span class="k">lm-resizer</span> init-native-hooks --client all --project-dir . --force
+
+<span class="c"># Reversible agent guidance blocks</span>
+<span class="k">lm-resizer</span> install-hooks --client codex --project-dir . --force
+<span class="k">lm-resizer</span> install-hooks --client claude --project-dir . --force</pre>
+        <pre><span class="c"># MCP stdio server</span>
+<span class="k">lm-resizer</span> mcp
+
+<span class="c"># Install MCP config where supported</span>
+<span class="k">lm-resizer</span> install --client claude --scope project
+<span class="k">lm-resizer</span> install --client codex --scope global</pre>
+      </div>
+      <div class="works">
+        <span>Claude Code</span><span>Codex</span><span>Cursor</span><span>Aider</span><span>OpenCode</span><span>any MCP client</span>
+      </div>
+    </section>
+
+    <section id="proxy">
+      <h2>Proxy, MCP and local APIs</h2>
+      <p class="lead">Run lm-resizer beside your agent as a local service. It can compress direct HTTP requests, OpenAI-compatible routes, Anthropic messages, Bedrock and Vertex route shapes, or expose a small MCP tool surface.</p>
+      <div class="grid3">
+        <div class="card"><h3>HTTP compression</h3><p><code>POST /compress</code>, <code>GET /retrieve/:hash</code> and <code>GET /stats</code> provide a small local API for custom tools.</p></div>
+        <div class="card"><h3>Provider-compatible proxy</h3><p><code>/v1/chat/completions</code>, <code>/v1/responses</code>, <code>/v1/messages</code>, Bedrock and Vertex shapes support preview or upstream forwarding.</p></div>
+        <div class="card"><h3>Embeddable core</h3><p>Use the Rust API, C ABI or WASM wrapper when you want the same compression pipeline inside another host.</p></div>
+      </div>
+    </section>
+
+    <section id="start">
+      <h2>Quick start</h2>
+      <div class="grid2">
+        <pre><span class="c"># Build the local binary</span>
+git clone https://github.com/phuetz/lm-resizer
+cd lm-resizer
+cargo build --release
+
+<span class="c"># Compress a file or command output</span>
+<span class="k">lm-resizer</span> compress --input tool-output.txt --json
+<span class="k">lm-resizer</span> exec --stream -- cargo test</pre>
+        <pre><span class="c"># Run the local proxy</span>
+<span class="k">lm-resizer</span> serve --bind 127.0.0.1:8787
+
+<span class="c"># Evaluate real Claude/Codex session logs</span>
+<span class="k">lm-resizer</span> discover-sessions --agent all --markdown
+<span class="k">lm-resizer</span> eval fixtures/sessions --recursive --markdown</pre>
+      </div>
+    </section>
+
+    <section id="about">
+      <h2>Part of the Code Buddy toolchain</h2>
+      <div class="about">
+        <p><b>lm-resizer is the context-budget layer.</b> Code Explorer maps the codebase, Code Buddy orchestrates coding work, and lm-resizer keeps command output, diffs, logs and provider payloads small enough for agents to use effectively.</p>
+        <p>Built in Rust, local-first, Apache-2.0 licensed, and designed for real Claude Code, Codex and MCP workflows.</p>
+      </div>
+    </section>
+  </main>
+</div>
+<footer>
+  <div class="wrap">
+    Rust-native · MCP-ready · local-first · <a href="https://github.com/phuetz/lm-resizer">github.com/phuetz/lm-resizer</a><br>
+    © Patrice Huetz · companion to <a href="https://github.com/phuetz/code-explorer">Code Explorer</a> and <a href="https://github.com/phuetz/code-buddy">Code Buddy</a>
+  </div>
+</footer>
+</body>
+</html>
