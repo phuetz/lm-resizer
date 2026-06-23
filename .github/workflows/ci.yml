@@ -26,11 +26,11 @@ jobs:
 
       - name: Release check
         shell: bash
-        run: ./scripts/check-release.sh
+        run: bash scripts/check-release.sh
 
       - name: Package release
         shell: bash
-        run: ./scripts/package-release.sh
+        run: bash scripts/package-release.sh
 
       - name: Upload release evidence
         uses: actions/upload-artifact@v4
