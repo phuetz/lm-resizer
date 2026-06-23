@@ -28,7 +28,7 @@ jobs:
           test "${{ inputs.confirm_package }}" = "@lm-resizer/wasm"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
