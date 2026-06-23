@@ -37,6 +37,12 @@ sortie complète récupérable. Il peut aussi compresser de façon **query-aware
 biaiser la rétention vers les lignes pertinentes à la question en cours quand il
 doit abandonner quelque chose.
 
+**Agnostique au provider, validé en réel.** lm-resizer se place devant n'importe
+quelle API compatible OpenAI/Anthropic. Vérifié end-to-end (2026-06-23) avec
+**Mistral** (`api.mistral.ai`, vraie clé) et **Ollama** (local, `$0`) : une sortie
+d'outil bruyante a été compressée par le proxy et le modèle amont a répondu à
+travers lui. Tout autre provider compatible OpenAI/Anthropic passe par le même chemin.
+
 ## Pourquoi j’ai créé ce projet
 
 Je construis une suite d’outils pour rendre les agents de code réellement

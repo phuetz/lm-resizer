@@ -30,6 +30,12 @@ keep the full output recoverable. It can also compress **query-aware** — biasi
 retention toward the rows relevant to the user's current question when it must
 drop anything.
 
+**Provider-agnostic, validated live.** lm-resizer sits in front of any
+OpenAI/Anthropic-compatible API. Verified end-to-end (2026-06-23) with
+**Mistral** (`api.mistral.ai`, real key) and **Ollama** (local, `$0`): a noisy
+tool payload was compressed by the proxy and the upstream model answered through
+it. Any other OpenAI/Anthropic-compatible provider works via the same path.
+
 ## Why this exists
 
 `lm-resizer` is part of a broader toolchain for making coding agents usable on
