@@ -32,11 +32,59 @@ les chemins de fichiers, les résumés et les liens de récupération.
 | Les grosses sorties sont tronquées ou perdues | Le brut peut être récupéré localement via CCR |
 | Chaque agent improvise ses propres règles | Une couche commune CLI, hooks, MCP et proxy |
 
-`lm-resizer` est complémentaire de Code Explorer :
+## Complémentarité avec Code Explorer
 
-- **Code Explorer** aide l’agent à comprendre la structure du dépôt.
-- **lm-resizer** évite que l’agent gaspille son contexte avec les sorties
-  bruyantes pendant qu’il travaille.
+`lm-resizer` est pensé pour fonctionner avec
+[Code Explorer](https://github.com/phuetz/code-explorer). Les deux outils ne
+répondent pas au même problème, mais ils se renforcent très bien ensemble.
+
+**Code Explorer** donne à Claude Code, Codex ou à un agent MCP une carte
+interrogeable du dépôt : fichiers, symboles, appels, dépendances, impact d’un
+changement, zones à modifier. Il évite à l’agent de relire tout le code source
+pour comprendre la structure du projet.
+
+**lm-resizer** protège ensuite le budget contexte pendant le travail : sorties
+terminal, logs de tests, diffs, résultats `rg`, JSON providers, erreurs
+répétitives, payloads MCP/HTTP. Il évite que l’agent consomme son contexte avec
+du bruit produit par les commandes et les outils.
+
+Ensemble, ils couvrent les deux grandes sources de gaspillage de contexte :
+
+| Besoin de l’agent | Outil |
+| --- | --- |
+| Comprendre où se trouvent les responsabilités dans le dépôt | Code Explorer |
+| Répondre à “qui appelle quoi ?” ou “qu’est-ce qui casse si je change ça ?” | Code Explorer |
+| Exécuter tests, builds, recherches et commandes sans noyer le LLM | lm-resizer |
+| Garder les erreurs utiles tout en supprimant les lignes répétitives | lm-resizer |
+| Récupérer la sortie brute quand elle est vraiment nécessaire | lm-resizer |
+
+Le workflow typique est :
+
+```bash
+# 1. Indexer le dépôt pour donner une carte à l’agent
+code-explorer analyze .
+code-explorer mcp-install --client both --scope project
+
+# 2. Installer la compression de contexte pour les sorties d’outils
+lm-resizer init-native-hooks --client all --project-dir . --force
+lm-resizer install-hooks --client codex --project-dir . --force
+lm-resizer install-hooks --client claude --project-dir . --force
+
+# 3. Utiliser lm-resizer pour les commandes bruyantes
+lm-resizer exec --stream -- cargo test
+lm-resizer exec -- git diff
+lm-resizer exec -- rg "PaymentService"
+```
+
+L’intérêt de les faire fonctionner ensemble est simple :
+
+- l’agent sait **où chercher** grâce à Code Explorer ;
+- l’agent reçoit **moins de bruit** grâce à lm-resizer ;
+- les requêtes consomment moins de tokens ;
+- la fenêtre de contexte reste disponible pour le raisonnement ;
+- les grosses sorties restent récupérables via CCR au lieu d’être perdues ;
+- Claude Code et Codex peuvent travailler plus longtemps sur un gros dépôt sans
+  reconstruire la compréhension du projet à chaque étape.
 
 ## Usages principaux
 
@@ -341,4 +389,3 @@ Pas encore fourni :
 - Release : [docs/RELEASE.md](docs/RELEASE.md)
 - Portage : [docs/PORTING.md](docs/PORTING.md)
 - Posts réseaux sociaux : [docs/SOCIAL_POSTS.md](docs/SOCIAL_POSTS.md)
-

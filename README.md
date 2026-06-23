@@ -31,6 +31,21 @@ Use it as a context-budget layer for agent workflows:
 - **CCR recovery**: offload bulky data locally and retrieve the original output
   when the agent really needs the full evidence.
 
+## Pair it with Code Explorer
+
+`lm-resizer` is complementary to
+[Code Explorer](https://github.com/phuetz/code-explorer). Code Explorer gives
+Claude Code, Codex, and MCP agents a queryable map of the repository: files,
+symbols, calls, dependencies, and change impact. `lm-resizer` protects the
+agent's context budget while it works by compressing noisy command output,
+logs, diffs, search results, JSON payloads, and provider traffic.
+
+Used together, Code Explorer helps the agent know **where to look**, while
+`lm-resizer` keeps the agent from wasting tokens on low-value output after it
+starts running commands. The result is a cleaner loop: structural questions go
+to the code graph, noisy execution output goes through compression, and the full
+raw evidence remains recoverable through CCR when needed.
+
 This repository is a standalone Rust-only context compression engine. It keeps the
 useful primitives local and dependency-light at runtime:
 
