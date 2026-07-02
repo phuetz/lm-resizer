@@ -1,6 +1,6 @@
 {
   "name": "@phuetz/lm-resizer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Minimal WebAssembly wrapper for lm-resizer-core.",
   "type": "module",
   "repository": {
