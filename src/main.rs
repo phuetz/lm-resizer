@@ -1974,6 +1974,12 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
     };
     let sub = command.get(1).map(String::as_str).unwrap_or("");
 
+    // JS test runners (vitest/jest) — directly or via npx/pnpm/yarn/bunx. This is the single
+    // biggest token sink in agent sessions; route it before the generic fallback.
+    if command_runs_js_test(command) {
+        return ("js_test_runner".to_string(), filter_vitest(raw));
+    }
+
     match (program.as_str(), sub) {
         ("git", "status") => ("git_status".to_string(), filter_git_status(raw)),
         ("git", "diff") => ("diff_summary".to_string(), filter_diff_summary(raw)),
@@ -2988,6 +2994,101 @@ fn filter_pytest(raw: &str) -> String {
     } else {
         append_omitted(kept, skipped)
     }
+}
+
+/// True when the command invokes the vitest/jest JS test runners — directly (`vitest run`,
+/// `jest`) or via a JS launcher (`npx vitest`, `bunx jest`, `pnpm exec vitest`, `yarn jest`).
+/// Deliberately does NOT match `grep vitest` / `cat jest.config.js`: the runner must be the
+/// program itself or an argument to a known launcher, never an arbitrary search pattern/path.
+fn command_runs_js_test(command: &[String]) -> bool {
+    let Some(first) = command.first().map(|s| command_basename(s)) else {
+        return false;
+    };
+    if first == "vitest" || first == "jest" {
+        return true;
+    }
+    const LAUNCHERS: [&str; 6] = ["npx", "bunx", "pnpm", "yarn", "npm", "bun"];
+    if LAUNCHERS.contains(&first.as_str()) {
+        return command
+            .iter()
+            .skip(1)
+            .map(|tok| command_basename(tok))
+            .any(|b| b == "vitest" || b == "jest");
+    }
+    false
+}
+
+/// Filter vitest/jest output down to the real signal: failing files/tests, assertion diffs,
+/// stack frames, and the final `Test Files` / `Tests` summary. Passing-noise, the RUN banner,
+/// deprecation notices and timing footers are dropped. When everything passed, collapse hard to
+/// just the summary line(s) — matching rtk's `vitest run` semantic collapse.
+fn filter_vitest(raw: &str) -> String {
+    let mut kept = Vec::new();
+    let mut keep_following = 0usize;
+    let mut skipped = 0usize;
+    let mut saw_failure = false;
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+
+        // Final counters (vitest: "Test Files …" / "Tests …"; jest: "Tests:" / "Test Suites:").
+        let is_summary = trimmed.starts_with("Test Files")
+            || trimmed.starts_with("Test Suites")
+            || trimmed.starts_with("Tests")
+            || trimmed.starts_with("Snapshots:");
+
+        // Failure markers across vitest + jest output shapes.
+        let is_failure = trimmed.starts_with("FAIL ")
+            || trimmed.starts_with('\u{00D7}') // × vitest failed test
+            || trimmed.starts_with('\u{2715}') // ✕ jest failed test
+            || trimmed.starts_with('\u{276F}') // ❯ vitest failing file header / stack frame
+            || trimmed.starts_with('\u{25CF}') // ● jest failure header
+            || trimmed.contains("Failed Tests")
+            || trimmed.contains("AssertionError")
+            || trimmed.contains("Error:")
+            || trimmed.contains("Expected")
+            || trimmed.contains("Received")
+            || trimmed.starts_with("expect(");
+
+        if is_summary {
+            kept.push(line.to_string());
+            keep_following = 0; // final counters end the failure block; drop trailing Start at/Duration
+        } else if is_failure {
+            saw_failure = true;
+            kept.push(line.to_string());
+            keep_following = 3; // grab a little trailing context (diff/stack/code frame)
+        } else if keep_following > 0 && !trimmed.is_empty() {
+            kept.push(line.to_string());
+            keep_following -= 1;
+        } else {
+            if keep_following > 0 {
+                keep_following -= 1;
+            }
+            skipped += 1;
+        }
+    }
+
+    if kept.is_empty() {
+        return "vitest: passed\n".to_string();
+    }
+    if !saw_failure {
+        // All green: collapse to the summary counters only.
+        let summary: Vec<String> = kept
+            .into_iter()
+            .filter(|l| {
+                let t = l.trim();
+                t.starts_with("Test Files")
+                    || t.starts_with("Test Suites")
+                    || t.starts_with("Tests")
+            })
+            .collect();
+        return if summary.is_empty() {
+            "vitest: passed\n".to_string()
+        } else {
+            summary.join("\n") + "\n"
+        };
+    }
+    append_omitted(kept, skipped)
 }
 
 fn filter_search_results(raw: &str, max_total: usize, max_per_file: usize) -> String {
@@ -8105,6 +8206,74 @@ expected = "error: bad\n"
         let filtered = filter_cargo_test(raw);
         assert!(filtered.contains("test result: ok"));
         assert!(!filtered.contains("Compiling demo"));
+    }
+
+    #[test]
+    fn command_runs_js_test_matches_runners_not_search() {
+        let v = |args: &[&str]| command_runs_js_test(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert!(v(&["vitest", "run"]));
+        assert!(v(&["jest"]));
+        assert!(v(&["npx", "vitest", "run"]));
+        assert!(v(&["bunx", "jest"]));
+        assert!(v(&["pnpm", "exec", "vitest"]));
+        assert!(v(&["node_modules/.bin/vitest"]));
+        // must NOT misfire when vitest/jest is a search pattern or a config path
+        assert!(!v(&["grep", "vitest", "src/"]));
+        assert!(!v(&["cat", "jest.config.js"]));
+        assert!(!v(&["npm", "run", "build"]));
+    }
+
+    #[test]
+    fn filter_vitest_collapses_passing_run_to_summary() {
+        let raw = " RUN  v4.1.9 /repo\n\n \u{2713} tests/a.test.ts (24 tests) 6ms\n\n Test Files  1 passed (1)\n      Tests  24 passed (24)\n   Start at  20:27:57\n   Duration  132ms (transform 41ms)\n";
+        let filtered = filter_vitest(raw);
+        assert!(filtered.contains("Tests  24 passed (24)"));
+        assert!(filtered.contains("Test Files  1 passed (1)"));
+        assert!(!filtered.contains("RUN  v4.1.9"));
+        assert!(!filtered.contains("Duration"));
+        // hard collapse: dramatically smaller than the raw
+        assert!(filtered.len() < raw.len() / 2);
+    }
+
+    #[test]
+    fn filter_vitest_keeps_failure_signal_drops_noise() {
+        // Real vitest v4 failing output shape (captured live).
+        let raw = concat!(
+            " DEPRECATED  `test.poolOptions` was removed in Vitest 4. See migration guide...\n\n",
+            " RUN  v4.1.9 /repo\n\n",
+            " \u{276F} tests/x.test.ts (3 tests | 1 failed) 6ms\n",
+            "     \u{00D7} fails on purpose 4ms\n\n",
+            "\u{23AF}\u{23AF}\u{23AF} Failed Tests 1 \u{23AF}\u{23AF}\u{23AF}\n\n",
+            " FAIL  tests/x.test.ts > scratch shape > fails on purpose\n",
+            "AssertionError: expected 2 to be 3 // Object.is equality\n\n",
+            "- Expected\n+ Received\n\n- 3\n+ 2\n\n",
+            " \u{276F} tests/x.test.ts:5:48\n",
+            " Test Files  1 failed (1)\n      Tests  1 failed | 2 passed (3)\n",
+            "   Start at  20:35:19\n   Duration  117ms\n",
+        );
+        let filtered = filter_vitest(raw);
+        // signal kept
+        assert!(filtered.contains("fails on purpose"));
+        assert!(filtered.contains("AssertionError: expected 2 to be 3"));
+        assert!(filtered.contains("Failed Tests 1"));
+        assert!(filtered.contains("tests/x.test.ts:5:48"));
+        assert!(filtered.contains("Tests  1 failed | 2 passed (3)"));
+        // noise dropped
+        assert!(!filtered.contains("DEPRECATED"));
+        assert!(!filtered.contains("RUN  v4.1.9"));
+        assert!(!filtered.contains("Duration  117ms"));
+        // and it is genuinely shorter than the raw
+        assert!(filtered.len() < raw.len());
+    }
+
+    #[test]
+    fn filter_command_output_routes_vitest_via_npx() {
+        let command: Vec<String> = ["npx", "vitest", "run"].iter().map(|s| s.to_string()).collect();
+        let raw = " Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Duration  10ms\n";
+        let (name, filtered) = filter_command_output(&command, raw);
+        assert_eq!(name, "js_test_runner");
+        assert!(filtered.contains("Tests  3 passed (3)"));
+        assert!(!filtered.contains("Duration"));
     }
 
     #[test]
