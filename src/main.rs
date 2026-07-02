@@ -4553,7 +4553,12 @@ fn claude_native_hooks_json(exe_path: &str) -> Result<String> {
 /// `exec` (in-place output substitution — the active rtk role; never blocks:
 /// unsupported commands emit nothing and run raw), PostToolUse records
 /// command-output savings telemetry.
-fn native_hooks_json(exe_path: &str, client: &str, events: &[&str], matcher: &str) -> Result<String> {
+fn native_hooks_json(
+    exe_path: &str,
+    client: &str,
+    events: &[&str],
+    matcher: &str,
+) -> Result<String> {
     let mut hooks = serde_json::Map::new();
     for event in events {
         let command = format!("\"{exe_path}\" hook --client {client} --event {event}");
@@ -8298,7 +8303,9 @@ expected = "error: bad\n"
 
     #[test]
     fn command_runs_js_test_matches_runners_not_search() {
-        let v = |args: &[&str]| command_runs_js_test(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let v = |args: &[&str]| {
+            command_runs_js_test(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+        };
         assert!(v(&["vitest", "run"]));
         assert!(v(&["jest"]));
         assert!(v(&["npx", "vitest", "run"]));
@@ -8356,7 +8363,10 @@ expected = "error: bad\n"
 
     #[test]
     fn filter_command_output_routes_vitest_via_npx() {
-        let command: Vec<String> = ["npx", "vitest", "run"].iter().map(|s| s.to_string()).collect();
+        let command: Vec<String> = ["npx", "vitest", "run"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let raw = " Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Duration  10ms\n";
         let (name, filtered) = filter_command_output(&command, raw);
         assert_eq!(name, "js_test_runner");
@@ -8371,7 +8381,8 @@ expected = "error: bad\n"
             "tool_name": "Bash",
             "tool_input": {"command": "vitest run", "description": "run tests"}
         });
-        let out = pretooluse_rewrite_json(&ev, "/opt/lm-resizer", "PreToolUse").expect("should rewrite");
+        let out =
+            pretooluse_rewrite_json(&ev, "/opt/lm-resizer", "PreToolUse").expect("should rewrite");
         let cmd = out
             .pointer("/hookSpecificOutput/updatedInput/command")
             .and_then(|v| v.as_str())
@@ -8379,11 +8390,13 @@ expected = "error: bad\n"
         assert_eq!(cmd, "\"/opt/lm-resizer\" exec -- vitest run");
         // preserves other tool_input fields (description)
         assert_eq!(
-            out.pointer("/hookSpecificOutput/updatedInput/description").and_then(|v| v.as_str()),
+            out.pointer("/hookSpecificOutput/updatedInput/description")
+                .and_then(|v| v.as_str()),
             Some("run tests")
         );
         assert_eq!(
-            out.pointer("/hookSpecificOutput/hookEventName").and_then(|v| v.as_str()),
+            out.pointer("/hookSpecificOutput/hookEventName")
+                .and_then(|v| v.as_str()),
             Some("PreToolUse")
         );
     }
@@ -8394,7 +8407,8 @@ expected = "error: bad\n"
         let ev = serde_json::json!({"tool_input": {"command": "echo hello"}});
         assert!(pretooluse_rewrite_json(&ev, "/opt/lm-resizer", "PreToolUse").is_none());
         // our own exec invocation → never re-wrapped (anti-recursion)
-        let ev2 = serde_json::json!({"tool_input": {"command": "/opt/lm-resizer exec -- git status"}});
+        let ev2 =
+            serde_json::json!({"tool_input": {"command": "/opt/lm-resizer exec -- git status"}});
         assert!(pretooluse_rewrite_json(&ev2, "/opt/lm-resizer", "PreToolUse").is_none());
     }
 
@@ -8405,7 +8419,10 @@ expected = "error: bad\n"
         // the exact original bytes so bash re-parses the pattern identically.
         let cmd = r#"grep -rn "export function\|export const" src/x.ts"#;
         let out = rewrite_command_for_hook(cmd, "/opt/lm").unwrap();
-        assert_eq!(out, r#""/opt/lm" exec -- grep -rn "export function\|export const" src/x.ts"#);
+        assert_eq!(
+            out,
+            r#""/opt/lm" exec -- grep -rn "export function\|export const" src/x.ts"#
+        );
     }
 
     #[test]
