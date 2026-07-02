@@ -3387,26 +3387,45 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     Ok(())
 }
 
+/// True when the segment ends with a shell redirect (`>`, `<`, `>>`) — its output goes to a file,
+/// not the model, so wrapping it would be pointless and would rewrite the file's contents.
+fn segment_has_redirect(seg: &str) -> bool {
+    let (_, suffix) = split_trailing_redirects(seg);
+    !suffix.trim().is_empty()
+}
+
+/// Rewrite a Bash command to run through `"{exe}" exec -- <cmd>` for the hook, ONLY when it is a
+/// single simple command (no `&&`/`||`/`;`/`|`, no redirect) whose program has a real filter.
+/// Crucially the wrap is VERBATIM — the original segment bytes are reused untouched, never
+/// re-tokenized — so quoting/backslash-escaping (e.g. a grep BRE `"\|"`) can't be corrupted the way
+/// a split-and-rejoin would. Compound/piped/redirected commands run raw (safety over coverage).
+fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
+    let tokens = split_shell_operators(command.trim());
+    let [ShellToken::Segment(seg)] = tokens.as_slice() else {
+        return None; // operators present → don't touch (avoid pipe/&& semantics + re-quoting)
+    };
+    let seg = seg.trim();
+    if segment_has_redirect(seg) {
+        return None;
+    }
+    let words = split_shell_words(seg)?;
+    // empty, or our own exec invocation (anti-recursion) → leave raw
+    if words.is_empty() || command_basename(&words[0]) == "lm-resizer" {
+        return None;
+    }
+    if !rewrite_command_report(&words).supported {
+        return None;
+    }
+    Some(format!("\"{exe}\" exec -- {seg}"))
+}
+
 /// Build the PreToolUse `hookSpecificOutput` that rewrites a supported Bash command to run
 /// through `"{exe}" exec -- <cmd>`, preserving other tool_input fields. Returns `None` (→ emit
-/// nothing → run raw) when the command is unsupported or is already our own exec invocation
-/// (anti-recursion). Pure/testable: takes the parsed event + resolved exe path.
+/// nothing → run raw) when the command is unsupported/compound/redirected or is our own exec
+/// invocation. Pure/testable: takes the parsed event + resolved exe path.
 fn pretooluse_rewrite_json(value: &Value, exe: &str, event: &str) -> Option<Value> {
     let command = extract_hook_command(value)?;
-    // Never re-wrap our own exec invocation (guards against infinite rewrite loops).
-    let first = split_shell_words(command.trim()).and_then(|w| w.first().map(|s| command_basename(s)));
-    if first.as_deref() == Some("lm-resizer") {
-        return None;
-    }
-    let report = rewrite_shell_report(&command);
-    if !report.changed {
-        return None;
-    }
-    // rewrite_shell_report emits a bare `lm-resizer exec --`; point it at THIS binary so the
-    // hook works regardless of PATH (matches init-native-hooks/shim templates).
-    let rewritten = report
-        .rewritten
-        .replace("lm-resizer exec --", &format!("\"{exe}\" exec --"));
+    let rewritten = rewrite_command_for_hook(&command, exe)?;
     let updated_input = match value.pointer("/tool_input") {
         Some(Value::Object(map)) => {
             let mut map = map.clone();
@@ -8370,6 +8389,29 @@ expected = "error: bad\n"
         // our own exec invocation → never re-wrapped (anti-recursion)
         let ev2 = serde_json::json!({"tool_input": {"command": "/opt/lm-resizer exec -- git status"}});
         assert!(pretooluse_rewrite_json(&ev2, "/opt/lm-resizer", "PreToolUse").is_none());
+    }
+
+    #[test]
+    fn hook_rewrite_preserves_quoting_verbatim() {
+        // Regression: a split-and-rejoin dropped the backslash inside double quotes, turning a
+        // grep BRE alternation `"\|"` into a literal `|` (0 matches). The verbatim wrap must keep
+        // the exact original bytes so bash re-parses the pattern identically.
+        let cmd = r#"grep -rn "export function\|export const" src/x.ts"#;
+        let out = rewrite_command_for_hook(cmd, "/opt/lm").unwrap();
+        assert_eq!(out, r#""/opt/lm" exec -- grep -rn "export function\|export const" src/x.ts"#);
+    }
+
+    #[test]
+    fn hook_rewrite_skips_compound_redirect_and_unsupported() {
+        // compound (operators) → run raw, never re-quote a pipeline
+        assert!(rewrite_command_for_hook("cd x && vitest run", "/opt/lm").is_none());
+        assert!(rewrite_command_for_hook("git log | head", "/opt/lm").is_none());
+        // redirect → output goes to a file, not the model → don't wrap
+        assert!(rewrite_command_for_hook("grep x foo > out.txt", "/opt/lm").is_none());
+        // unsupported program → run raw
+        assert!(rewrite_command_for_hook("echo hello", "/opt/lm").is_none());
+        // supported single command → wrapped
+        assert!(rewrite_command_for_hook("vitest run", "/opt/lm").is_some());
     }
 
     #[test]
