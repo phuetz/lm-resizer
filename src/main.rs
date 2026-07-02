@@ -1447,16 +1447,22 @@ async fn main() -> Result<()> {
             event,
             json,
         } => {
-            let report = run_native_hook(&client, &event);
-            if json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
-            } else if report.recorded {
-                println!(
-                    "lm-resizer hook recorded {} via {} ({} bytes saved)",
-                    report.client,
-                    report.filter.as_deref().unwrap_or("unknown"),
-                    report.bytes_saved
-                );
+            // PreToolUse: rewrite a supported Bash command to run through `lm-resizer exec --`
+            // (in-place output substitution, the rtk role). PostToolUse: measure-only telemetry.
+            if event.eq_ignore_ascii_case("PreToolUse") {
+                emit_pretooluse_rewrite(&event);
+            } else {
+                let report = run_native_hook(&client, &event);
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else if report.recorded {
+                    println!(
+                        "lm-resizer hook recorded {} via {} ({} bytes saved)",
+                        report.client,
+                        report.filter.as_deref().unwrap_or("unknown"),
+                        report.bytes_saved
+                    );
+                }
             }
         }
         Commands::InitShims {
@@ -3379,6 +3385,62 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
         .open(path)?;
     writeln!(file, "{}", serde_json::to_string(&record)?)?;
     Ok(())
+}
+
+/// Build the PreToolUse `hookSpecificOutput` that rewrites a supported Bash command to run
+/// through `"{exe}" exec -- <cmd>`, preserving other tool_input fields. Returns `None` (→ emit
+/// nothing → run raw) when the command is unsupported or is already our own exec invocation
+/// (anti-recursion). Pure/testable: takes the parsed event + resolved exe path.
+fn pretooluse_rewrite_json(value: &Value, exe: &str, event: &str) -> Option<Value> {
+    let command = extract_hook_command(value)?;
+    // Never re-wrap our own exec invocation (guards against infinite rewrite loops).
+    let first = split_shell_words(command.trim()).and_then(|w| w.first().map(|s| command_basename(s)));
+    if first.as_deref() == Some("lm-resizer") {
+        return None;
+    }
+    let report = rewrite_shell_report(&command);
+    if !report.changed {
+        return None;
+    }
+    // rewrite_shell_report emits a bare `lm-resizer exec --`; point it at THIS binary so the
+    // hook works regardless of PATH (matches init-native-hooks/shim templates).
+    let rewritten = report
+        .rewritten
+        .replace("lm-resizer exec --", &format!("\"{exe}\" exec --"));
+    let updated_input = match value.pointer("/tool_input") {
+        Some(Value::Object(map)) => {
+            let mut map = map.clone();
+            map.insert("command".to_string(), Value::String(rewritten));
+            Value::Object(map)
+        }
+        _ => serde_json::json!({ "command": rewritten }),
+    };
+    Some(serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "permissionDecisionReason": "lm-resizer auto-rewrite",
+            "updatedInput": updated_input,
+        }
+    }))
+}
+
+/// PreToolUse hook entry: read the event from stdin, print the rewrite JSON if any, else nothing.
+/// Never-throws / never-blocks — any parse failure silently lets the command run raw.
+fn emit_pretooluse_rewrite(event: &str) {
+    let mut input = String::new();
+    if io::stdin().read_to_string(&mut input).is_err() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(&input) else {
+        return;
+    };
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(String::from))
+        .unwrap_or_else(|| "lm-resizer".to_string());
+    if let Some(out) = pretooluse_rewrite_json(&value, &exe, event) {
+        println!("{out}");
+    }
 }
 
 fn run_native_hook(client: &str, event: &str) -> NativeHookRunReport {
@@ -8274,6 +8336,40 @@ expected = "error: bad\n"
         assert_eq!(name, "js_test_runner");
         assert!(filtered.contains("Tests  3 passed (3)"));
         assert!(!filtered.contains("Duration"));
+    }
+
+    #[test]
+    fn pretooluse_rewrite_wraps_supported_command_at_exe_path() {
+        let ev = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "vitest run", "description": "run tests"}
+        });
+        let out = pretooluse_rewrite_json(&ev, "/opt/lm-resizer", "PreToolUse").expect("should rewrite");
+        let cmd = out
+            .pointer("/hookSpecificOutput/updatedInput/command")
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert_eq!(cmd, "\"/opt/lm-resizer\" exec -- vitest run");
+        // preserves other tool_input fields (description)
+        assert_eq!(
+            out.pointer("/hookSpecificOutput/updatedInput/description").and_then(|v| v.as_str()),
+            Some("run tests")
+        );
+        assert_eq!(
+            out.pointer("/hookSpecificOutput/hookEventName").and_then(|v| v.as_str()),
+            Some("PreToolUse")
+        );
+    }
+
+    #[test]
+    fn pretooluse_rewrite_skips_unsupported_and_self() {
+        // generic/unsupported command → run raw (no rewrite)
+        let ev = serde_json::json!({"tool_input": {"command": "echo hello"}});
+        assert!(pretooluse_rewrite_json(&ev, "/opt/lm-resizer", "PreToolUse").is_none());
+        // our own exec invocation → never re-wrapped (anti-recursion)
+        let ev2 = serde_json::json!({"tool_input": {"command": "/opt/lm-resizer exec -- git status"}});
+        assert!(pretooluse_rewrite_json(&ev2, "/opt/lm-resizer", "PreToolUse").is_none());
     }
 
     #[test]
