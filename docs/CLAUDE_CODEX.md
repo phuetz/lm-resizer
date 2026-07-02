@@ -1,12 +1,15 @@
 # Using lm-resizer With Claude Code Or Codex
 
-lm-resizer is intentionally opt-in. It does not replace your shell or silently
-rewrite commands. Claude Code and Codex can use it in four practical ways:
+lm-resizer is intentionally opt-in. Nothing rewrites commands until you
+explicitly install hook config. Claude Code and Codex can use it in four
+practical ways:
 
 1. MCP compression tools
 2. explicit `lm-resizer exec -- ...` command wrapping
 3. project hook instructions in `CLAUDE.md` or `AGENTS.md`
-4. native hook config for non-blocking PostToolUse savings records
+4. native hook config: a PreToolUse rewrite that actively routes supported
+   commands through `exec` (the model sees filtered, compressed output) plus
+   non-blocking PostToolUse savings records
 
 ## Install
 
@@ -83,11 +86,17 @@ Generate project-local Codex and Claude hook config:
 lm-resizer init-native-hooks --client all --project-dir . --force
 ```
 
-This writes `.codex/hooks.json` and `.claude/settings.json`. The generated hooks
-call `lm-resizer hook` on `PostToolUse` / `Bash` events. The handler reads the
-event JSON from stdin, records command-output savings when it can identify a
-command and output, and exits successfully when the event shape is unknown. It
-does not block or rewrite the agent action.
+This writes `.codex/hooks.json` and `.claude/settings.json`. The generated
+config wires `lm-resizer hook` on two `Bash` events:
+
+- `PreToolUse` — if the command is supported (git, cargo, vitest/jest, rg, …),
+  the hook emits `updatedInput` rewriting it to `lm-resizer exec -- <cmd>`, so
+  the model sees the filtered, compressed output in place of the raw dump. The
+  command line is preserved verbatim (quoting and backslashes intact), the hook
+  never re-wraps its own `exec` invocations, and an unsupported or unparseable
+  command emits nothing — the command runs raw. It never blocks.
+- `PostToolUse` — records command-output savings telemetry when it can identify
+  a command and output, and exits successfully when the event shape is unknown.
 
 ## Audit Existing Sessions
 

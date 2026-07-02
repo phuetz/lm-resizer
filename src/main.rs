@@ -4542,31 +4542,38 @@ fn native_hook_targets(client: &str, project_dir: &Path) -> Result<Vec<NativeHoo
 }
 
 fn codex_native_hooks_json(exe_path: &str) -> Result<String> {
-    native_hooks_json(exe_path, "codex", "PostToolUse", "Bash")
+    native_hooks_json(exe_path, "codex", &["PreToolUse", "PostToolUse"], "Bash")
 }
 
 fn claude_native_hooks_json(exe_path: &str) -> Result<String> {
-    native_hooks_json(exe_path, "claude", "PostToolUse", "Bash")
+    native_hooks_json(exe_path, "claude", &["PreToolUse", "PostToolUse"], "Bash")
 }
 
-fn native_hooks_json(exe_path: &str, client: &str, event: &str, matcher: &str) -> Result<String> {
-    let command = format!("\"{exe_path}\" hook --client {client} --event {event}");
-    let mut hook = json!({
-        "type": "command",
-        "command": command,
-        "timeout": 30
-    });
-    if cfg!(windows) {
-        hook["commandWindows"] = hook["command"].clone();
-    }
-    let config = json!({
-        "hooks": {
-            event: [{
+/// One hook entry per event: PreToolUse rewrites supported commands through
+/// `exec` (in-place output substitution — the active rtk role; never blocks:
+/// unsupported commands emit nothing and run raw), PostToolUse records
+/// command-output savings telemetry.
+fn native_hooks_json(exe_path: &str, client: &str, events: &[&str], matcher: &str) -> Result<String> {
+    let mut hooks = serde_json::Map::new();
+    for event in events {
+        let command = format!("\"{exe_path}\" hook --client {client} --event {event}");
+        let mut hook = json!({
+            "type": "command",
+            "command": command,
+            "timeout": 30
+        });
+        if cfg!(windows) {
+            hook["commandWindows"] = hook["command"].clone();
+        }
+        hooks.insert(
+            (*event).to_string(),
+            json!([{
                 "matcher": matcher,
                 "hooks": [hook]
-            }]
-        }
-    });
+            }]),
+        );
+    }
+    let config = json!({ "hooks": hooks });
     Ok(serde_json::to_string_pretty(&config)?)
 }
 
@@ -8658,15 +8665,19 @@ expected = "error: bad\n"
     }
 
     #[test]
-    fn native_hook_configs_target_codex_and_claude_post_tool_use() {
+    fn native_hook_configs_target_codex_and_claude_pre_and_post_tool_use() {
         let codex = codex_native_hooks_json("lm-resizer").unwrap();
+        assert!(codex.contains("PreToolUse"));
         assert!(codex.contains("PostToolUse"));
         assert!(codex.contains("\"matcher\": \"Bash\""));
+        assert!(codex.contains("hook --client codex --event PreToolUse"));
         assert!(codex.contains("hook --client codex --event PostToolUse"));
 
         let claude = claude_native_hooks_json("lm-resizer").unwrap();
+        assert!(claude.contains("PreToolUse"));
         assert!(claude.contains("PostToolUse"));
         assert!(claude.contains("\"matcher\": \"Bash\""));
+        assert!(claude.contains("hook --client claude --event PreToolUse"));
         assert!(claude.contains("hook --client claude --event PostToolUse"));
     }
 

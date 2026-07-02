@@ -206,9 +206,13 @@ lm-resizer serve --dashboard
 ```
 
 `exec` runs a command, applies RTK-inspired output filtering for noisy command
-families such as `git`, `cargo`, `rg`, and directory listings, then sends the
-filtered text through the normal compression pipeline. It is an explicit CLI
-wrapper, not an automatic shell hook.
+families such as `git`, `cargo`, `rg`, `vitest`/`jest` (directly or via
+npx/pnpm/yarn/bunx), and directory listings, then sends the filtered text
+through the normal compression pipeline. It is an explicit CLI wrapper, not an
+automatic shell hook. The test-runner filter keeps failing files/tests,
+assertion diffs, stack frames and the final counters; a passing run collapses
+to just the summary lines — in agent telemetry, test-runner output is the
+single biggest token sink.
 Use `--stream` for long-running commands when you still want live child output;
 lm-resizer captures the stream and emits the filtered/compressed result after
 the child exits.
@@ -276,6 +280,15 @@ after long Claude/Codex sessions without touching hook setup.
 `init-hooks` writes opt-in helper scripts and an `AGENT_RULES.md` snippet under
 `.lm-resizer/hooks`. These helpers call `rewrite` / `rewrite-shell`; they do not
 execute target commands or modify agent config.
+
+`init-native-hooks` writes real Claude Code / Codex hook config
+(`.claude/settings.json` / `.codex/hooks.json`) wiring two events: a
+**PreToolUse rewrite** that substitutes a supported Bash command with
+`lm-resizer exec -- <cmd>` in place (the model then sees the filtered,
+compressed output — the active rtk role), and a **PostToolUse** handler that
+records command-output savings telemetry. The rewrite never blocks: an
+unsupported or unparseable command emits nothing and runs raw, and the hook
+refuses to re-wrap its own `exec` invocations.
 
 `init-shims` writes opt-in PATH shims under `.lm-resizer/shims`. Put that
 directory at the front of `PATH` for a shell/session to automatically route
@@ -417,6 +430,8 @@ Done in Rust:
 - opt-in PATH command shims for automatic shell rewriting
 - broader built-in filters including Go, .NET, JVM, Python package managers,
   Kubernetes, AWS, and JS quality tools
+- vitest/jest test-runner filter (direct or via npx/pnpm/yarn/bunx) — the
+  largest agent token sink in measured telemetry
 - streaming `exec --stream` capture for long-running commands
 - Bedrock and Vertex proxy route shapes for compressed preview/forwarding
 - OpenAI-compatible `/v1/*` POST fallback and SSE preview for streaming requests
@@ -444,7 +459,8 @@ Done in Rust:
 - opt-in local `/dashboard` view over existing counters, with no background
   telemetry collector
 - native Codex/Claude hook config generation plus a non-blocking Rust hook
-  handler for PostToolUse command-output savings records
+  handler: PreToolUse command rewrite (in-place output substitution through
+  `exec`, verbatim command preservation) and PostToolUse savings records
 - local image inspection, transcript filler cleanup, and ML classifier status
 - optional ONNX content detection via Google's `magika` crate (opt-in
   `--features magika` + `LM_RESIZER_ENABLE_MAGIKA=1`; bundled `standard_v3_3`
@@ -458,7 +474,8 @@ Not yet implemented:
 - external npm registry credentials and release approval
 - project-specific/custom ecosystem filters beyond the built-ins and starter
   contribution templates
-- deeper agent-native integrations beyond current PostToolUse savings hooks
+- deeper agent-native integrations beyond the current PreToolUse rewrite +
+  PostToolUse telemetry hooks (e.g. session-level context surfaces)
 
 Detailed port tracker: [docs/PORTING.md](docs/PORTING.md).
 Claude/Codex usage guide: [docs/CLAUDE_CODEX.md](docs/CLAUDE_CODEX.md).

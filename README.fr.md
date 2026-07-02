@@ -176,6 +176,13 @@ Installer les hooks natifs projet pour Claude Code et Codex :
 lm-resizer init-native-hooks --client all --project-dir . --force
 ```
 
+Cette commande câble deux hooks : une **réécriture PreToolUse** qui substitue
+en place une commande Bash supportée par `lm-resizer exec -- <cmd>` (le modèle
+voit alors la sortie filtrée et compressée — le rôle actif de rtk), et un
+handler **PostToolUse** qui enregistre la télémétrie d’économies. La réécriture
+ne bloque jamais : commande non supportée → rien n’est émis, la commande
+s’exécute telle quelle.
+
 Installer les blocs d’instructions réversibles dans `AGENTS.md` et/ou
 `CLAUDE.md` :
 
@@ -221,8 +228,12 @@ lm-resizer doctor --json
 ```
 
 `exec` lance la commande, applique des filtres inspirés de RTK pour les familles
-bruyantes (`git`, `cargo`, `rg`, listings de dossiers, etc.), puis envoie la
-sortie filtrée dans le pipeline de compression normal.
+bruyantes (`git`, `cargo`, `rg`, `vitest`/`jest` — direct ou via
+npx/pnpm/yarn/bunx —, listings de dossiers, etc.), puis envoie la sortie
+filtrée dans le pipeline de compression normal. Le filtre test-runner garde les
+fichiers/tests en échec, les diffs d’assertion et les compteurs finaux ; une
+suite qui passe se réduit aux lignes de résumé — la sortie de test est le plus
+gros consommateur de tokens mesuré chez les agents.
 
 `--stream` est utile pour les commandes longues : la sortie reste visible en
 direct, puis `lm-resizer` capture et compresse le résultat à la fin.
