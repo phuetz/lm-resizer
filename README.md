@@ -3,6 +3,12 @@
 Make **Claude Code** and **Codex** work with less noise, fewer wasted tokens,
 and more useful context.
 
+![lm-resizer in action](docs/lm-resizer-hero.png)
+
+> One `cargo test` run through `lm-resizer`: **398 commands, 1.23 MB → 372 KB,
+> 222,247 tokens saved** — signal kept, noise dropped, nothing lost (full output
+> stays recoverable).
+
 Website: <https://phuetz.github.io/lm-resizer/>
 
 French README: [README.fr.md](README.fr.md)
@@ -170,6 +176,7 @@ lm-resizer batch logs/ --recursive --ext log,json,diff --jobs 8 --json
 lm-resizer exec -- git status
 lm-resizer exec --json -- cargo test
 lm-resizer exec --stream -- cargo test
+command-that-is-already-sandboxed | lm-resizer tool-output --command "cargo test" --token-budget 2000 --json
 lm-resizer rewrite -- git status
 lm-resizer rewrite-shell "cargo test && git status"
 lm-resizer trust-filters --path .lm-resizer/filters.toml
@@ -217,13 +224,32 @@ Use `--stream` for long-running commands when you still want live child output;
 lm-resizer captures the stream and emits the filtered/compressed result after
 the child exits.
 
+`tool-output` is the agent-native counterpart to `exec`: it **never executes
+the command**. A host such as Code Buddy can validate, approve and run a command
+inside its own sandbox, then pipe the inert output to `tool-output`. lm-resizer
+uses `--command` only to select the same semantic filter as `exec`, applies the
+optional query-aware `--token-budget`, stores the complete original under a CCR
+recovery hash, and returns the exact original whenever the candidate would not
+meet `--min-savings-bytes` and `--min-savings-ratio`. The recovery write is
+verified before the hash is announced; if the configured CCR backend cannot
+read the original back, lm-resizer returns the exact raw output. Use
+`--request-json` to pass the complete request over stdin so commands and user
+queries do not appear in the process argument list. This avoids wrapper
+binaries inside the sandbox and guarantees that compression never makes a tool
+result larger.
+
+Both `compress` and `exec` accept `--token-budget`. Use a model-aware budget
+when the caller knows the remaining context capacity; omit it for the
+lossless-first pipeline.
+
 `rewrite` is the safe hook-building primitive: it does not execute anything, it
 only reports whether a command is supported and prints the equivalent
 `lm-resizer exec -- ...` invocation.
 
-`rewrite-shell` applies the same idea to a full shell line. It preserves simple
-operators such as `&&`, `||`, `;`, and `|`, and intentionally avoids rewriting
-the right-hand side of a pipe.
+`rewrite-shell` applies the same idea to a full shell line. It may rewrite
+independent segments joined by `&&`, `||`, or `;`, but leaves any expression
+containing a pipeline or redirection untouched so filtering cannot change a
+consumer's input or a file's contents.
 
 `exec` also supports lightweight declarative filters. Put project filters in
 `.lm-resizer/filters.toml`, then run `lm-resizer trust-filters` to approve the
@@ -332,6 +358,7 @@ lm-resizer wrap cursor -- --help
 Tools exposed:
 
 - `lm_resizer_compress`
+- `lm_resizer_tool_output` (post-execution command-aware reduction; never executes commands)
 - `lm_resizer_retrieve`
 - `lm_resizer_stats`
 
@@ -382,6 +409,7 @@ Endpoints:
 
 - `GET /health`
 - `POST /compress` with `{ "content": "...", "query": "optional" }`
+- `POST /tool-output` with `{ "content": "...", "command": "cargo test", "query": "optional", "token_budget": 2000 }`
 - `GET /retrieve/:hash`
 - `GET /stats`
 - `POST /v1/chat/completions`
@@ -468,6 +496,9 @@ Done in Rust:
 - lightweight `eval` harness over session/log fixtures
 - direct proxy launcher env mapping for Claude Code, Codex, Cursor, OpenCode,
   OpenClaw, Aider, and Copilot
+- host-safe post-execution `tool-output` integration over CLI, MCP and HTTP,
+  including semantic command filters, model-aware token budgets, full-original
+  CCR recovery, and a strict no-growth acceptance gate
 
 Not yet implemented:
 
