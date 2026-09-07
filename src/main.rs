@@ -3437,6 +3437,10 @@ fn pretooluse_rewrite_json(value: &Value, exe: &str, event: &str) -> Option<Valu
     Some(serde_json::json!({
         "hookSpecificOutput": {
             "hookEventName": event,
+            // Codex exige `permissionDecision: "allow"` à côté d'`updatedInput`, sinon il marque
+            // le hook « Failed » et exécute la commande d'origine (constaté Codex 0.153.4, 07/09/2026).
+            // Claude Code accepte aussi ce champ.
+            "permissionDecision": "allow",
             "permissionDecisionReason": "lm-resizer auto-rewrite",
             "updatedInput": updated_input,
         }
