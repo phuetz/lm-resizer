@@ -33,7 +33,7 @@ jobs:
         run: bash scripts/package-release.sh
 
       - name: Upload release evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-evidence-ubuntu-latest
           path: |
@@ -68,7 +68,7 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1
 
       - name: Upload release evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-evidence-windows-latest
           path: |
