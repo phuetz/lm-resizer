@@ -16,6 +16,7 @@ jobs:
   publish:
     name: publish @phuetz/lm-resizer
     runs-on: ubuntu-latest
+    environment: npm-production
     permissions:
       contents: read
       id-token: write
