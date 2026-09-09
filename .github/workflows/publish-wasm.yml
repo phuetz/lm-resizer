@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_package:
-        description: "Type @lm-resizer/wasm to confirm the package being published"
+        description: "Type @phuetz/lm-resizer to confirm the package being published"
         required: true
         type: string
       confirm_version:
@@ -14,9 +14,8 @@ on:
 
 jobs:
   publish:
-    name: publish @lm-resizer/wasm
+    name: publish @phuetz/lm-resizer
     runs-on: ubuntu-latest
-    environment: npm-production
     permissions:
       contents: read
       id-token: write
@@ -25,7 +24,7 @@ jobs:
       - name: Validate confirmation
         shell: bash
         run: |
-          test "${{ inputs.confirm_package }}" = "@lm-resizer/wasm"
+          test "${{ inputs.confirm_package }}" = "@phuetz/lm-resizer"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,7 +61,6 @@ jobs:
       - name: Publish package
         shell: bash
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_TRUSTED_PUBLISHING: "1"
           NPM_PROVENANCE: "1"
         run: ./scripts/publish-wasm.sh
