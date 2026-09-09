@@ -81,3 +81,13 @@ export async function initLmResizerWasm(input) {
 
   return { compressJson };
 }
+
+/**
+ * Load the `lm_resizer_wasm.wasm` shipped inside this npm package (Node.js).
+ * Equivalent to reading the file next to index.js and calling initLmResizerWasm().
+ */
+export async function initLmResizerWasmFromPackage() {
+  const { readFile } = await import("node:fs/promises");
+  const bytes = await readFile(new URL("./lm_resizer_wasm.wasm", import.meta.url));
+  return initLmResizerWasm(bytes);
+}

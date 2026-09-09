@@ -9,7 +9,15 @@ export interface CompressionReport {
 }
 
 export interface LmResizerWasm {
+  /**
+   * Compress a JSON document (string). `query` biases retention towards
+   * matching keys/values (query-aware compression); leave it empty for the
+   * generic pipeline. Returns the compressed text in `output` plus a report.
+   */
   compressJson(content: string, query?: string): CompressionReport;
 }
 
 export function initLmResizerWasm(input: WebAssembly.Module | BufferSource): Promise<LmResizerWasm>;
+
+/** Node.js only: load the wasm module bundled with this package. */
+export function initLmResizerWasmFromPackage(): Promise<LmResizerWasm>;

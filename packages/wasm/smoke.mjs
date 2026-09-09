@@ -74,3 +74,12 @@ console.log(
   `WASM smoke passed: json_array ${report.original_bytes}B -> ${report.compressed_bytes}B ` +
     `(saved ${report.bytes_saved}, steps ${JSON.stringify(report.steps_applied)})`
 );
+
+// Case N — the bundled-wasm convenience loader must produce a working module.
+{
+  const { initLmResizerWasmFromPackage } = await import("./index.js");
+  const lm2 = await initLmResizerWasmFromPackage();
+  const r = lm2.compressJson(JSON.stringify({ items: Array.from({ length: 50 }, (_, i) => ({ id: i, tag: "x" })) }));
+  assert(typeof r.output === "string" && r.original_bytes > 0, "initLmResizerWasmFromPackage must return a usable module");
+  console.log("WASM smoke: bundled loader OK");
+}
