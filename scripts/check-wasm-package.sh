@@ -12,10 +12,14 @@ node --check "$pkg/index.js"
 # wasm-only panics, minify-vs-real-pipeline regressions).
 node "$pkg/smoke.mjs"
 
-json="$(cd "$pkg" && npm pack --dry-run --json)"
+json="$(cd "$pkg" && npm pack --dry-run --json 2>/dev/null)"
 PACK_JSON="$json" node -e '
-  const pack = JSON.parse(process.env.PACK_JSON);
-  const files = new Set(pack[0].files.map((file) => file.path));
+  const raw = process.env.PACK_JSON;
+  let pack;
+  try { pack = JSON.parse(raw); } catch (error) { console.error("npm pack --json did not return JSON:", raw.slice(0, 400)); process.exit(1); }
+  const entry = Array.isArray(pack) ? pack[0] : pack;
+  if (!entry || !Array.isArray(entry.files)) { console.error("npm pack --json has no files list:", raw.slice(0, 400)); process.exit(1); }
+  const files = new Set(entry.files.map((file) => file.path));
   for (const path of ["index.js", "index.d.ts", "README.md", "lm_resizer_wasm.wasm"]) {
     if (!files.has(path)) {
       console.error(`npm package missing required file: ${path}`);
