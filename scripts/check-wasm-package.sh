@@ -17,7 +17,8 @@ PACK_JSON="$json" node -e '
   const raw = process.env.PACK_JSON;
   let pack;
   try { pack = JSON.parse(raw); } catch (error) { console.error("npm pack --json did not return JSON:", raw.slice(0, 400)); process.exit(1); }
-  const entry = Array.isArray(pack) ? pack[0] : pack;
+  // npm 11.17 returns an array; npm 11.19 on CI returns an object keyed by package name.
+  const entry = Array.isArray(pack) ? pack[0] : (pack && Array.isArray(pack.files) ? pack : Object.values(pack || {})[0]);
   if (!entry || !Array.isArray(entry.files)) { console.error("npm pack --json has no files list:", raw.slice(0, 400)); process.exit(1); }
   const files = new Set(entry.files.map((file) => file.path));
   for (const path of ["index.js", "index.d.ts", "README.md", "lm_resizer_wasm.wasm"]) {
