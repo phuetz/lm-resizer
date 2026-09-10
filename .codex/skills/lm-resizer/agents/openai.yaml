@@ -1,0 +1,8 @@
+interface:
+  display_name: "lm-resizer"
+  short_description: "Filter noisy command output, keep the signal, recover the raw evidence on demand"
+  brand_color: "#22c55e"
+  default_prompt: "Use $lm-resizer to wrap noisy commands (tests, builds, package managers) so the context stays lean."
+
+policy:
+  allow_implicit_invocation: true

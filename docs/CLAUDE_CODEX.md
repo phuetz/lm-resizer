@@ -10,6 +10,9 @@ practical ways:
 4. native hook config: a PreToolUse rewrite that actively routes supported
    commands through `exec` (the model sees filtered, compressed output) plus
    non-blocking PostToolUse savings records
+5. a drop-in **skill** (`.claude/skills/lm-resizer`, `.codex/skills/lm-resizer`)
+   that teaches the agent when to wrap, how to recover raw output, and how to
+   report savings — copy the folder into your repo or your home skills dir
 
 ## Install
 

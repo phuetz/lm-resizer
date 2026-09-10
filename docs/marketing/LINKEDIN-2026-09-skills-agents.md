@@ -1,0 +1,35 @@
+# LinkedIn — skills lm-resizer + Code Explorer pour Claude Code et Codex (brouillon, à publier par Patrice)
+
+Faits vérifiés le 10/09/2026 : dossiers `.claude/skills/<outil>` et `.codex/skills/<outil>` dans les deux dépôts ; la compétence lm-resizer
+n'exécute que `lm-resizer exec --raw-on-failure -- <commande>` ; Code Explorer : `status` → `analyze` → `context` / `impact` / `query`.
+Chiffres autorisés : ceux des README (398 commandes, 1,23 Mo → 372 Ko, 222 247 tokens ; ~730 000 → ~18 000 tokens, ~25 ms). Rien d'autre.
+
+## Version profil
+
+Un outil que l'agent ne sait pas quand utiliser ne sert à rien.
+
+J'ai donc mis dans les dépôts de lm-resizer et de Code Explorer ce que Claude Code et Codex lisent avant d'agir : une compétence, un
+simple dossier à copier dans `.claude/skills/` ou `.codex/skills/`.
+
+Elle dit à l'agent trois choses :
+• quand cartographier le dépôt avec Code Explorer avant de chercher à la main (status, analyze, context, impact) ;
+• quand envelopper une commande bruyante avec lm-resizer, toujours avec `--raw-on-failure` : une commande qui échoue s'affiche brute, jamais résumée ;
+• comment retrouver la sortie complète quand il en a besoin, et comment rendre compte de ce qu'il a économisé, mesuré, pas estimé.
+
+Pas de hook obligatoire, pas de serveur MCP obligatoire. Un dossier, et l'agent sait.
+
+Copie : `cp -r .claude/skills/lm-resizer votre-depot/.claude/skills/`
+github.com/phuetz/lm-resizer
+
+#IA #ClaudeCode #Codex #AgentsIA #Rust #DeveloperTools
+
+## English (short)
+
+A tool your agent doesn't know when to use is useless. lm-resizer and Code Explorer now ship drop-in skills for Claude Code and Codex:
+one folder to copy into `.claude/skills/` or `.codex/skills/`. It tells the agent when to map the repo first, when to wrap a noisy
+command (always `--raw-on-failure`: a failing command is never summarised away), how to recover the raw output, and how to report
+measured savings. No mandatory hook, no mandatory MCP server. github.com/phuetz/lm-resizer
+
+#AI #ClaudeCode #Codex #DevTools
+
+Checklist : vérifier que la copie du dossier suffit sur un dépôt vierge (Claude Code liste la compétence dans /skills) avant de poster.

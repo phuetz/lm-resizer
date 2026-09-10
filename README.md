@@ -347,6 +347,24 @@ adding runtime model dependencies: image inspects size/dimensions, voice removes
 common transcript filler tokens, and ml-status reports whether optional Magika /
 ONNX classification is enabled.
 
+## Skills for Claude Code and Codex
+
+Two drop-in skills teach an agent *when* to wrap a command, how to recover the
+raw output, and how to report what it saved — no hook or MCP server required:
+
+```bash
+# Claude Code (project-scoped, or ~/.claude/skills for every project)
+cp -r .claude/skills/lm-resizer /path/to/your/repo/.claude/skills/
+# Codex
+cp -r .codex/skills/lm-resizer ~/.codex/skills/
+```
+
+The skill only ever runs `lm-resizer exec --raw-on-failure -- <command>`: a
+failing command is shown raw, a passing one is summarised, and every raw output
+stays under `lm-resizer tee list`. Pair it with the
+[Code Explorer](https://github.com/phuetz/code-explorer) skill: map first, then
+filter.
+
 ## MCP
 
 ```bash
