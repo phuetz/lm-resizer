@@ -127,6 +127,15 @@ is a no-op and detection stays deterministic; on any model/runtime error the
 ONNX path falls back to deterministic detection. ONNX detection is native-only
 (it is never compiled into the wasm build).
 
+## Install from crates.io
+
+```bash
+cargo install lm-resizer
+```
+
+The `lm-resizer` crate ships the CLI, the MCP server and the agent hooks;
+`lm-resizer-core` is the embeddable library (transforms + CCR store).
+
 ## Build
 
 ```bash

@@ -6,6 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Core lm-resizer compression transforms and CCR storage."
+readme = "README.md"
+homepage = "https://phuetz.github.io/lm-resizer/"
+keywords = ["llm", "context", "compression", "tokens", "agents"]
+categories = ["text-processing", "development-tools"]
+include = ["/src/**", "/config/**", "/Cargo.toml", "/README.md", "/LICENSE"]
 
 [lib]
 crate-type = ["rlib", "cdylib", "staticlib"]
