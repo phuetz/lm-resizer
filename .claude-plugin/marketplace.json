@@ -1,8 +1,11 @@
 {
   "$schema": "https://code.claude.com/schemas/marketplace.json",
   "name": "phuetz-tools",
-  "owner": { "name": "Patrice Huetz", "url": "https://github.com/phuetz" },
-  "description": "Tools for AI coding agents by Patrice Huetz: lm-resizer (context budget), Code Buddy (agent).",
+  "owner": {
+    "name": "Patrice Huetz",
+    "url": "https://github.com/phuetz"
+  },
+  "description": "Tools for AI coding agents by Patrice Huetz: lm-resizer (context budget), Code Explorer (codebase knowledge graph), Code Buddy (agent).",
   "plugins": [
     {
       "name": "lm-resizer",
@@ -10,10 +13,39 @@
       "description": "Filter noisy command output before it reaches the model; raw output stays recoverable. Skill + MCP server.",
       "source": "./",
       "version": "0.2.1",
-      "author": { "name": "Patrice Huetz" },
+      "author": {
+        "name": "Patrice Huetz"
+      },
       "license": "Apache-2.0",
-      "keywords": ["context", "compression", "tokens", "mcp"],
+      "keywords": [
+        "context",
+        "compression",
+        "tokens",
+        "mcp"
+      ],
       "category": "productivity"
+    },
+    {
+      "name": "code-explorer",
+      "displayName": "Code Explorer",
+      "description": "Map the codebase first: symbols, callers, impact/blast radius, hotspots over a pre-indexed knowledge graph. Skill + MCP server.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/phuetz/code-explorer.git",
+        "ref": "main"
+      },
+      "version": "0.2.0",
+      "author": {
+        "name": "Patrice Huetz"
+      },
+      "license": "BUSL-1.1",
+      "keywords": [
+        "code-intelligence",
+        "knowledge-graph",
+        "impact-analysis",
+        "mcp"
+      ],
+      "category": "development"
     }
   ]
 }
