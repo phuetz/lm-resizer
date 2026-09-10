@@ -18,6 +18,7 @@ Elle dit à l'agent trois choses :
 
 Pas de hook obligatoire, pas de serveur MCP obligatoire. Un dossier, et l'agent sait.
 
+Vous n'êtes pas sur Claude Code ? `npx skills add phuetz/lm-resizer` installe la même compétence pour Codex, Gemini CLI, Copilot, Hermes, OpenClaw et cinq autres, vérifié le 10/09.
 Et pour Claude Code, une seule commande installe la compétence et le serveur MCP :
 `claude plugin marketplace add phuetz/lm-resizer` puis `claude plugin install lm-resizer@phuetz-tools`
 
@@ -30,8 +31,8 @@ github.com/phuetz/lm-resizer
 A tool your agent doesn't know when to use is useless. lm-resizer and Code Explorer now ship drop-in skills for Claude Code and Codex:
 one folder to copy into `.claude/skills/` or `.codex/skills/`. It tells the agent when to map the repo first, when to wrap a noisy
 command (always `--raw-on-failure`: a failing command is never summarised away), how to recover the raw output, and how to report
-measured savings. Claude Code users: `claude plugin marketplace add phuetz/lm-resizer && claude plugin install lm-resizer@phuetz-tools` installs the skill and the MCP server at once. github.com/phuetz/lm-resizer
+measured savings. Not on Claude Code? `npx skills add phuetz/lm-resizer` installs the same skill for Codex, Gemini CLI, Copilot, Hermes, OpenClaw and five more (verified). Claude Code users: `claude plugin marketplace add phuetz/lm-resizer && claude plugin install lm-resizer@phuetz-tools` installs the skill and the MCP server at once. github.com/phuetz/lm-resizer
 
 #AI #ClaudeCode #Codex #DevTools
 
-Checklist : vérifier que la copie du dossier suffit sur un dépôt vierge (Claude Code liste la compétence dans /skills) avant de poster.
+Checklist : `npx skills add` vérifié le 10/09 sur les deux dépôts (1 compétence trouvée, installée dans `.agents/skills/`) ; le plugin Claude Code vérifié en installation locale et distante.
