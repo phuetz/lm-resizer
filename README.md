@@ -9,6 +9,8 @@ and more useful context.
 > 222,247 tokens saved** — signal kept, noise dropped, nothing lost (full output
 > stays recoverable).
 
+![lm-resizer: from noisy tool output (tests, logs, diffs, JSON, provider traffic) through detection, filtering, compression and CCR offload, to a lean context for the agent; CLI, exec wrapper, MCP, HTTP and proxy modes](docs/infographic-lm-resizer.webp)
+
 Website: <https://phuetz.github.io/lm-resizer/>
 
 French README: [README.fr.md](README.fr.md)
@@ -70,6 +72,8 @@ Use it as a context-budget layer for agent workflows:
   when the agent really needs the full evidence.
 
 ## Pair it with Code Explorer
+
+![The AI engineering stack: Code Explorer understands the repository, lm-resizer protects the context budget, Code Buddy 2 acts with AI agents](docs/infographic-ai-engineering-stack.webp)
 
 `lm-resizer` is complementary to
 [Code Explorer](https://github.com/phuetz/code-explorer). Code Explorer gives

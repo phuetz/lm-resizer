@@ -170,6 +170,12 @@
       </div>
     </section>
 
+    <section id="picture">
+      <h2>The big picture</h2>
+      <p class="lead">From noisy tool output to higher-quality context: what lm-resizer detects, filters, compresses and offloads, and what the agent actually receives.</p>
+      <p><a href="infographic-lm-resizer.webp"><img src="infographic-lm-resizer.webp" alt="lm-resizer: from noisy tool output (tests, logs, diffs, JSON, provider traffic) through detection, filtering, compression and CCR offload, to a lean context for the agent; CLI, exec wrapper, MCP, HTTP and proxy modes" style="width:100%;height:auto;border-radius:14px;display:block" loading="lazy"></a></p>
+    </section>
+
     <section id="why">
       <h2>Why readers should care</h2>
       <p class="lead">AI coding agents are only as useful as the context they can still see. If the window is full of repeated logs, long diffs and raw JSON, the model has less room left for the actual reasoning. lm-resizer keeps the important signal visible while moving bulk data into recoverable local storage.</p>
@@ -188,6 +194,7 @@
         <div class="card"><h3><a href="https://github.com/phuetz/lm-resizer">lm-resizer</a></h3><p>Filters the noisy outputs produced while the agent tests, searches, builds, reviews and calls providers.</p></div>
         <div class="card"><h3>Code Buddy toolchain</h3><p>A practical direction for agentic coding: map the repo, preserve context, orchestrate the work.</p></div>
       </div>
+      <p><a href="infographic-ai-engineering-stack.webp"><img src="infographic-ai-engineering-stack.webp" alt="The AI engineering stack: Code Explorer understands the repository, lm-resizer protects the context budget, Code Buddy 2 acts with AI agents" style="width:100%;height:auto;border-radius:14px;display:block;margin-bottom:18px" loading="lazy"></a></p>
       <h2>Agent alone vs. agent with lm-resizer</h2>
       <p class="lead">The point is not only to compress text. The point is to make Claude Code and Codex easier to trust because the prompt contains less waste and more useful evidence.</p>
       <table>
