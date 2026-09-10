@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "lm-resizer": {
+      "command": "lm-resizer",
+      "args": ["mcp"]
+    }
+  }
+}

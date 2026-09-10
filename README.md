@@ -347,6 +347,21 @@ adding runtime model dependencies: image inspects size/dimensions, voice removes
 common transcript filler tokens, and ml-status reports whether optional Magika /
 ONNX classification is enabled.
 
+## Install as a Claude Code plugin (one command)
+
+The repository is its own plugin marketplace. With the `lm-resizer` binary on
+your `PATH`, this installs the skill **and** the MCP server:
+
+```bash
+claude plugin marketplace add phuetz/lm-resizer
+claude plugin install lm-resizer@phuetz-tools
+```
+
+Or, inside a session: `/plugin` → marketplace `phuetz/lm-resizer` → install
+`lm-resizer`. The skill is then available as `/lm-resizer:lm-resizer` and
+`lm_resizer_*` tools appear in the MCP list. Remove with
+`claude plugin uninstall lm-resizer@phuetz-tools`.
+
 ## Skills for Claude Code and Codex
 
 Two drop-in skills teach an agent *when* to wrap a command, how to recover the
@@ -357,6 +372,8 @@ raw output, and how to report what it saved — no hook or MCP server required:
 cp -r .claude/skills/lm-resizer /path/to/your/repo/.claude/skills/
 # Codex
 cp -r .codex/skills/lm-resizer ~/.codex/skills/
+# skills.sh
+npx skills add phuetz/lm-resizer
 ```
 
 The skill only ever runs `lm-resizer exec --raw-on-failure -- <command>`: a

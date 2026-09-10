@@ -1,0 +1,23 @@
+{
+  "name": "lm-resizer",
+  "version": "0.2.1",
+  "displayName": "lm-resizer",
+  "description": "Keep noisy command output (tests, builds, package managers, diffs, logs) out of the context window. Ships the lm-resizer skill and the lm-resizer MCP server (compress, tool_output, retrieve, stats). Requires the lm-resizer binary on PATH.",
+  "author": {
+    "name": "Patrice Huetz",
+    "url": "https://github.com/phuetz"
+  },
+  "homepage": "https://phuetz.github.io/lm-resizer/",
+  "repository": "https://github.com/phuetz/lm-resizer",
+  "license": "Apache-2.0",
+  "keywords": [
+    "context",
+    "compression",
+    "tokens",
+    "mcp",
+    "claude-code",
+    "codex",
+    "rust"
+  ],
+  "skills": "./skills/"
+}

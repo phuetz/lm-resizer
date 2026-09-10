@@ -18,7 +18,9 @@ Elle dit à l'agent trois choses :
 
 Pas de hook obligatoire, pas de serveur MCP obligatoire. Un dossier, et l'agent sait.
 
-Copie : `cp -r .claude/skills/lm-resizer votre-depot/.claude/skills/`
+Et pour Claude Code, une seule commande installe la compétence et le serveur MCP :
+`claude plugin marketplace add phuetz/lm-resizer` puis `claude plugin install lm-resizer@phuetz-tools`
+
 github.com/phuetz/lm-resizer
 
 #IA #ClaudeCode #Codex #AgentsIA #Rust #DeveloperTools
@@ -28,7 +30,7 @@ github.com/phuetz/lm-resizer
 A tool your agent doesn't know when to use is useless. lm-resizer and Code Explorer now ship drop-in skills for Claude Code and Codex:
 one folder to copy into `.claude/skills/` or `.codex/skills/`. It tells the agent when to map the repo first, when to wrap a noisy
 command (always `--raw-on-failure`: a failing command is never summarised away), how to recover the raw output, and how to report
-measured savings. No mandatory hook, no mandatory MCP server. github.com/phuetz/lm-resizer
+measured savings. Claude Code users: `claude plugin marketplace add phuetz/lm-resizer && claude plugin install lm-resizer@phuetz-tools` installs the skill and the MCP server at once. github.com/phuetz/lm-resizer
 
 #AI #ClaudeCode #Codex #DevTools
 
