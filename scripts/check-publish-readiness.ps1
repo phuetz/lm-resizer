@@ -10,7 +10,7 @@ if (-not (Test-Path $workflowPath)) { throw "missing $workflowPath" }
 if (-not (Test-Path $evidencePath)) { throw "missing $evidencePath; run scripts\check-release.ps1 first" }
 
 $packageJson = Get-Content $packageJsonPath -Raw | ConvertFrom-Json
-if ($packageJson.name -ne "@lm-resizer/wasm") {
+if ($packageJson.name -ne "@phuetz/lm-resizer") {
   throw "unexpected npm package name: $($packageJson.name)"
 }
 if (-not $packageJson.version) {

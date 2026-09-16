@@ -1,6 +1,6 @@
 {
   "name": "@phuetz/lm-resizer",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Query-aware JSON compression for LLM agents, as a WebAssembly module: shrink noisy tool output before it reaches the model, keep errors and paths intact.",
   "type": "module",
   "repository": {
