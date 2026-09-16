@@ -1408,7 +1408,7 @@ dependencies = [
 
 [[package]]
 name = "lm-resizer-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aho-corasick",
  "blake3",
@@ -1440,7 +1440,7 @@ dependencies = [
 
 [[package]]
 name = "lm-resizer-wasm"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "lm-resizer-core",
  "serde_json",
