@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install the Grok-authored skill. Does not delete extra files in dest.
-# On any content conflict, skip the whole copy unless --force (then backup dest).
+# On any content conflict, skip the whole copy (including missing-file repair)
+# unless --force (then backup dest).
 set -euo pipefail
 
 SKILL_NAME="lm-resizer"
@@ -14,7 +15,12 @@ DEST_OVERRIDE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --target)
-      TARGET="${2:?--target needs a value}"
+      if [ $# -lt 2 ]; then
+        echo "--target needs a value" >&2
+        usage
+        exit 2
+      fi
+      TARGET="$2"
       shift 2
       ;;
     --target=*)
@@ -22,7 +28,12 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --dest)
-      DEST_OVERRIDE="${2:?--dest needs a value}"
+      if [ $# -lt 2 ]; then
+        echo "--dest needs a value" >&2
+        usage
+        exit 2
+      fi
+      DEST_OVERRIDE="$2"
       shift 2
       ;;
     --dest=*)
@@ -63,6 +74,10 @@ if [ ! -d "$SRC" ]; then
   exit 1
 fi
 
+PREEXISTED=0
+if [ -d "$DEST" ]; then
+  PREEXISTED=1
+fi
 mkdir -p "$DEST"
 
 conflicts=0
@@ -79,8 +94,12 @@ if [ "$conflicts" -eq 1 ] && [ "$FORCE" -ne 1 ]; then
   exit 0
 fi
 
-if [ "$FORCE" -eq 1 ] && [ -d "$DEST" ]; then
-  bak="${DEST}.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+if [ "$FORCE" -eq 1 ] && [ "$PREEXISTED" -eq 1 ]; then
+  bak="${DEST}.bak.$(date -u +%Y%m%dT%H%M%SZ).$$"
+  if [ -e "$bak" ]; then
+    echo "backup path already exists: $bak" >&2
+    exit 1
+  fi
   mkdir -p "$bak"
   cp -a "$DEST"/. "$bak"/ 2>/dev/null || true
   echo "backup: $bak"

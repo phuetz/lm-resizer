@@ -4,7 +4,7 @@ description: Compress large command or file output with the local `lm-resizer` C
 metadata:
   author: Grok
   short-description: Local lossless-first context compression
-  compatibility: Requires lm-resizer on PATH. Crate 0.2.1. CLI has no --version flag
+  compatibility: Requires lm-resizer on PATH. CLI has no --version flag
 ---
 
 # LM Resizer (local CLI)

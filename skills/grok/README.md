@@ -7,4 +7,4 @@ https://github.com/phuetz/lm-resizer
 ./scripts/install-grok-skill.sh --target codex
 ```
 
-Idempotent; `--force` backups dest. Grok discovery: `grok inspect --json`. No `grok` MCP client. Claude/Buddy not installed by this script.
+Idempotent; skips the whole copy if any dest file differs (missing-file repair is then skipped too). `--force` backups dest. Grok discovery: `grok inspect --json`. No `grok` MCP client. Claude/Buddy not installed by this script.
