@@ -1,0 +1,3 @@
+interface:
+  display_name: "LM Resizer"
+  short_description: "Local lossless-first compression of large command output"
