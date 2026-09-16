@@ -1,11 +1,10 @@
 # Grok skill (LM Resizer)
 
-Canonical copy of the Grok-authored `lm-resizer` skill.
+https://github.com/phuetz/lm-resizer
 
 ```bash
-./scripts/install-grok-skill.sh
+./scripts/install-grok-skill.sh --target grok
+./scripts/install-grok-skill.sh --target codex
 ```
 
-Verified `lm-resizer install --client` values: claude, codex, cursor, vscode. No `grok` client. Discovery is `~/.grok/skills/lm-resizer/SKILL.md` on the next Grok session.
-
-The CLI has no `--version` flag; crate version lives in Cargo.toml.
+Idempotent; `--force` backups dest. Grok discovery: `grok inspect --json`. No `grok` MCP client. Claude/Buddy not installed by this script.
