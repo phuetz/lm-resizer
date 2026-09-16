@@ -101,7 +101,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 tiktoken-rs = "0.11"
 # `tokenizers` default features pull in `onig` (vendors oniguruma, builds
 # without a system dep on macOS/Linux); C, so native-only.
-tokenizers = "0.22"
+tokenizers = "0.23"
 # Optional ONNX content detection (feature `magika`). Google's official crate
 # bundles the `standard_v3_3` model; `ort` is its inference runtime, pinned to
 # the exact version `magika` requires. ONNX = native-only.
