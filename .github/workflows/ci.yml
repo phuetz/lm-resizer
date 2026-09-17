@@ -7,6 +7,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  test-ubuntu:
+    name: test (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run installer tests
+        shell: bash
+        run: bash scripts/test-install-grok-skill.sh
+
+      - name: Run skills sync check
+        shell: bash
+        run: bash scripts/check-skills-sync.sh
+
   release-check-linux:
     name: release check (ubuntu-latest)
     runs-on: ubuntu-latest
