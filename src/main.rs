@@ -3067,9 +3067,7 @@ fn filter_vitest(raw: &str) -> String {
             kept.push(line.to_string());
             keep_following -= 1;
         } else {
-            if keep_following > 0 {
-                keep_following -= 1;
-            }
+            keep_following = keep_following.saturating_sub(1);
             skipped += 1;
         }
     }
@@ -3921,17 +3919,17 @@ fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     let mut i = 2usize;
     while i + 9 < bytes.len() {
         if bytes[i] != 0xff {
-            i += 1;
+            i = i.checked_add(1)?;
             continue;
         }
         while i < bytes.len() && bytes[i] == 0xff {
-            i += 1;
+            i = i.checked_add(1)?;
         }
         if i >= bytes.len() {
             return None;
         }
         let marker = bytes[i];
-        i += 1;
+        i = i.checked_add(1)?;
         if matches!(marker, 0xd8 | 0xd9) {
             continue;
         }
@@ -3939,7 +3937,7 @@ fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
             return None;
         }
         let len = u16::from_be_bytes([bytes[i], bytes[i + 1]]) as usize;
-        if len < 2 || i + len > bytes.len() {
+        if len < 2 || i.checked_add(len)? > bytes.len() {
             return None;
         }
         if matches!(
@@ -3964,7 +3962,7 @@ fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
             let width = u16::from_be_bytes([bytes[i + 5], bytes[i + 6]]) as u32;
             return Some((width, height));
         }
-        i += len;
+        i = i.checked_add(len)?;
     }
     None
 }
@@ -3972,7 +3970,16 @@ fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 fn image_recommendation(bytes: u64, width: Option<u32>, height: Option<u32>) -> String {
     let megapixels = width
         .zip(height)
-        .map(|(w, h)| (w as u64 * h as u64) as f64 / 1_000_000.0)
+        .map(|(w, h)| {
+            // Un calcul de taille doit utiliser des opérations vérifiées et refuser,
+            // jamais reboucler silencieusement.
+            let pixels = (w as u64).saturating_mul(h as u64);
+            if pixels == u64::MAX {
+                f64::INFINITY
+            } else {
+                pixels as f64 / 1_000_000.0
+            }
+        })
         .unwrap_or(0.0);
     if bytes > 2_000_000 || megapixels > 4.0 {
         "large image: downsample or summarize before sending to an LLM".to_string()
@@ -6794,7 +6801,7 @@ fn axum_ws_to_tungstenite(message: WsMessage) -> Option<TungsteniteMessage> {
 fn tungstenite_to_axum_ws(message: TungsteniteMessage) -> Option<WsMessage> {
     match message {
         TungsteniteMessage::Text(text) => Some(WsMessage::Text(text)),
-        TungsteniteMessage::Binary(bytes) => Some(WsMessage::Binary(bytes.into())),
+        TungsteniteMessage::Binary(bytes) => Some(WsMessage::Binary(bytes)),
         TungsteniteMessage::Ping(bytes) => Some(WsMessage::Ping(bytes)),
         TungsteniteMessage::Pong(bytes) => Some(WsMessage::Pong(bytes)),
         TungsteniteMessage::Close(frame) => Some(WsMessage::Close(frame.map(|frame| {
@@ -8645,6 +8652,58 @@ expected = "error: bad\n"
         assert_eq!(format, "png");
         assert_eq!(width, Some(640));
         assert_eq!(height, Some(480));
+    }
+
+    #[test]
+    fn image_hostile_inputs() {
+        // empty image
+        let (format, w, h) = image_dimensions(b"");
+        assert_eq!(format, "unknown");
+        assert_eq!(w, None);
+        assert_eq!(h, None);
+
+        // truncated PNG
+        let (format, w, h) = image_dimensions(b"\x89PNG\r\n\x1a\n123");
+        assert_eq!(format, "unknown");
+        assert_eq!(w, None);
+        assert_eq!(h, None);
+
+        // dimensions nulles ou négatives : on parse en u32,
+        // donc on vérifie qu'une dimension demandée gigantesque (u32::MAX)
+        // ne fait pas crasher et se voit refuser côté recommandation.
+        let mut png = b"\x89PNG\r\n\x1a\n00000000".to_vec();
+        png.extend_from_slice(&u32::MAX.to_be_bytes());
+        png.extend_from_slice(&u32::MAX.to_be_bytes());
+        let (format, width, height) = image_dimensions(&png);
+        assert_eq!(format, "png");
+        assert_eq!(width, Some(u32::MAX));
+        assert_eq!(height, Some(u32::MAX));
+
+        // Overflow check in recommendation
+        let rec = image_recommendation(100, Some(u32::MAX), Some(u32::MAX));
+        assert_eq!(
+            rec,
+            "large image: downsample or summarize before sending to an LLM"
+        );
+
+        // Fuzzing JPEG with malicious length
+        let mut jpeg = vec![0xff, 0xd8, 0xff, 0xc0];
+        // length overflow
+        jpeg.push(0xff);
+        jpeg.push(0xff);
+        // data (fake)
+        jpeg.extend_from_slice(&[0; 20]);
+        let (format, w, h) = image_dimensions(&jpeg);
+        assert_eq!(format, "jpeg");
+        assert_eq!(w, None);
+        assert_eq!(h, None);
+    }
+
+    #[test]
+    fn inspect_image_unreadable_file() {
+        // file without read permissions (or missing file)
+        let res = inspect_image(Path::new("/does/not/exist.png"));
+        assert!(res.is_err());
     }
 
     #[test]
