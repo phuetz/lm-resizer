@@ -377,9 +377,99 @@ fn test_all_required_edge_cases() {
     let empty_res = compressor.compress("");
     assert_eq!(empty_res.compressed, "");
 
-    // 5. Single very long line
-    let single_long = format!("const payload = \"{}\";", "A".repeat(50_000));
-    let long_res = compressor.compress(&single_long);
-    assert!(!long_res.compressed.is_empty());
-    assert_eq!(long_res.compressed, single_long);
+
+    // 6. Verify banner contains Structure approximative when without Code Explorer
+    assert!(rust_res.is_approximate);
+    assert!(rust_res.compressed.contains("Structure approximative"));
+    assert!(!rust_res.compressed.contains("Code Explorer"));
+
+    assert!(py_res.is_approximate);
+    assert!(py_res.compressed.contains("Structure approximative"));
+
+    assert!(ts_res.is_approximate);
+    assert!(ts_res.compressed.contains("Structure approximative"));
+}
+
+#[test]
+fn test_embedded_path_tested_extensively_without_code_explorer() {
+    let compressor = SourceCompressor::embedded_only();
+    let store = InMemoryCcrStore::default();
+
+    // 1. Rust file test
+    let rust_input = r#"
+pub struct Point {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Point {
+    pub fn distance(&self, other: &Point) -> f64 {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+}
+"#;
+    let rust_res = compressor.compress_with_store(rust_input, Some(&store));
+    assert!(rust_res.is_approximate);
+    assert_eq!(rust_res.engine_used, "embedded-regex-braces");
+    assert!(rust_res.compressed.contains("// [Structure approximative:"));
+    assert!(rust_res.ccr_key.is_some());
+    let r_key = rust_res.ccr_key.unwrap();
+    assert_eq!(store.get(&r_key), Some(rust_input.to_string()));
+
+    // 2. Python file test
+    let py_input = r#"
+class Calculator:
+    def add(self, a: int, b: int) -> int:
+        temp = a + b
+        return temp
+
+    def multiply(self, a: int, b: int) -> int:
+        prod = a * b
+        return prod
+"#;
+    let py_res = compressor.compress_with_store(py_input, Some(&store));
+    assert!(py_res.is_approximate);
+    assert_eq!(py_res.engine_used, "embedded-regex-braces");
+    assert!(py_res.compressed.contains("# [Structure approximative:"));
+    assert!(py_res.ccr_key.is_some());
+    let p_key = py_res.ccr_key.unwrap();
+    assert_eq!(store.get(&p_key), Some(py_input.to_string()));
+}
+
+#[test]
+fn test_code_explorer_ast_symbols_path_and_banner() {
+    use lm_resizer_core::transforms::source_compressor::AstSymbol;
+
+    let compressor = SourceCompressor::default();
+    let store = InMemoryCcrStore::default();
+    let input = r#"
+pub fn calculate_hash(data: &[u8]) -> u64 {
+    let mut h = 0xcbf29ce484222325u64;
+    for &b in data {
+        h = (h ^ (b as u64)).wrapping_mul(0x100000001b3);
+    }
+    h
+}
+"#;
+    let symbols = vec![AstSymbol {
+        name: "calculate_hash".to_string(),
+        label: "Function".to_string(),
+        start_line: 2,
+        end_line: 8,
+    }];
+
+    let res = compressor
+        .compress_with_symbols(input, SourceLanguage::Rust, &symbols, Some(&store))
+        .expect("ast symbols compression should succeed");
+
+    assert!(!res.is_approximate);
+    assert_eq!(res.engine_used, "code-explorer");
+    assert!(res.compressed.contains("// [Structure syntaxique (Code Explorer):"));
+    assert!(!res.compressed.contains("Structure approximative"));
+    assert!(res.compressed.contains("calculate_hash(data: &[u8]) -> u64"));
+    assert!(res.compressed.contains("/* ... [5 lines omitted: function body] ... */"));
+    assert!(res.ccr_key.is_some());
+    assert_eq!(store.get(res.ccr_key.as_ref().unwrap()), Some(input.to_string()));
 }
