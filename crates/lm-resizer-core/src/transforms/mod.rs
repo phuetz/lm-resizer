@@ -34,6 +34,7 @@ pub mod pipeline;
 // and is not on the wasm `compress` path — native-only.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod recommendations;
+pub mod retention_advice;
 pub mod safety;
 pub mod search_compressor;
 pub mod smart_crusher;
@@ -72,6 +73,8 @@ pub use search_compressor::{
     FileMatches, SearchCompressionResult, SearchCompressor, SearchCompressorConfig,
     SearchCompressorStats, SearchMatch,
 };
-pub use source_compressor::{SourceCompressionResult, SourceCompressor};
+pub use source_compressor::{
+    AstSymbol, CodeExplorerMode, SourceCompressionResult, SourceCompressor, SourceLanguage,
+};
 pub use tag_protector::{is_known_html_tag, protect_tags, restore_tags, ProtectStats};
 pub use unidiff_detector::{detect_diff, is_diff};
