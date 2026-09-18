@@ -952,6 +952,10 @@ struct DoctorReport {
 struct CompanionCheck {
     name: String,
     command: String,
+    /// Where the binary actually is. Two entries in PATH resolving to different
+    /// builds is a real and invisible cause of confusion, so the diagnostic
+    /// names the file rather than just the version.
+    resolved_path: Option<String>,
     installed_version: Option<String>,
     /// Version declared by a checkout in the current directory, when the
     /// directory happens to be that tool's own repository.
@@ -6023,14 +6027,35 @@ fn run_doctor(json_output: bool, store: Option<PathBuf>) -> Result<()> {
                         tool.command,
                         tool.error.as_deref().unwrap_or("not installed")
                     ),
-                    (Some(installed), Some(checkout)) if tool.mismatch => println!(
-                        "    WARN {} ({}): installed {} but this checkout is {} \
-                         — you are querying a different version than you are reading",
-                        tool.name, tool.command, installed, checkout
-                    ),
-                    (Some(installed), _) => {
-                        println!("    OK  {} ({}) {}", tool.name, tool.command, installed)
+                    (Some(installed), Some(checkout)) if tool.mismatch => {
+                        // A released binary differing from a development
+                        // checkout is normal, not a fault. We report the gap and
+                        // where each figure came from, and let the reader judge;
+                        // we do not tell anyone to upgrade on the strength of a
+                        // Cargo.toml.
+                        println!(
+                            "    NOTE {} ({}): installed {} at {}",
+                            tool.name,
+                            tool.command,
+                            installed,
+                            tool.resolved_path.as_deref().unwrap_or("(chemin inconnu)")
+                        );
+                        println!(
+                            "         the checkout in this directory declares {checkout} \
+                             (source: ./Cargo.toml)"
+                        );
+                        println!(
+                            "         expected when one is a release and the other is work in \
+                             progress; a running MCP server keeps its own binary until restarted"
+                        );
                     }
+                    (Some(installed), _) => println!(
+                        "    OK  {} ({}) {} at {}",
+                        tool.name,
+                        tool.command,
+                        installed,
+                        tool.resolved_path.as_deref().unwrap_or("(chemin inconnu)")
+                    ),
                 }
             }
         }
@@ -6051,6 +6076,7 @@ fn check_companion(name: &str, command: &str, crate_name: &str) -> CompanionChec
     CompanionCheck {
         name: name.to_string(),
         command: command.to_string(),
+        resolved_path: resolve_command_path(command).map(|p| p.display().to_string()),
         installed_version,
         checkout_version,
         mismatch,
