@@ -3251,13 +3251,28 @@ fn filter_search_results(raw: &str, max_total: usize, max_per_file: usize) -> St
     let mut skipped = 0usize;
 
     for (file, lines) in by_file {
-        out.push(format!("{file}: {} matches", lines.len()));
+        // Un en-tête ne se paie que s'il résume quelque chose.
+        //
+        // Avec une seule occurrence, « fichier: 1 matches » ajoute une ligne
+        // entière pour redire ce que la ligne suivante contient déjà, et
+        // l'indentation ajoute deux octets de plus. Une recherche large qui
+        // touche trois cents fichiers une fois chacun sortait ainsi PLUS GROSSE
+        // qu'elle n'était entrée — 1 619 cas dans l'historique réel, et
+        // jusqu'à +39 % sur une sortie de 15 Ko.
+        let seule = lines.len() == 1;
+        if !seule {
+            out.push(format!("{file}: {} matches", lines.len()));
+        }
         for line in lines.iter().take(max_per_file) {
             if out.len() >= max_total {
                 skipped += 1;
                 continue;
             }
-            out.push(format!("  {line}"));
+            if seule {
+                out.push(line.clone());
+            } else {
+                out.push(format!("  {line}"));
+            }
         }
         skipped += lines.len().saturating_sub(max_per_file);
     }
@@ -7913,11 +7928,40 @@ command = "node"
     fn exec_search_filter_groups_matches_by_file() {
         let raw = "src/a.rs:1:match one\nsrc/a.rs:2:match two\nsrc/a.rs:3:match three\nsrc/b.rs:4:match four\n";
         let filtered = filter_search_results(raw, 20, 2);
+        // Plusieurs occurrences : l'en-tete resume, il gagne sa place.
         assert!(filtered.contains("src/a.rs: 3 matches"));
-        assert!(filtered.contains("src/b.rs: 1 matches"));
         assert!(filtered.contains("src/a.rs:1:match one"));
         assert!(!filtered.contains("src/a.rs:3:match three"));
         assert!(filtered.contains("omitted 1 low-signal lines"));
+
+        // Une seule occurrence : pas d'en-tete. Ce test epinglait auparavant
+        // « src/b.rs: 1 matches », une ligne entiere pour redire ce que la
+        // ligne suivante contient deja. Mesure sur l'historique reel : c'est
+        // cet en-tete qui faisait sortir 1 619 recherches PLUS GROSSES qu'elles
+        // n'etaient entrees, jusqu'a +39 % sur 15 Ko. La ligne elle-meme reste,
+        // avec son chemin : rien n'est perdu.
+        assert!(!filtered.contains("src/b.rs: 1 matches"));
+        assert!(filtered.contains("src/b.rs:4:match four"));
+    }
+
+    #[test]
+    fn une_recherche_large_ne_grossit_plus() {
+        // Le cas reel le plus frequent : beaucoup de fichiers, une occurrence
+        // chacun. C'est celui qui grossissait.
+        let brut: String = (0..300)
+            .map(|n| format!("src/module{n}.rs:{n}:une occurrence unique\n"))
+            .collect();
+        let filtre = filter_search_results(&brut, 10_000, 6);
+        assert!(
+            filtre.len() <= brut.len(),
+            "{} octets pour {} en entree",
+            filtre.len(),
+            brut.len()
+        );
+        // Et aucun chemin ne disparait au passage.
+        for n in [0usize, 150, 299] {
+            assert!(filtre.contains(&format!("src/module{n}.rs")));
+        }
     }
 
     #[test]
