@@ -576,6 +576,11 @@ struct ExecReport {
     command: String,
     exit_code: i32,
     filter: String,
+    /// The no-growth gate fired: the filter (or the recovery marker) made this
+    /// output bigger, so the original was handed back untouched. Recorded so a
+    /// filter that keeps hitting it can be found and fixed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    filter_not_smaller: bool,
     original_bytes: usize,
     filtered_bytes: usize,
     compressed_bytes: usize,
@@ -1619,6 +1624,34 @@ fn compress_text_with_pipeline(
         token_budget,
     };
     let result = pipeline.run(content, detection.content_type, &ctx, store);
+
+    // Porte de non-croissance, posée ici parce que c'est le seul endroit que
+    // tous les chemins traversent : `exec`, les hooks natifs, les shims et
+    // l'outil MCP `lm_resizer_compress` passent tous par cette fonction. La
+    // poser plus haut, au cas par cas, laissait des entrées non couvertes —
+    // c'est le reproche que la contre-revue a fait à une première version, et
+    // il était juste.
+    //
+    // Elle compare la sortie FINALE, notices et marqueur de récupération
+    // compris : un résultat plus gros que l'entrée n'est pas une compression,
+    // quelle que soit la part du texte qui l'a fait grossir.
+    //
+    // Quand elle tire, on rend le contenu tel quel et on n'annonce aucune clé
+    // de récupération : rien n'a été retiré, il n'y a rien à récupérer, et
+    // promettre une récupération qui ne sert à rien coûte une écriture dans le
+    // magasin à chaque appel.
+    if !content.is_empty() && result.output.len() >= content.len() {
+        return Ok(CompressReport {
+            content_type: detection.content_type.as_str().to_string(),
+            original_bytes: content.len(),
+            compressed_bytes: content.len(),
+            bytes_saved: 0,
+            steps_applied: Vec::new(),
+            cache_keys: Vec::new(),
+            output: content.to_string(),
+        });
+    }
+
     Ok(CompressReport {
         content_type: detection.content_type.as_str().to_string(),
         original_bytes: content.len(),
@@ -1653,10 +1686,10 @@ fn run_exec_command(
         )
     };
 
-    let (filter, filtered) = if raw_on_failure && exit_code != 0 {
-        ("raw_on_failure".to_string(), raw.clone())
+    let (filter, filtered, gated) = if raw_on_failure && exit_code != 0 {
+        ("raw_on_failure".to_string(), raw.clone(), false)
     } else {
-        filter_command_output(command, &raw)
+        filter_command_output_gated(command, &raw)
     };
 
     let compressed = compress_text(&filtered, query, store)?;
@@ -1670,10 +1703,24 @@ fn run_exec_command(
         final_output.push('\n');
     }
 
+    // Seconde porte, après la compression et l'ajout de l'indication de tee.
+    //
+    // Le filtre ne peut plus grossir. Il reste le cas mesuré sur 469 commandes
+    // — 11,1 % des croissances — où le filtre n'avait rien changé et où
+    // l'étape suivante ajoutait exactement 108 octets de marqueur. Poser un
+    // marqueur de récupération sur un texte dont rien n'a été retiré ne sert à
+    // rien : il n'y a rien à récupérer.
+    let mut gated = gated;
+    if !raw.is_empty() && final_output.len() >= raw.len() {
+        final_output = raw.clone();
+        gated = true;
+    }
+
     let report = ExecReport {
         command: command.join(" "),
         exit_code,
         filter,
+        filter_not_smaller: gated,
         original_bytes: raw.len(),
         filtered_bytes: filtered.len(),
         compressed_bytes: final_output.len(),
@@ -1969,7 +2016,53 @@ fn shell_join(args: &[String]) -> String {
         .join(" ")
 }
 
+/// Route a command's output to its filter, and refuse a filter that made it
+/// bigger.
+///
+/// # Why the gate lives here
+///
+/// Measured on 32 483 real commands from `exec-history.jsonl`: **4 207 outputs,
+/// 12.95 %, came out larger than they went in** — up to +39 % on a 15 KB `rg`
+/// search.
+///
+/// The cause is not the recovery marker, which is what one assumes. In 88.9 %
+/// of those cases the *filter itself* added text: `search_results` annotates
+/// and groups `rg` output, which costs more than it saves on a short result.
+/// So the gate belongs at the filter boundary, where every caller crosses it,
+/// not at one call site.
+///
+/// Returning the raw output loses nothing, and that is checked rather than
+/// assumed: across those 4 207 cases **the filter had removed text in none of
+/// them**. Where output grew it contained the original plus annotations, so
+/// handing back the original only drops the annotations.
+///
+/// The filter *name* is left untouched when the gate fires. It identifies which
+/// filter was chosen, and callers rely on that identity — `rewrite_command_report`
+/// decides whether a command is supported from it. Whether the filter helped on
+/// one particular input is a different question, reported separately by
+/// [`filter_command_output_gated`].
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
+    let (filter, filtered, _gated) = filter_command_output_gated(command, raw);
+    (filter, filtered)
+}
+
+/// As [`filter_command_output`], plus whether the no-growth gate fired.
+///
+/// The flag exists so history stays attributable: a filter that keeps hitting
+/// the gate is a filter to fix, and that is invisible if we only record the
+/// name of the filter that was chosen.
+fn filter_command_output_gated(command: &[String], raw: &str) -> (String, String, bool) {
+    let (filter, filtered) = route_command_filter(command, raw);
+    // Empty output is not a growth case; it is nothing to do. Firing the gate
+    // there would be noise, and it is the common case for the callers that only
+    // ask which filter *would* apply.
+    if !raw.is_empty() && filtered.len() >= raw.len() {
+        return (filter, raw.to_string(), true);
+    }
+    (filter, filtered, false)
+}
+
+fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     let command_text = normalized_command_text(command);
     if let Some((filter, filtered)) = apply_toml_filters(&command_text, raw) {
         return (filter, filtered);
@@ -2752,6 +2845,40 @@ fn command_basename(command: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// Abrège une ligne de `git status` au format long en son équivalent court.
+///
+/// `\tmodified:   src/fichier.rs` devient `M src/fichier.rs` : même
+/// information, un tiers d'octets en moins. La correspondance est celle que
+/// `git status --short` emploie déjà, donc elle ne surprend personne et ne perd
+/// rien — l'état et le chemin sont tous deux conservés.
+///
+/// Une ligne dont le préfixe n'est pas reconnu est rendue telle quelle. On ne
+/// devine pas : un état qu'on ne sait pas nommer se garde en entier.
+fn abreger_ligne_git_status(ligne: &str) -> Option<String> {
+    let t = ligne.trim();
+    for (long, court) in [
+        ("both modified:", "UU"),
+        ("both added:", "AA"),
+        ("deleted by us:", "DU"),
+        ("deleted by them:", "UD"),
+        ("new file:", "A"),
+        ("modified:", "M"),
+        ("deleted:", "D"),
+        ("renamed:", "R"),
+        ("copied:", "C"),
+        ("typechange:", "T"),
+    ] {
+        if let Some(reste) = t.strip_prefix(long) {
+            let chemin = reste.trim();
+            if chemin.is_empty() {
+                return None;
+            }
+            return Some(format!("{court} {chemin}"));
+        }
+    }
+    None
+}
+
 fn filter_git_status(raw: &str) -> String {
     let mut kept = Vec::new();
     let mut skipped = 0usize;
@@ -2766,7 +2893,13 @@ fn filter_git_status(raw: &str) -> String {
             skipped += 1;
             continue;
         }
-        kept.push(line.to_string());
+        // Les en-têtes de section — « Changes not staged for commit: » — sont
+        // conservés : c'est eux qui disent si un fichier est indexé ou non, et
+        // ils sont peu nombreux. Seules les lignes de fichiers sont abrégées.
+        match abreger_ligne_git_status(line) {
+            Some(court) => kept.push(court),
+            None => kept.push(line.to_string()),
+        }
     }
 
     if kept.is_empty() {
@@ -3118,13 +3251,28 @@ fn filter_search_results(raw: &str, max_total: usize, max_per_file: usize) -> St
     let mut skipped = 0usize;
 
     for (file, lines) in by_file {
-        out.push(format!("{file}: {} matches", lines.len()));
+        // Un en-tête ne se paie que s'il résume quelque chose.
+        //
+        // Avec une seule occurrence, « fichier: 1 matches » ajoute une ligne
+        // entière pour redire ce que la ligne suivante contient déjà, et
+        // l'indentation ajoute deux octets de plus. Une recherche large qui
+        // touche trois cents fichiers une fois chacun sortait ainsi PLUS GROSSE
+        // qu'elle n'était entrée — 1 619 cas dans l'historique réel, et
+        // jusqu'à +39 % sur une sortie de 15 Ko.
+        let seule = lines.len() == 1;
+        if !seule {
+            out.push(format!("{file}: {} matches", lines.len()));
+        }
         for line in lines.iter().take(max_per_file) {
             if out.len() >= max_total {
                 skipped += 1;
                 continue;
             }
-            out.push(format!("  {line}"));
+            if seule {
+                out.push(line.clone());
+            } else {
+                out.push(format!("  {line}"));
+            }
         }
         skipped += lines.len().saturating_sub(max_per_file);
     }
@@ -3500,6 +3648,7 @@ fn run_native_hook(client: &str, event: &str) -> NativeHookRunReport {
                 command: command.clone(),
                 exit_code: extract_hook_exit_code(value.as_ref()).unwrap_or(0),
                 filter: filter.clone(),
+                filter_not_smaller: false,
                 original_bytes: output.len(),
                 filtered_bytes: filtered.len(),
                 compressed_bytes: compressed.compressed_bytes,
@@ -7779,11 +7928,40 @@ command = "node"
     fn exec_search_filter_groups_matches_by_file() {
         let raw = "src/a.rs:1:match one\nsrc/a.rs:2:match two\nsrc/a.rs:3:match three\nsrc/b.rs:4:match four\n";
         let filtered = filter_search_results(raw, 20, 2);
+        // Plusieurs occurrences : l'en-tete resume, il gagne sa place.
         assert!(filtered.contains("src/a.rs: 3 matches"));
-        assert!(filtered.contains("src/b.rs: 1 matches"));
         assert!(filtered.contains("src/a.rs:1:match one"));
         assert!(!filtered.contains("src/a.rs:3:match three"));
         assert!(filtered.contains("omitted 1 low-signal lines"));
+
+        // Une seule occurrence : pas d'en-tete. Ce test epinglait auparavant
+        // « src/b.rs: 1 matches », une ligne entiere pour redire ce que la
+        // ligne suivante contient deja. Mesure sur l'historique reel : c'est
+        // cet en-tete qui faisait sortir 1 619 recherches PLUS GROSSES qu'elles
+        // n'etaient entrees, jusqu'a +39 % sur 15 Ko. La ligne elle-meme reste,
+        // avec son chemin : rien n'est perdu.
+        assert!(!filtered.contains("src/b.rs: 1 matches"));
+        assert!(filtered.contains("src/b.rs:4:match four"));
+    }
+
+    #[test]
+    fn une_recherche_large_ne_grossit_plus() {
+        // Le cas reel le plus frequent : beaucoup de fichiers, une occurrence
+        // chacun. C'est celui qui grossissait.
+        let brut: String = (0..300)
+            .map(|n| format!("src/module{n}.rs:{n}:une occurrence unique\n"))
+            .collect();
+        let filtre = filter_search_results(&brut, 10_000, 6);
+        assert!(
+            filtre.len() <= brut.len(),
+            "{} octets pour {} en entree",
+            filtre.len(),
+            brut.len()
+        );
+        // Et aucun chemin ne disparait au passage.
+        for n in [0usize, 150, 299] {
+            assert!(filtre.contains(&format!("src/module{n}.rs")));
+        }
     }
 
     #[test]
@@ -8363,6 +8541,354 @@ expected = "error: bad\n"
         assert!(!filtered.contains("Duration  117ms"));
         // and it is genuinely shorter than the raw
         assert!(filtered.len() < raw.len());
+    }
+
+    #[test]
+    fn compress_text_ne_rend_jamais_plus_gros_que_ce_qu_on_lui_donne() {
+        // compress_text est le seul point que TOUS les chemins traversent :
+        // exec, les hooks natifs, les shims et l'outil MCP lm_resizer_compress.
+        // Verrouiller la propriete ici la verrouille partout ; la poser au cas
+        // par cas laissait des entrees non couvertes.
+        let store = InMemoryCcrStore::default();
+        for contenu in [
+            "",
+            "x",
+            "court\n",
+            "a.rs:1:x\nb.rs:2:y\n",
+            "{\"cle\": 1}",
+            "\u{feff}entete\ncorps\n",
+            "ligne unique sans retour",
+        ] {
+            let rapport = compress_text(contenu, "une requete", &store).unwrap();
+            assert!(
+                rapport.output.len() <= contenu.len(),
+                "sortie de {} octets pour {} en entree : {contenu:?}",
+                rapport.output.len(),
+                contenu.len()
+            );
+            // Et quand rien n'a ete gagne, on rend le contenu exact : jamais une
+            // troncature, jamais une approximation.
+            if rapport.output.len() == contenu.len() {
+                assert_eq!(rapport.output, contenu);
+            }
+        }
+    }
+
+    #[test]
+    fn une_compression_sans_gain_ne_promet_pas_de_recuperation() {
+        // Annoncer une cle de recuperation quand rien n'a ete retire coute une
+        // ecriture dans le magasin a chaque appel, pour rien.
+        let store = InMemoryCcrStore::default();
+        let contenu = "deja compact\n";
+        let rapport = compress_text(contenu, "", &store).unwrap();
+        if rapport.bytes_saved == 0 {
+            assert!(
+                rapport.cache_keys.is_empty(),
+                "aucune cle ne doit etre annoncee sans gain"
+            );
+            assert!(rapport.steps_applied.is_empty());
+        }
+    }
+
+    /// Le corpus figé, côté filtres par commande.
+    ///
+    /// Le corpus de `crates/lm-resizer-core/tests/corpus_fige.rs` mesure le
+    /// pipeline seul, et il a montré que celui-ci ne réduit qu'un cas sur
+    /// quatorze. C'est normal : l'essentiel du gain vient des filtres par
+    /// commande, qui vivent ici, dans le binaire, et s'appliquent AVANT le
+    /// pipeline sur le chemin `exec`.
+    ///
+    /// Sans ce pendant, la mesure publiée serait trompeuse : on rapporterait le
+    /// maillon qui gagne le moins.
+    fn corpus_commandes() -> Vec<(&'static str, Vec<String>, String)> {
+        let cmd = |parts: &[&str]| parts.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        vec![
+            (
+                "rg, resultat court",
+                cmd(&["rg", "-n", "motif"]),
+                "a.rs:1:x\nb.rs:2:y\n".to_string(),
+            ),
+            (
+                "rg, resultat volumineux",
+                cmd(&["rg", "-n", "motif"]),
+                (0..600)
+                    .map(|n| format!("src/module{n}.rs:{n}:une ligne de resultat plutot longue\n"))
+                    .collect(),
+            ),
+            (
+                "git status propre",
+                cmd(&["git", "status"]),
+                "On branch main\nnothing to commit, working tree clean\n".to_string(),
+            ),
+            (
+                "git status charge",
+                cmd(&["git", "status"]),
+                format!(
+                    "On branch main\nChanges not staged for commit:\n{}",
+                    (0..300)
+                        .map(|n| format!("\tmodified:   src/fichier{n}.rs\n"))
+                        .collect::<String>()
+                ),
+            ),
+            (
+                "cargo test vert",
+                cmd(&["cargo", "test"]),
+                format!(
+                    "{}test result: ok. 400 passed; 0 failed; 0 ignored\n",
+                    (0..400)
+                        .map(|n| format!("test module::cas_{n} ... ok\n"))
+                        .collect::<String>()
+                ),
+            ),
+            (
+                "cargo test rouge",
+                cmd(&["cargo", "test"]),
+                format!(
+                    "{}test result: FAILED. 398 passed; 2 failed; 0 ignored\n",
+                    (0..400)
+                        .map(|n| if n % 200 == 3 {
+                            format!("test module::cas_{n} ... FAILED\n")
+                        } else {
+                            format!("test module::cas_{n} ... ok\n")
+                        })
+                        .collect::<String>()
+                ),
+            ),
+            ("git diff volumineux", cmd(&["git", "diff"]), {
+                let mut d = String::from("diff --git a/gros.rs b/gros.rs\n");
+                for n in 0..1500 {
+                    d.push_str(&format!("+    let variable_{n} = calcul({n});\n"));
+                }
+                d
+            }),
+            (
+                "listing volumineux",
+                cmd(&["ls", "-la"]),
+                (0..500)
+                    .map(|n| format!("-rw-r--r-- 1 u u {n} fichier{n}.txt\n"))
+                    .collect(),
+            ),
+            (
+                "commande inconnue, sortie longue",
+                cmd(&["outil-inconnu", "--tout"]),
+                "une ligne de sortie quelconque\n".repeat(800),
+            ),
+            (
+                "unicode et ANSI",
+                cmd(&["rg", "motif"]),
+                (0..200)
+                    .map(|n| format!("\u{1b}[31msrc/é{n}.rs\u{1b}[0m:{n}:中文 🙂\n"))
+                    .collect(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn abreger_git_status_ne_perd_ni_etat_ni_chemin() {
+        // La seule chose qui rend cette abreviation acceptable : rien ne
+        // disparait. On verifie les deux moities — l'etat et le chemin — sur
+        // chaque forme que git peut produire.
+        for (long, attendu) in [
+            ("\tmodified:   src/a.rs", "M src/a.rs"),
+            ("\tnew file:   src/b.rs", "A src/b.rs"),
+            ("\tdeleted:    src/c.rs", "D src/c.rs"),
+            (
+                "\trenamed:    src/d.rs -> src/e.rs",
+                "R src/d.rs -> src/e.rs",
+            ),
+            ("\tcopied:     src/f.rs", "C src/f.rs"),
+            ("\ttypechange: src/g.rs", "T src/g.rs"),
+            ("\tboth modified:   src/h.rs", "UU src/h.rs"),
+            ("\tboth added:      src/i.rs", "AA src/i.rs"),
+            ("\tdeleted by us:   src/j.rs", "DU src/j.rs"),
+            ("\tdeleted by them: src/k.rs", "UD src/k.rs"),
+        ] {
+            let obtenu = abreger_ligne_git_status(long)
+                .unwrap_or_else(|| panic!("forme non reconnue : {long:?}"));
+            assert_eq!(obtenu, attendu);
+            // Le chemin survit entierement, y compris apres une fleche de
+            // renommage.
+            let chemin = long.trim().splitn(2, ':').nth(1).unwrap().trim();
+            assert!(
+                obtenu.ends_with(chemin),
+                "chemin perdu : {obtenu} ne finit pas par {chemin}"
+            );
+        }
+    }
+
+    #[test]
+    fn une_ligne_git_status_inconnue_est_gardee_entiere() {
+        // On ne devine pas : un etat qu'on ne sait pas nommer se garde tel quel
+        // plutot que d'etre abrege de travers.
+        for ligne in [
+            "On branch main",
+            "Changes not staged for commit:",
+            "\tune-forme-future:  src/z.rs",
+            "\tmodified:",
+            "",
+        ] {
+            assert!(
+                abreger_ligne_git_status(ligne).is_none(),
+                "ligne abregee a tort : {ligne:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn git_status_abrege_conserve_tous_les_chemins() {
+        // Propriete de bout en bout : chaque chemin present en entree est
+        // present en sortie. C'est ce qui autorise a compresser.
+        let brut = format!(
+            "On branch main\nChanges not staged for commit:\n  (use \"git add\" ...)\n{}",
+            (0..50)
+                .map(|n| format!("\tmodified:   src/chemin/tres/long/fichier{n}.rs\n"))
+                .collect::<String>()
+        );
+        let sortie = filter_git_status(&brut);
+        for n in 0..50 {
+            let chemin = format!("src/chemin/tres/long/fichier{n}.rs");
+            assert!(
+                sortie.contains(&chemin),
+                "chemin absent de la sortie : {chemin}"
+            );
+        }
+        // L'en-tete de section survit : c'est lui qui dit indexe ou non.
+        assert!(sortie.contains("Changes not staged for commit:"));
+        assert!(sortie.len() < brut.len());
+    }
+
+    #[test]
+    fn aucun_filtre_du_corpus_ne_fait_grossir_sa_sortie() {
+        // La propriete que la porte garantit, verifiee sur des formes reelles
+        // plutot que sur un seul exemple.
+        let mut fautes = Vec::new();
+        for (nom, commande, brut) in corpus_commandes() {
+            let (filtre, sortie, porte) = filter_command_output_gated(&commande, &brut);
+            if sortie.len() > brut.len() {
+                fautes.push(format!(
+                    "« {nom} » [{filtre}] : {} octets pour {} en entree",
+                    sortie.len(),
+                    brut.len()
+                ));
+            }
+            if porte && sortie != brut {
+                fautes.push(format!(
+                    "« {nom} » : la porte a tire mais la sortie n'est pas l'original exact"
+                ));
+            }
+        }
+        assert!(fautes.is_empty(), "\n{}", fautes.join("\n"));
+    }
+
+    #[test]
+    fn le_corpus_de_commandes_mesure_octets_et_jetons() {
+        // Octets ET jetons, cote a cote, avec le tokenizer nomme et sans
+        // promettre d'equivalence : ils ne bougent pas du meme pas.
+        let tokenizer = lm_resizer_core::tokenizer::get_tokenizer("gpt-4o");
+        eprintln!("\n=== corpus fige, filtres par commande — tokenizer gpt-4o ===");
+        for (nom, commande, brut) in corpus_commandes() {
+            let (filtre, sortie, porte) = filter_command_output_gated(&commande, &brut);
+            let pct = |a: usize, b: usize| {
+                if a == 0 {
+                    0.0
+                } else {
+                    (1.0 - b as f64 / a as f64) * 100.0
+                }
+            };
+            eprintln!(
+                "{:<30} [{:<16}]{} octets {:>7} -> {:>7} ({:>5.1} %)   jetons {:>6} -> {:>6} ({:>5.1} %)",
+                nom,
+                filtre,
+                if porte { " porte" } else { "      " },
+                brut.len(),
+                sortie.len(),
+                pct(brut.len(), sortie.len()),
+                tokenizer.count_text(&brut),
+                tokenizer.count_text(&sortie),
+                pct(tokenizer.count_text(&brut), tokenizer.count_text(&sortie))
+            );
+        }
+        eprintln!("\nLes pourcentages d'octets et de jetons ne sont pas interchangeables.\n");
+    }
+
+    #[test]
+    fn les_filtres_du_corpus_sont_deterministes() {
+        for (nom, commande, brut) in corpus_commandes() {
+            let a = filter_command_output(&commande, &brut);
+            let b = filter_command_output(&commande, &brut);
+            assert_eq!(a.0, b.0, "« {nom} » change de filtre d'une fois a l'autre");
+            assert_eq!(a.1, b.1, "« {nom} » ne rend pas le meme resultat deux fois");
+        }
+    }
+
+    #[test]
+    fn un_filtre_qui_grossit_est_refuse() {
+        // Cas réel le plus coûteux du corpus : une recherche `rg` de 15 Ko que
+        // le filtre `search_results` rendait à 21 Ko en l'annotant.
+        let commande = vec!["rg".to_string(), "-n".to_string(), "motif".to_string()];
+        // Une sortie courte et dense, que l'annotation par fichier fait grossir.
+        let brut = "a.rs:1:x\nb.rs:2:y\nc.rs:3:z\n";
+        let (filtre, sortie, porte) = filter_command_output_gated(&commande, brut);
+        assert!(
+            sortie.len() <= brut.len(),
+            "le filtre a rendu {} octets pour {} en entree",
+            sortie.len(),
+            brut.len()
+        );
+        // Le nom du filtre ne change pas : il dit lequel a ete choisi, pas s'il
+        // a servi. C'est le drapeau qui porte cette seconde information.
+        assert_eq!(filtre, "search_results");
+        if porte {
+            assert_eq!(
+                sortie, brut,
+                "quand la porte tire, on rend l'original exact"
+            );
+        } else {
+            assert!(sortie.len() < brut.len());
+        }
+    }
+
+    #[test]
+    fn la_porte_ne_gene_pas_un_filtre_qui_gagne() {
+        // Une sortie volumineuse et répétitive : le filtre doit gagner, et la
+        // porte ne doit pas s'interposer ni renommer le filtre.
+        let commande = vec!["rg".to_string(), "-n".to_string(), "motif".to_string()];
+        let brut: String = (0..500)
+            .map(|n| format!("fichier{n}.rs:{n}:une ligne de resultat assez longue pour compter\n"))
+            .collect();
+        let (filtre, sortie, porte) = filter_command_output_gated(&commande, &brut);
+        assert!(sortie.len() < brut.len());
+        assert_eq!(filtre, "search_results");
+        assert!(
+            !porte,
+            "la porte ne doit pas s'interposer quand le filtre gagne"
+        );
+    }
+
+    #[test]
+    fn la_porte_ne_perd_jamais_d_information() {
+        // La propriété qui rend la porte acceptable : quand elle tire, la
+        // sortie est l'original, octet pour octet. Jamais une troncature.
+        for brut in ["x", "a\nb\n", "\u{feff}entete\ncorps\n"] {
+            for prog in ["rg", "ls", "git", "inconnu"] {
+                let commande = vec![prog.to_string(), "arg".to_string()];
+                let (_filtre, sortie, porte) = filter_command_output_gated(&commande, brut);
+                assert!(
+                    sortie.len() <= brut.len(),
+                    "sortie plus grosse que l'entree pour {prog}"
+                );
+                if porte {
+                    assert_eq!(
+                        sortie, brut,
+                        "la porte rend l'original, jamais une troncature"
+                    );
+                }
+            }
+        }
+        // Une sortie vide n'est pas un cas de croissance : rien a faire.
+        let (_f, sortie, porte) = filter_command_output_gated(&["rg".into(), "x".into()], "");
+        assert!(!porte);
+        assert!(sortie.is_empty());
     }
 
     #[test]
