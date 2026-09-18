@@ -74,4 +74,5 @@ node packages/wasm/smoke.mjs   # real-execution smoke test
 
 ## License
 
-Apache-2.0. Source: https://github.com/phuetz/lm-resizer
+BUSL-1.1 (change date 2030-08-31, becomes Apache-2.0).
+Source: https://github.com/phuetz/lm-resizer

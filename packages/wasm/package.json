@@ -30,5 +30,6 @@
   "homepage": "https://github.com/phuetz/lm-resizer#readme",
   "engines": {
     "node": ">=18"
-  }
+  },
+  "license": "BUSL-1.1"
 }
