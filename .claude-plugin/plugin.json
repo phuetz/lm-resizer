@@ -9,7 +9,7 @@
   },
   "homepage": "https://phuetz.github.io/lm-resizer/",
   "repository": "https://github.com/phuetz/lm-resizer",
-  "license": "Apache-2.0",
+  "license": "BUSL-1.1",
   "keywords": [
     "context",
     "compression",

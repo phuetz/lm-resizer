@@ -550,3 +550,18 @@ Not yet implemented:
 Detailed port tracker: [docs/PORTING.md](docs/PORTING.md).
 Claude/Codex usage guide: [docs/CLAUDE_CODEX.md](docs/CLAUDE_CODEX.md).
 Social post drafts: [docs/SOCIAL_POSTS.md](docs/SOCIAL_POSTS.md).
+
+## License
+
+Business Source License 1.1 — see [LICENSE](LICENSE).
+
+Personal, non-commercial and **internal business use are permitted**. What the
+licence withholds is offering lm-resizer itself as a service to third parties.
+On **2030-08-31** it converts automatically to the Apache License 2.0.
+
+Versions published up to and including **0.2.2 remain under Apache-2.0**: a
+licence change is not retroactive, and anyone who obtained those versions keeps
+the rights they were granted. The change applies from the next release onwards.
+
+The bundled `standard_v3_3` content-detection model is Google's and stays under
+its own Apache-2.0 terms.

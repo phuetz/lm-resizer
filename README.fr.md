@@ -466,3 +466,20 @@ Pas encore fourni :
 - Release : [docs/RELEASE.md](docs/RELEASE.md)
 - Portage : [docs/PORTING.md](docs/PORTING.md)
 - Posts réseaux sociaux : [docs/SOCIAL_POSTS.md](docs/SOCIAL_POSTS.md)
+
+## Licence
+
+Business Source License 1.1 — voir [LICENSE](LICENSE).
+
+L'usage personnel, non commercial et **interne à une entreprise est autorisé**.
+Ce que la licence retient, c'est le fait d'offrir lm-resizer lui-même comme
+service à des tiers. Le **31 août 2030**, elle devient automatiquement la licence
+Apache 2.0.
+
+Les versions publiées jusqu'à la **0.2.2 incluse restent sous Apache-2.0** : un
+changement de licence n'est pas rétroactif, et quiconque a obtenu ces versions
+conserve les droits qui lui ont été accordés. Le changement vaut à partir de la
+version suivante.
+
+Le modèle de détection de contenu `standard_v3_3` embarqué appartient à Google et
+reste sous ses propres termes Apache-2.0.
