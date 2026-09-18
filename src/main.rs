@@ -38,6 +38,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use walkdir::WalkDir;
 
+mod mcp_proxy;
+
 #[derive(Parser)]
 #[command(name = "lm-resizer")]
 #[command(about = "Rust-native context compression for LLM agents")]
@@ -419,6 +421,22 @@ enum Commands {
         #[arg(long)]
         store: Option<PathBuf>,
     },
+    /// Run a transparent MCP stdio proxy that compresses tool call results.
+    #[command(name = "mcp-proxy")]
+    McpProxy {
+        /// CCR SQLite database path.
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Upstream MCP server command and arguments. Use `--` before flags.
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// Internal mock MCP server for testing scenarios.
+    #[command(name = "mock-mcp-server", hide = true)]
+    MockMcpServer {
+        #[arg(long, default_value = "all")]
+        scenario: String,
+    },
     /// Install lm-resizer as an MCP server for common agent clients.
     Install {
         /// Client to configure: claude, codex, cursor, vscode, all.
@@ -572,18 +590,18 @@ struct BatchItemReport {
 }
 
 #[derive(Debug, Serialize)]
-struct ExecReport {
-    command: String,
-    exit_code: i32,
-    filter: String,
-    original_bytes: usize,
-    filtered_bytes: usize,
-    compressed_bytes: usize,
-    bytes_saved: usize,
-    compression_steps: Vec<String>,
-    cache_keys: Vec<String>,
-    tee_hint: Option<String>,
-    output: String,
+pub(crate) struct ExecReport {
+    pub(crate) command: String,
+    pub(crate) exit_code: i32,
+    pub(crate) filter: String,
+    pub(crate) original_bytes: usize,
+    pub(crate) filtered_bytes: usize,
+    pub(crate) compressed_bytes: usize,
+    pub(crate) bytes_saved: usize,
+    pub(crate) compression_steps: Vec<String>,
+    pub(crate) cache_keys: Vec<String>,
+    pub(crate) tee_hint: Option<String>,
+    pub(crate) output: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1517,6 +1535,8 @@ async fn main() -> Result<()> {
         }
         Commands::Doctor { json, store } => run_doctor(json, store)?,
         Commands::Mcp { store } => run_mcp(store)?,
+        Commands::McpProxy { store, command } => mcp_proxy::run_mcp_proxy(command, store)?,
+        Commands::MockMcpServer { scenario } => mcp_proxy::run_mock_mcp_server(&scenario)?,
         Commands::Install {
             client,
             scope,
@@ -1569,7 +1589,7 @@ async fn read_input(path: Option<&Path>) -> Result<String> {
     Ok(input)
 }
 
-fn default_store_path() -> Result<PathBuf> {
+pub(crate) fn default_store_path() -> Result<PathBuf> {
     if let Ok(path) = std::env::var("LM_RESIZER_STORE") {
         return Ok(PathBuf::from(path));
     }
@@ -1588,7 +1608,7 @@ fn default_state_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(base).join("lm-resizer"))
 }
 
-fn open_store(path: Option<PathBuf>) -> Result<Box<dyn CcrStore>> {
+pub(crate) fn open_store(path: Option<PathBuf>) -> Result<Box<dyn CcrStore>> {
     let path = path.unwrap_or(default_store_path()?);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -1597,7 +1617,7 @@ fn open_store(path: Option<PathBuf>) -> Result<Box<dyn CcrStore>> {
     Ok(from_config(&cfg)?)
 }
 
-fn build_pipeline() -> CompressionPipeline {
+pub(crate) fn build_pipeline() -> CompressionPipeline {
     default_pipeline()
 }
 
@@ -1606,7 +1626,7 @@ fn compress_text(content: &str, query: &str, store: &dyn CcrStore) -> Result<Com
     compress_text_with_pipeline(content, query, store, &pipeline, None)
 }
 
-fn compress_text_with_pipeline(
+pub(crate) fn compress_text_with_pipeline(
     content: &str,
     query: &str,
     store: &dyn CcrStore,
@@ -3361,7 +3381,7 @@ fn sanitize_slug(value: &str) -> String {
     }
 }
 
-fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
+pub(crate) fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     if std::env::var("LM_RESIZER_TRACKING").ok().as_deref() == Some("0") {
         return Ok(());
     }
@@ -6223,7 +6243,7 @@ fn apply_agent_env(command: &mut Command, agent: &str, proxy_url: &str) {
     }
 }
 
-fn resolve_command_path(command: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_command_path(command: &str) -> Option<PathBuf> {
     let path = Path::new(command);
     if path.components().count() > 1 && path.exists() {
         return Some(path.to_path_buf());
