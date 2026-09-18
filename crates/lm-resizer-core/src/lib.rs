@@ -27,6 +27,8 @@ use transforms::{
     JsonMinifier, JsonOffload, LogOffload, LogTemplate, PipelineConfig, SourceCompressor,
 };
 
+pub use transforms::{SourceCompressionResult, SourceLanguage};
+
 // Re-exports for the live-zone dispatcher (Phase B PR-B2 consumes this).
 // Hoisted to the crate root so the proxy crate gets one stable import
 // path: `use lm_resizer_core::compute_frozen_count;`. Keeping the
