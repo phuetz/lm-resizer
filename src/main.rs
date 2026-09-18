@@ -2845,6 +2845,40 @@ fn command_basename(command: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// Abrège une ligne de `git status` au format long en son équivalent court.
+///
+/// `\tmodified:   src/fichier.rs` devient `M src/fichier.rs` : même
+/// information, un tiers d'octets en moins. La correspondance est celle que
+/// `git status --short` emploie déjà, donc elle ne surprend personne et ne perd
+/// rien — l'état et le chemin sont tous deux conservés.
+///
+/// Une ligne dont le préfixe n'est pas reconnu est rendue telle quelle. On ne
+/// devine pas : un état qu'on ne sait pas nommer se garde en entier.
+fn abreger_ligne_git_status(ligne: &str) -> Option<String> {
+    let t = ligne.trim();
+    for (long, court) in [
+        ("both modified:", "UU"),
+        ("both added:", "AA"),
+        ("deleted by us:", "DU"),
+        ("deleted by them:", "UD"),
+        ("new file:", "A"),
+        ("modified:", "M"),
+        ("deleted:", "D"),
+        ("renamed:", "R"),
+        ("copied:", "C"),
+        ("typechange:", "T"),
+    ] {
+        if let Some(reste) = t.strip_prefix(long) {
+            let chemin = reste.trim();
+            if chemin.is_empty() {
+                return None;
+            }
+            return Some(format!("{court} {chemin}"));
+        }
+    }
+    None
+}
+
 fn filter_git_status(raw: &str) -> String {
     let mut kept = Vec::new();
     let mut skipped = 0usize;
@@ -2859,7 +2893,13 @@ fn filter_git_status(raw: &str) -> String {
             skipped += 1;
             continue;
         }
-        kept.push(line.to_string());
+        // Les en-têtes de section — « Changes not staged for commit: » — sont
+        // conservés : c'est eux qui disent si un fichier est indexé ou non, et
+        // ils sont peu nombreux. Seules les lignes de fichiers sont abrégées.
+        match abreger_ligne_git_status(line) {
+            Some(court) => kept.push(court),
+            None => kept.push(line.to_string()),
+        }
     }
 
     if kept.is_empty() {
@@ -8597,6 +8637,80 @@ expected = "error: bad\n"
                     .collect(),
             ),
         ]
+    }
+
+    #[test]
+    fn abreger_git_status_ne_perd_ni_etat_ni_chemin() {
+        // La seule chose qui rend cette abreviation acceptable : rien ne
+        // disparait. On verifie les deux moities — l'etat et le chemin — sur
+        // chaque forme que git peut produire.
+        for (long, attendu) in [
+            ("\tmodified:   src/a.rs", "M src/a.rs"),
+            ("\tnew file:   src/b.rs", "A src/b.rs"),
+            ("\tdeleted:    src/c.rs", "D src/c.rs"),
+            (
+                "\trenamed:    src/d.rs -> src/e.rs",
+                "R src/d.rs -> src/e.rs",
+            ),
+            ("\tcopied:     src/f.rs", "C src/f.rs"),
+            ("\ttypechange: src/g.rs", "T src/g.rs"),
+            ("\tboth modified:   src/h.rs", "UU src/h.rs"),
+            ("\tboth added:      src/i.rs", "AA src/i.rs"),
+            ("\tdeleted by us:   src/j.rs", "DU src/j.rs"),
+            ("\tdeleted by them: src/k.rs", "UD src/k.rs"),
+        ] {
+            let obtenu = abreger_ligne_git_status(long)
+                .unwrap_or_else(|| panic!("forme non reconnue : {long:?}"));
+            assert_eq!(obtenu, attendu);
+            // Le chemin survit entierement, y compris apres une fleche de
+            // renommage.
+            let chemin = long.trim().splitn(2, ':').nth(1).unwrap().trim();
+            assert!(
+                obtenu.ends_with(chemin),
+                "chemin perdu : {obtenu} ne finit pas par {chemin}"
+            );
+        }
+    }
+
+    #[test]
+    fn une_ligne_git_status_inconnue_est_gardee_entiere() {
+        // On ne devine pas : un etat qu'on ne sait pas nommer se garde tel quel
+        // plutot que d'etre abrege de travers.
+        for ligne in [
+            "On branch main",
+            "Changes not staged for commit:",
+            "\tune-forme-future:  src/z.rs",
+            "\tmodified:",
+            "",
+        ] {
+            assert!(
+                abreger_ligne_git_status(ligne).is_none(),
+                "ligne abregee a tort : {ligne:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn git_status_abrege_conserve_tous_les_chemins() {
+        // Propriete de bout en bout : chaque chemin present en entree est
+        // present en sortie. C'est ce qui autorise a compresser.
+        let brut = format!(
+            "On branch main\nChanges not staged for commit:\n  (use \"git add\" ...)\n{}",
+            (0..50)
+                .map(|n| format!("\tmodified:   src/chemin/tres/long/fichier{n}.rs\n"))
+                .collect::<String>()
+        );
+        let sortie = filter_git_status(&brut);
+        for n in 0..50 {
+            let chemin = format!("src/chemin/tres/long/fichier{n}.rs");
+            assert!(
+                sortie.contains(&chemin),
+                "chemin absent de la sortie : {chemin}"
+            );
+        }
+        // L'en-tete de section survit : c'est lui qui dit indexe ou non.
+        assert!(sortie.contains("Changes not staged for commit:"));
+        assert!(sortie.len() < brut.len());
     }
 
     #[test]
