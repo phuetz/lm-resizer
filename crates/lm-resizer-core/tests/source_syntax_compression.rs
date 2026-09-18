@@ -5,7 +5,11 @@ use lm_resizer_core::transforms::source_compressor::{SourceCompressor, SourceLan
 #[test]
 fn test_real_rust_file_measurements() {
     let source_path = "src/transforms/source_compressor.rs";
-    let full_path = format!("{}/crates/lm-resizer-core/{}", env!("CARGO_MANIFEST_DIR").trim_end_matches("/crates/lm-resizer-core"), source_path);
+    let full_path = format!(
+        "{}/crates/lm-resizer-core/{}",
+        env!("CARGO_MANIFEST_DIR").trim_end_matches("/crates/lm-resizer-core"),
+        source_path
+    );
     let original = std::fs::read_to_string(&full_path).unwrap_or_else(|_| {
         std::fs::read_to_string("src/transforms/source_compressor.rs")
             .expect("must read source_compressor.rs")
@@ -41,10 +45,27 @@ fn test_real_rust_file_measurements() {
 
     eprintln!("\n=== RUST REAL FILE MEASUREMENTS ===");
     eprintln!("File: {}", source_path);
-    eprintln!("Original lines: {}, Compressed lines: {}", original.lines().count(), res.compressed.lines().count());
-    eprintln!("Original bytes: {}, Compressed bytes: {} ({:.1}% reduction)", original.len(), res.compressed.len(), (1.0 - res.compressed.len() as f64 / original.len() as f64) * 100.0);
-    eprintln!("Original tokens: {}, Compressed tokens: {} ({:.1}% reduction)", orig_tokens, comp_tokens, (1.0 - token_ratio) * 100.0);
-    eprintln!("Omitted function bodies: {}, Omitted body lines: {}", res.omitted_functions, res.omitted_body_lines);
+    eprintln!(
+        "Original lines: {}, Compressed lines: {}",
+        original.lines().count(),
+        res.compressed.lines().count()
+    );
+    eprintln!(
+        "Original bytes: {}, Compressed bytes: {} ({:.1}% reduction)",
+        original.len(),
+        res.compressed.len(),
+        (1.0 - res.compressed.len() as f64 / original.len() as f64) * 100.0
+    );
+    eprintln!(
+        "Original tokens: {}, Compressed tokens: {} ({:.1}% reduction)",
+        orig_tokens,
+        comp_tokens,
+        (1.0 - token_ratio) * 100.0
+    );
+    eprintln!(
+        "Omitted function bodies: {}, Omitted body lines: {}",
+        res.omitted_functions, res.omitted_body_lines
+    );
     eprintln!("CCR Hash: {}", key);
 
     assert!(token_savings > 0);
@@ -173,11 +194,19 @@ export function authMiddleware(authMgr: AuthenticationManager) {
     assert!(res.ccr_key.is_some());
 
     // Verify preservation of signatures and types
-    assert!(res.compressed.contains("export interface AuthServiceConfig"));
+    assert!(res
+        .compressed
+        .contains("export interface AuthServiceConfig"));
     assert!(res.compressed.contains("export interface AuthResult"));
-    assert!(res.compressed.contains("export class AuthenticationManager"));
-    assert!(res.compressed.contains("public async authenticate(credentials: UserCredentials): Promise<AuthResult>"));
-    assert!(res.compressed.contains("export function authMiddleware(authMgr: AuthenticationManager)"));
+    assert!(res
+        .compressed
+        .contains("export class AuthenticationManager"));
+    assert!(res
+        .compressed
+        .contains("public async authenticate(credentials: UserCredentials): Promise<AuthResult>"));
+    assert!(res
+        .compressed
+        .contains("export function authMiddleware(authMgr: AuthenticationManager)"));
 
     let tokenizer = get_tokenizer("gpt-4o");
     let orig_tokens = tokenizer.count_text(original);
@@ -185,10 +214,27 @@ export function authMiddleware(authMgr: AuthenticationManager) {
     let token_ratio = (comp_tokens as f64) / (orig_tokens as f64);
 
     eprintln!("\n=== TYPESCRIPT REAL WORKLOAD MEASUREMENTS ===");
-    eprintln!("Original lines: {}, Compressed lines: {}", original.lines().count(), res.compressed.lines().count());
-    eprintln!("Original bytes: {}, Compressed bytes: {} ({:.1}% reduction)", original.len(), res.compressed.len(), (1.0 - res.compressed.len() as f64 / original.len() as f64) * 100.0);
-    eprintln!("Original tokens: {}, Compressed tokens: {} ({:.1}% reduction)", orig_tokens, comp_tokens, (1.0 - token_ratio) * 100.0);
-    eprintln!("Omitted function bodies: {}, Omitted body lines: {}", res.omitted_functions, res.omitted_body_lines);
+    eprintln!(
+        "Original lines: {}, Compressed lines: {}",
+        original.lines().count(),
+        res.compressed.lines().count()
+    );
+    eprintln!(
+        "Original bytes: {}, Compressed bytes: {} ({:.1}% reduction)",
+        original.len(),
+        res.compressed.len(),
+        (1.0 - res.compressed.len() as f64 / original.len() as f64) * 100.0
+    );
+    eprintln!(
+        "Original tokens: {}, Compressed tokens: {} ({:.1}% reduction)",
+        orig_tokens,
+        comp_tokens,
+        (1.0 - token_ratio) * 100.0
+    );
+    eprintln!(
+        "Omitted function bodies: {}, Omitted body lines: {}",
+        res.omitted_functions, res.omitted_body_lines
+    );
     eprintln!("CCR Hash: {}", res.ccr_key.unwrap());
 }
 
@@ -319,10 +365,16 @@ if __name__ == "__main__":
     assert!(res.compressed.contains("class EventRecord:"));
     assert!(res.compressed.contains("class IngestionPipeline:"));
     assert!(res.compressed.contains("def __init__(self, lake_path: str, batch_size: int = 1000, flush_interval_secs: float = 5.0):"));
-    assert!(res.compressed.contains("def push_event(self, raw_data: bytes) -> bool:"));
+    assert!(res
+        .compressed
+        .contains("def push_event(self, raw_data: bytes) -> bool:"));
     assert!(res.compressed.contains("def flush(self) -> int:"));
-    assert!(res.compressed.contains("def health_check(self) -> Dict[str, Any]:"));
-    assert!(res.compressed.contains("def run_standalone_worker(storage_dir: str) -> None:"));
+    assert!(res
+        .compressed
+        .contains("def health_check(self) -> Dict[str, Any]:"));
+    assert!(res
+        .compressed
+        .contains("def run_standalone_worker(storage_dir: str) -> None:"));
     assert!(res.compressed.contains("if __name__ == \"__main__\":"));
 
     let tokenizer = get_tokenizer("gpt-4o");
@@ -331,10 +383,27 @@ if __name__ == "__main__":
     let token_ratio = (comp_tokens as f64) / (orig_tokens as f64);
 
     eprintln!("\n=== PYTHON REAL WORKLOAD MEASUREMENTS ===");
-    eprintln!("Original lines: {}, Compressed lines: {}", original.lines().count(), res.compressed.lines().count());
-    eprintln!("Original bytes: {}, Compressed bytes: {} ({:.1}% reduction)", original.len(), res.compressed.len(), (1.0 - res.compressed.len() as f64 / original.len() as f64) * 100.0);
-    eprintln!("Original tokens: {}, Compressed tokens: {} ({:.1}% reduction)", orig_tokens, comp_tokens, (1.0 - token_ratio) * 100.0);
-    eprintln!("Omitted function bodies: {}, Omitted body lines: {}", res.omitted_functions, res.omitted_body_lines);
+    eprintln!(
+        "Original lines: {}, Compressed lines: {}",
+        original.lines().count(),
+        res.compressed.lines().count()
+    );
+    eprintln!(
+        "Original bytes: {}, Compressed bytes: {} ({:.1}% reduction)",
+        original.len(),
+        res.compressed.len(),
+        (1.0 - res.compressed.len() as f64 / original.len() as f64) * 100.0
+    );
+    eprintln!(
+        "Original tokens: {}, Compressed tokens: {} ({:.1}% reduction)",
+        orig_tokens,
+        comp_tokens,
+        (1.0 - token_ratio) * 100.0
+    );
+    eprintln!(
+        "Omitted function bodies: {}, Omitted body lines: {}",
+        res.omitted_functions, res.omitted_body_lines
+    );
     eprintln!("CCR Hash: {}", res.ccr_key.unwrap());
 }
 
@@ -353,7 +422,10 @@ fn test_all_required_edge_cases() {
 
     let ts_code = "export function add(a: number, b: number): number {\n    const sum = a + b;\n    return sum;\n}\n\nexport function sub(a: number, b: number): number {\n    return a - b;\n}\n";
     let ts_res = compressor.compress(ts_code);
-    assert!(ts_res.language == Some(SourceLanguage::TypeScript) || ts_res.language == Some(SourceLanguage::JavaScript));
+    assert!(
+        ts_res.language == Some(SourceLanguage::TypeScript)
+            || ts_res.language == Some(SourceLanguage::JavaScript)
+    );
 
     // 2. Syntactically invalid files (must gracefully fallback, no panic, no empty output)
     let invalid_rust = "pub fn unclosed_brace(x: u32) {\n    let y = x * 2;\n// missing brace";
@@ -376,7 +448,6 @@ fn test_all_required_edge_cases() {
     // 4. Empty file
     let empty_res = compressor.compress("");
     assert_eq!(empty_res.compressed, "");
-
 
     // 6. Verify banner contains Structure approximative when without Code Explorer
     assert!(rust_res.is_approximate);
@@ -466,10 +537,19 @@ pub fn calculate_hash(data: &[u8]) -> u64 {
 
     assert!(!res.is_approximate);
     assert_eq!(res.engine_used, "code-explorer");
-    assert!(res.compressed.contains("// [Structure syntaxique (Code Explorer):"));
+    assert!(res
+        .compressed
+        .contains("// [Structure syntaxique (Code Explorer):"));
     assert!(!res.compressed.contains("Structure approximative"));
-    assert!(res.compressed.contains("calculate_hash(data: &[u8]) -> u64"));
-    assert!(res.compressed.contains("/* ... [5 lines omitted: function body] ... */"));
+    assert!(res
+        .compressed
+        .contains("calculate_hash(data: &[u8]) -> u64"));
+    assert!(res
+        .compressed
+        .contains("/* ... [5 lines omitted: function body] ... */"));
     assert!(res.ccr_key.is_some());
-    assert_eq!(store.get(res.ccr_key.as_ref().unwrap()), Some(input.to_string()));
+    assert_eq!(
+        store.get(res.ccr_key.as_ref().unwrap()),
+        Some(input.to_string())
+    );
 }

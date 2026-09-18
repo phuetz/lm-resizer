@@ -69,8 +69,11 @@ fn ts_accolade_dans_un_gabarit() {
 fn aucune_panique_sur_entrees_hostiles() {
     let c = SourceCompressor::default();
     for src in [
-        "pub fn a() { \"", "def f(:\n  \"\"\"", "function x(){`${",
-        "fn a(){}\u{0}fn b(){}", "\u{feff}pub fn a() -> u32 { 1 }",
+        "pub fn a() { \"",
+        "def f(:\n  \"\"\"",
+        "function x(){`${",
+        "fn a(){}\u{0}fn b(){}",
+        "\u{feff}pub fn a() -> u32 { 1 }",
         &"pub fn a() { ".repeat(400),
     ] {
         let _ = c.compress(src);
@@ -139,7 +142,9 @@ fn ce_qui_est_retire_reste_recuperable() {
         RetentionAdvice::from_json(r#"{"ranges":[{"start_line":2,"end_line":5}]}"#).unwrap();
     let res = c.compress_with_advice(SOURCE, &advice, Some(&store));
     assert!(res.compressed.len() < SOURCE.len());
-    let cle = res.ccr_key.expect("une compression effective doit deposer une cle");
+    let cle = res
+        .ccr_key
+        .expect("une compression effective doit deposer une cle");
     assert_eq!(store.get(&cle).as_deref(), Some(SOURCE));
 }
 
@@ -147,10 +152,20 @@ fn ce_qui_est_retire_reste_recuperable() {
 fn code_explorer_n_est_qu_un_producteur_parmi_d_autres() {
     use lm_resizer_core::transforms::source_compressor::AstSymbol;
     let symboles = vec![
-        AstSymbol { name: "premiere".into(), label: "function".into(), start_line: 2, end_line: 5 },
+        AstSymbol {
+            name: "premiere".into(),
+            label: "function".into(),
+            start_line: 2,
+            end_line: 5,
+        },
         // Une plage absurde que le graphe pourrait produire : elle est écartée
         // sans faire tomber les autres.
-        AstSymbol { name: "bruit".into(), label: "function".into(), start_line: 9, end_line: 4 },
+        AstSymbol {
+            name: "bruit".into(),
+            label: "function".into(),
+            start_line: 9,
+            end_line: 4,
+        },
     ];
     let advice = advice_from_symbols(&symboles);
     assert_eq!(advice.advisor.as_deref(), Some("code-explorer"));

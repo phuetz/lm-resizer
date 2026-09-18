@@ -112,13 +112,19 @@ impl RetentionAdvice {
             consomme += lignes;
             retenus.push(plage);
         }
-        retenus.sort_by(|a, b| a.start_line.cmp(&b.start_line).then(a.end_line.cmp(&b.end_line)));
+        retenus.sort_by(|a, b| {
+            a.start_line
+                .cmp(&b.start_line)
+                .then(a.end_line.cmp(&b.end_line))
+        });
         retenus
     }
 
     /// Total number of distinct lines the advice protects.
     pub fn protected_line_count(&self, total_lines: usize) -> usize {
-        (1..=total_lines).filter(|line| self.protects(*line)).count()
+        (1..=total_lines)
+            .filter(|line| self.protects(*line))
+            .count()
     }
 }
 

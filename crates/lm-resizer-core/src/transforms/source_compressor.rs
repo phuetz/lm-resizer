@@ -8,11 +8,11 @@
 //! Falls back gracefully to conservative line-by-line comment/blank stripping
 //! if the language is unsupported or syntax analysis fails.
 
-use std::sync::LazyLock;
 use regex::Regex;
+use std::sync::LazyLock;
 
-use crate::transforms::retention_advice::{RetentionAdvice, RetentionRange};
 use crate::ccr::{compute_key, CcrStore};
+use crate::transforms::retention_advice::{RetentionAdvice, RetentionRange};
 
 /// Supported target languages for structural compression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -696,9 +696,12 @@ fn compress_with_ast_symbols(
         // Imports folding (> 3 lines)
         let is_import_start = match lang {
             SourceLanguage::Rust => trimmed.starts_with("use ") || trimmed.starts_with("pub use "),
-            SourceLanguage::Python => trimmed.starts_with("import ") || trimmed.starts_with("from "),
+            SourceLanguage::Python => {
+                trimmed.starts_with("import ") || trimmed.starts_with("from ")
+            }
             SourceLanguage::TypeScript | SourceLanguage::JavaScript => {
-                trimmed.starts_with("import ") || (trimmed.starts_with("const ") && trimmed.contains("= require("))
+                trimmed.starts_with("import ")
+                    || (trimmed.starts_with("const ") && trimmed.contains("= require("))
             }
         };
 
@@ -709,25 +712,50 @@ fn compress_with_ast_symbols(
                 let lt = lines[j].trim();
                 let is_import = match lang {
                     SourceLanguage::Rust => {
-                        lt.starts_with("use ") || lt.starts_with("pub use ") || (import_lines > 0 && (lt.starts_with('{') || lt.ends_with(';') || lt.starts_with("};")))
+                        lt.starts_with("use ")
+                            || lt.starts_with("pub use ")
+                            || (import_lines > 0
+                                && (lt.starts_with('{')
+                                    || lt.ends_with(';')
+                                    || lt.starts_with("};")))
                     }
                     SourceLanguage::Python => {
-                        lt.starts_with("import ") || lt.starts_with("from ") || (import_lines > 0 && (lt.starts_with('(') || lt.ends_with(')') || lt.ends_with(',')))
+                        lt.starts_with("import ")
+                            || lt.starts_with("from ")
+                            || (import_lines > 0
+                                && (lt.starts_with('(') || lt.ends_with(')') || lt.ends_with(',')))
                     }
                     SourceLanguage::TypeScript | SourceLanguage::JavaScript => {
-                        lt.starts_with("import ") || (lt.starts_with("const ") && lt.contains("= require(")) || (import_lines > 0 && (lt.starts_with('{') || lt.ends_with(';') || lt.starts_with("};")))
+                        lt.starts_with("import ")
+                            || (lt.starts_with("const ") && lt.contains("= require("))
+                            || (import_lines > 0
+                                && (lt.starts_with('{')
+                                    || lt.ends_with(';')
+                                    || lt.starts_with("};")))
                     }
                 };
                 if is_import {
                     import_lines += 1;
                     j += 1;
-                    if (lang != SourceLanguage::Python && lt.ends_with(';')) || (lang == SourceLanguage::Python && !lt.ends_with('\\') && !lt.starts_with('(')) {
+                    if (lang != SourceLanguage::Python && lt.ends_with(';'))
+                        || (lang == SourceLanguage::Python
+                            && !lt.ends_with('\\')
+                            && !lt.starts_with('('))
+                    {
                         if j < lines.len() {
                             let next_t = lines[j].trim();
                             let is_next_import = match lang {
-                                SourceLanguage::Rust => next_t.starts_with("use ") || next_t.starts_with("pub use "),
-                                SourceLanguage::Python => next_t.starts_with("import ") || next_t.starts_with("from "),
-                                SourceLanguage::TypeScript | SourceLanguage::JavaScript => next_t.starts_with("import ") || (next_t.starts_with("const ") && next_t.contains("= require(")),
+                                SourceLanguage::Rust => {
+                                    next_t.starts_with("use ") || next_t.starts_with("pub use ")
+                                }
+                                SourceLanguage::Python => {
+                                    next_t.starts_with("import ") || next_t.starts_with("from ")
+                                }
+                                SourceLanguage::TypeScript | SourceLanguage::JavaScript => {
+                                    next_t.starts_with("import ")
+                                        || (next_t.starts_with("const ")
+                                            && next_t.contains("= require("))
+                                }
                             };
                             if is_next_import {
                                 continue;
@@ -745,7 +773,9 @@ fn compress_with_ast_symbols(
                 output.push(lines[i + 1].to_string());
                 let omitted = import_lines - 2;
                 let comment = match lang {
-                    SourceLanguage::Python => format!("# ... [{} import lines omitted] ...", omitted),
+                    SourceLanguage::Python => {
+                        format!("# ... [{} import lines omitted] ...", omitted)
+                    }
                     _ => format!("// ... [{} import lines omitted] ...", omitted),
                 };
                 output.push(comment);
@@ -814,7 +844,11 @@ fn compress_with_ast_symbols(
                         if body_start < lines.len() {
                             let next_t = lines[body_start].trim();
                             if next_t.starts_with("\"\"\"") || next_t.starts_with("'''") {
-                                let quote = if next_t.starts_with("\"\"\"") { "\"\"\"" } else { "'''" };
+                                let quote = if next_t.starts_with("\"\"\"") {
+                                    "\"\"\""
+                                } else {
+                                    "'''"
+                                };
                                 output.push(lines[body_start].to_string());
                                 if !(next_t.len() > 3 && next_t[3..].contains(quote)) {
                                     body_start += 1;
@@ -892,7 +926,11 @@ fn build_structural_output(
         parts.push(format!(
             "{} function {}",
             res.omitted_functions,
-            if res.omitted_functions == 1 { "body" } else { "bodies" }
+            if res.omitted_functions == 1 {
+                "body"
+            } else {
+                "bodies"
+            }
         ));
     }
     if res.omitted_import_lines > 0 {
@@ -1065,7 +1103,9 @@ pub fn detect_language(input: &str) -> Option<SourceLanguage> {
             || trimmed.starts_with("elif ")
             || trimmed.starts_with("\"\"\"")
             || trimmed.starts_with("'''")
-            || (trimmed.starts_with('#') && !trimmed.starts_with("#!") && !trimmed.starts_with("#["))
+            || (trimmed.starts_with('#')
+                && !trimmed.starts_with("#!")
+                && !trimmed.starts_with("#["))
         {
             py_score += 2;
         }
@@ -1094,9 +1134,17 @@ pub fn detect_language(input: &str) -> Option<SourceLanguage> {
         return None;
     }
 
-    if rust_score == max_score && rust_score > py_score && rust_score > js_score && rust_score > ts_score {
+    if rust_score == max_score
+        && rust_score > py_score
+        && rust_score > js_score
+        && rust_score > ts_score
+    {
         Some(SourceLanguage::Rust)
-    } else if py_score == max_score && py_score > rust_score && py_score > js_score && py_score > ts_score {
+    } else if py_score == max_score
+        && py_score > rust_score
+        && py_score > js_score
+        && py_score > ts_score
+    {
         Some(SourceLanguage::Python)
     } else if ts_score > 0 && (ts_score >= js_score || (js_score == max_score && ts_score >= 2)) {
         Some(SourceLanguage::TypeScript)
@@ -1281,7 +1329,11 @@ fn compress_rust(input: &str) -> Option<InternalStructural> {
             let mut j = i;
             while j < lines.len() {
                 let lt = lines[j].trim();
-                if lt.starts_with("use ") || lt.starts_with("pub use ") || (import_lines > 0 && (lt.starts_with('{') || lt.ends_with(';') || lt.starts_with("};"))) {
+                if lt.starts_with("use ")
+                    || lt.starts_with("pub use ")
+                    || (import_lines > 0
+                        && (lt.starts_with('{') || lt.ends_with(';') || lt.starts_with("};")))
+                {
                     import_lines += 1;
                     j += 1;
                     // continue until semicolon ends the import
@@ -1313,15 +1365,25 @@ fn compress_rust(input: &str) -> Option<InternalStructural> {
         }
 
         // Keep doc comments & inner attributes verbatim
-        if trimmed.starts_with("///") || trimmed.starts_with("//!") || trimmed.starts_with("#[") || trimmed.starts_with("#![") {
+        if trimmed.starts_with("///")
+            || trimmed.starts_with("//!")
+            || trimmed.starts_with("#[")
+            || trimmed.starts_with("#![")
+        {
             output.push(line.to_string());
             i += 1;
             continue;
         }
 
         // Check if function definition starts here
-        if !trimmed.starts_with("type ") && !trimmed.starts_with("pub type ") && RUST_FN_RE.is_match(trimmed) {
-            let fn_indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+        if !trimmed.starts_with("type ")
+            && !trimmed.starts_with("pub type ")
+            && RUST_FN_RE.is_match(trimmed)
+        {
+            let fn_indent = line
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .collect::<String>();
             // Collect function signature lines until `{` or `;`
             let mut sig_lines = Vec::new();
             let mut has_body = false;
@@ -1387,7 +1449,10 @@ fn compress_rust(input: &str) -> Option<InternalStructural> {
             }
 
             if body_line_count > 0 {
-                output.push(format!("{}    /* ... [{} lines omitted: function body] ... */", fn_indent, body_line_count));
+                output.push(format!(
+                    "{}    /* ... [{} lines omitted: function body] ... */",
+                    fn_indent, body_line_count
+                ));
                 omitted_body_lines += body_line_count;
                 omitted_functions += 1;
             }
@@ -1402,7 +1467,10 @@ fn compress_rust(input: &str) -> Option<InternalStructural> {
         global_braces = (global_braces + net).max(0);
 
         // Discard non-doc full line comments to maximize compactness
-        if is_full_line_comment(trimmed) && !trimmed.starts_with("///") && !trimmed.starts_with("//!") {
+        if is_full_line_comment(trimmed)
+            && !trimmed.starts_with("///")
+            && !trimmed.starts_with("//!")
+        {
             i += 1;
             continue;
         }
@@ -1425,9 +1493,8 @@ fn compress_rust(input: &str) -> Option<InternalStructural> {
 
 // ─── Python Compression ────────────────────────────────────────────────
 
-static PY_FN_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^(\s*)(?:async\s+)?def\s+([A-Za-z0-9_]+)\s*\("#).unwrap()
-});
+static PY_FN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^(\s*)(?:async\s+)?def\s+([A-Za-z0-9_]+)\s*\("#).unwrap());
 
 fn compress_python(input: &str) -> Option<InternalStructural> {
     let lines: Vec<&str> = input.lines().collect();
@@ -1448,7 +1515,11 @@ fn compress_python(input: &str) -> Option<InternalStructural> {
             let mut import_lines = 0usize;
             while j < lines.len() {
                 let lt = lines[j].trim();
-                if lt.starts_with("import ") || lt.starts_with("from ") || (import_lines > 0 && (lt.starts_with('(') || lt.ends_with(')') || lt.ends_with(','))) {
+                if lt.starts_with("import ")
+                    || lt.starts_with("from ")
+                    || (import_lines > 0
+                        && (lt.starts_with('(') || lt.ends_with(')') || lt.ends_with(',')))
+                {
                     import_lines += 1;
                     j += 1;
                 } else {
@@ -1468,7 +1539,11 @@ fn compress_python(input: &str) -> Option<InternalStructural> {
 
         // 2. Module / Class docstring
         if trimmed.starts_with("\"\"\"") || trimmed.starts_with("'''") {
-            let quote = if trimmed.starts_with("\"\"\"") { "\"\"\"" } else { "'''" };
+            let quote = if trimmed.starts_with("\"\"\"") {
+                "\"\"\""
+            } else {
+                "'''"
+            };
             output.push(line.to_string());
             if trimmed.len() > 3 && trimmed[3..].contains(quote) {
                 // One-line docstring
@@ -1510,7 +1585,11 @@ fn compress_python(input: &str) -> Option<InternalStructural> {
             if sig_idx < lines.len() {
                 let next_t = lines[sig_idx].trim();
                 if next_t.starts_with("\"\"\"") || next_t.starts_with("'''") {
-                    let quote = if next_t.starts_with("\"\"\"") { "\"\"\"" } else { "'''" };
+                    let quote = if next_t.starts_with("\"\"\"") {
+                        "\"\"\""
+                    } else {
+                        "'''"
+                    };
                     output.push(lines[sig_idx].to_string());
                     if !(next_t.len() > 3 && next_t[3..].contains(quote)) {
                         sig_idx += 1;
@@ -1549,7 +1628,10 @@ fn compress_python(input: &str) -> Option<InternalStructural> {
             }
 
             if body_lines > 0 {
-                output.push(format!("{}    # ... [{} lines omitted: function body] ...", indent, body_lines));
+                output.push(format!(
+                    "{}    # ... [{} lines omitted: function body] ...",
+                    indent, body_lines
+                ));
                 output.push(format!("{}    ...", indent));
                 omitted_body_lines += body_lines;
                 omitted_functions += 1;
@@ -1562,7 +1644,10 @@ fn compress_python(input: &str) -> Option<InternalStructural> {
         // 4. `if __name__ == "__main__":` entrypoint
         if trimmed.starts_with("if __name__ ==") && trimmed.ends_with(':') {
             output.push(line.to_string());
-            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            let indent = line
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .collect::<String>();
             let indent_len = indent.len();
             let mut main_idx = i + 1;
             let mut main_lines = 0usize;
@@ -1583,7 +1668,10 @@ fn compress_python(input: &str) -> Option<InternalStructural> {
             }
 
             if main_lines > 2 {
-                output.push(format!("{}    # ... [{} lines omitted: main execution block] ...", indent, main_lines));
+                output.push(format!(
+                    "{}    # ... [{} lines omitted: main execution block] ...",
+                    indent, main_lines
+                ));
                 output.push(format!("{}    ...", indent));
                 omitted_body_lines += main_lines;
                 omitted_functions += 1;
@@ -1607,7 +1695,8 @@ fn compress_python(input: &str) -> Option<InternalStructural> {
 // ─── TypeScript / JavaScript Compression ───────────────────────────────
 
 static JS_FN_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^(?:export\s+)?(?:default\s+)?(?:async\s+)?function(?:\s+[A-Za-z0-9_$]+|\s*\()"#).unwrap()
+    Regex::new(r#"^(?:export\s+)?(?:default\s+)?(?:async\s+)?function(?:\s+[A-Za-z0-9_$]+|\s*\()"#)
+        .unwrap()
 });
 static JS_METHOD_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^\s*(?:public\s+|private\s+|protected\s+|static\s+|async\s+|get\s+|set\s+)*(?:constructor|[A-Za-z0-9_$]+)\s*\([^)]*\)\s*(?::\s*[^{]+)?\{"#).unwrap()
@@ -1643,7 +1732,10 @@ fn scan_js_tokens(line: &str, state: &mut JsLexState) -> (isize, bool) {
                     continue;
                 }
                 if bytes[i] == b'"' || bytes[i] == b'\'' {
-                    *state = JsLexState::InString { quote: bytes[i], escaped: false };
+                    *state = JsLexState::InString {
+                        quote: bytes[i],
+                        escaped: false,
+                    };
                     i += 1;
                     continue;
                 }
@@ -1668,7 +1760,10 @@ fn scan_js_tokens(line: &str, state: &mut JsLexState) -> (isize, bool) {
                     i += 1;
                 }
             }
-            JsLexState::InString { quote, ref mut escaped } => {
+            JsLexState::InString {
+                quote,
+                ref mut escaped,
+            } => {
                 if *escaped {
                     *escaped = false;
                     i += 1;
@@ -1718,18 +1813,27 @@ fn compress_ts_js(input: &str, _is_ts: bool) -> Option<InternalStructural> {
         let trimmed = line.trim();
 
         // 1. Imports block
-        if global_braces == 0 && (trimmed.starts_with("import ") || (trimmed.starts_with("const ") && trimmed.contains("= require("))) {
+        if global_braces == 0
+            && (trimmed.starts_with("import ")
+                || (trimmed.starts_with("const ") && trimmed.contains("= require(")))
+        {
             let mut j = i;
             let mut import_lines = 0usize;
             while j < lines.len() {
                 let lt = lines[j].trim();
-                if lt.starts_with("import ") || (lt.starts_with("const ") && lt.contains("= require(")) || (import_lines > 0 && (lt.starts_with('{') || lt.ends_with(';') || lt.starts_with("};"))) {
+                if lt.starts_with("import ")
+                    || (lt.starts_with("const ") && lt.contains("= require("))
+                    || (import_lines > 0
+                        && (lt.starts_with('{') || lt.ends_with(';') || lt.starts_with("};")))
+                {
                     import_lines += 1;
                     j += 1;
                     if lt.ends_with(';') {
                         if j < lines.len() {
                             let next_t = lines[j].trim();
-                            if next_t.starts_with("import ") || (next_t.starts_with("const ") && next_t.contains("= require(")) {
+                            if next_t.starts_with("import ")
+                                || (next_t.starts_with("const ") && next_t.contains("= require("))
+                            {
                                 continue;
                             }
                         }
@@ -1787,9 +1891,14 @@ fn compress_ts_js(input: &str, _is_ts: bool) -> Option<InternalStructural> {
         }
 
         // 4. Function or method definitions
-        let is_fn = JS_FN_RE.is_match(trimmed) || JS_ARROW_RE.is_match(trimmed) || (global_braces > 0 && JS_METHOD_RE.is_match(trimmed));
+        let is_fn = JS_FN_RE.is_match(trimmed)
+            || JS_ARROW_RE.is_match(trimmed)
+            || (global_braces > 0 && JS_METHOD_RE.is_match(trimmed));
         if is_fn {
-            let fn_indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            let fn_indent = line
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .collect::<String>();
             let mut sig_lines = Vec::new();
             let mut has_body = false;
             let mut sig_idx = i;
@@ -1851,7 +1960,10 @@ fn compress_ts_js(input: &str, _is_ts: bool) -> Option<InternalStructural> {
             }
 
             if body_line_count > 0 {
-                output.push(format!("{}    /* ... [{} lines omitted: function body] ... */", fn_indent, body_line_count));
+                output.push(format!(
+                    "{}    /* ... [{} lines omitted: function body] ... */",
+                    fn_indent, body_line_count
+                ));
                 omitted_body_lines += body_line_count;
                 omitted_functions += 1;
             }
@@ -1865,7 +1977,8 @@ fn compress_ts_js(input: &str, _is_ts: bool) -> Option<InternalStructural> {
         let (net, _) = scan_js_tokens(line, &mut lex_state);
         global_braces = (global_braces + net).max(0);
 
-        if is_full_line_comment(trimmed) && !trimmed.starts_with("/**") && !trimmed.starts_with('*') {
+        if is_full_line_comment(trimmed) && !trimmed.starts_with("/**") && !trimmed.starts_with('*')
+        {
             i += 1;
             continue;
         }
@@ -1980,7 +2093,9 @@ impl Config {
         assert_eq!(result.engine_used, "embedded-regex-braces");
         assert!(result.compressed.contains("Structure approximative"));
         assert!(result.compressed.contains("Retrieve full source: hash="));
-        assert!(result.compressed.contains("calculate_score(items: &[u32], multiplier: u32) -> u64"));
+        assert!(result
+            .compressed
+            .contains("calculate_score(items: &[u32], multiplier: u32) -> u64"));
         assert!(result.compressed.contains("Calculate something important."));
         assert!(result.compressed.contains("pub struct Config"));
         assert!(result.compressed.contains("pub fn new(name: &str) -> Self"));
@@ -2028,8 +2143,12 @@ if __name__ == "__main__":
         assert!(result.is_approximate);
         assert_eq!(result.engine_used, "embedded-regex-braces");
         assert!(result.compressed.contains("Structure approximative"));
-        assert!(result.compressed.contains("def __init__(self, db_url: str):"));
-        assert!(result.compressed.contains("def get_user(self, user_id: int) -> Optional[dict]:"));
+        assert!(result
+            .compressed
+            .contains("def __init__(self, db_url: str):"));
+        assert!(result
+            .compressed
+            .contains("def get_user(self, user_id: int) -> Optional[dict]:"));
         assert!(result.compressed.contains("Initialize database."));
         assert!(result.compressed.contains("Fetch user by id."));
         assert!(result.compressed.contains("if __name__ == \"__main__\":"));
@@ -2080,7 +2199,9 @@ export class ApiClient {
         assert!(result.compressed.contains("Structure approximative"));
         assert!(result.compressed.contains("export interface ClientOptions"));
         assert!(result.compressed.contains("export class ApiClient"));
-        assert!(result.compressed.contains("public async fetchUser(id: string): Promise<User>"));
+        assert!(result
+            .compressed
+            .contains("public async fetchUser(id: string): Promise<User>"));
         assert!(result.compressed.contains("Send authenticated request."));
     }
 
@@ -2111,8 +2232,12 @@ module.exports = { loadConfiguration, formatResponse };
         assert!(result.omitted_body_lines > 0);
         assert!(result.is_approximate);
         assert!(result.compressed.contains("Structure approximative"));
-        assert!(result.compressed.contains("function loadConfiguration(filePath)"));
-        assert!(result.compressed.contains("formatResponse = (code, message) =>"));
+        assert!(result
+            .compressed
+            .contains("function loadConfiguration(filePath)"));
+        assert!(result
+            .compressed
+            .contains("formatResponse = (code, message) =>"));
     }
 
     #[test]
@@ -2207,7 +2332,8 @@ pub fn cancel_job(id: u64) {
 
     #[test]
     fn code_explorer_disabled_mode_guarantees_embedded_fallback() {
-        let compressor = SourceCompressor::new(1, 4).with_code_explorer_mode(CodeExplorerMode::Disabled);
+        let compressor =
+            SourceCompressor::new(1, 4).with_code_explorer_mode(CodeExplorerMode::Disabled);
         let input = r#"
 def calculate_vat(price: float) -> float:
     vat_rate = 0.20
@@ -2257,15 +2383,25 @@ pub fn validate_order(id: u64) -> bool {
         ];
 
         let compressor = SourceCompressor::default();
-        let result = compressor.compress_with_symbols(input, SourceLanguage::Rust, &symbols, None).unwrap();
+        let result = compressor
+            .compress_with_symbols(input, SourceLanguage::Rust, &symbols, None)
+            .unwrap();
 
         assert!(!result.is_approximate);
         assert_eq!(result.engine_used, "code-explorer");
-        assert!(result.compressed.contains("// [Structure syntaxique (Code Explorer):"));
+        assert!(result
+            .compressed
+            .contains("// [Structure syntaxique (Code Explorer):"));
         assert!(!result.compressed.contains("Structure approximative"));
-        assert!(result.compressed.contains("process_order(id: u64) -> Result<(), String>"));
-        assert!(result.compressed.contains("/* ... [4 lines omitted: function body] ... */"));
-        assert!(result.compressed.contains("validate_order(id: u64) -> bool"));
+        assert!(result
+            .compressed
+            .contains("process_order(id: u64) -> Result<(), String>"));
+        assert!(result
+            .compressed
+            .contains("/* ... [4 lines omitted: function body] ... */"));
+        assert!(result
+            .compressed
+            .contains("validate_order(id: u64) -> bool"));
         assert!(result.omitted_body_lines >= 4);
         assert!(result.omitted_import_lines >= 2);
     }
@@ -2303,15 +2439,23 @@ def simple_helper():
         ];
 
         let compressor = SourceCompressor::default();
-        let result = compressor.compress_with_symbols(input, SourceLanguage::Python, &symbols, None).unwrap();
+        let result = compressor
+            .compress_with_symbols(input, SourceLanguage::Python, &symbols, None)
+            .unwrap();
 
         assert!(!result.is_approximate);
         assert_eq!(result.engine_used, "code-explorer");
-        assert!(result.compressed.contains("# [Structure syntaxique (Code Explorer):"));
+        assert!(result
+            .compressed
+            .contains("# [Structure syntaxique (Code Explorer):"));
         assert!(!result.compressed.contains("Structure approximative"));
-        assert!(result.compressed.contains("def complex_algorithm(data: list) -> int:"));
+        assert!(result
+            .compressed
+            .contains("def complex_algorithm(data: list) -> int:"));
         assert!(result.compressed.contains("Compute something with math."));
-        assert!(result.compressed.contains("# ... [4 lines omitted: function body] ..."));
+        assert!(result
+            .compressed
+            .contains("# ... [4 lines omitted: function body] ..."));
     }
 
     #[test]
@@ -2345,19 +2489,28 @@ export class DataService {
         ];
 
         let compressor = SourceCompressor::default();
-        let result = compressor.compress_with_symbols(input, SourceLanguage::TypeScript, &symbols, None).unwrap();
+        let result = compressor
+            .compress_with_symbols(input, SourceLanguage::TypeScript, &symbols, None)
+            .unwrap();
 
         assert!(!result.is_approximate);
         assert_eq!(result.engine_used, "code-explorer");
-        assert!(result.compressed.contains("// [Structure syntaxique (Code Explorer):"));
+        assert!(result
+            .compressed
+            .contains("// [Structure syntaxique (Code Explorer):"));
         assert!(result.compressed.contains("export class DataService"));
-        assert!(result.compressed.contains("public async fetchData(id: string): Promise<Record<string, any>>"));
-        assert!(result.compressed.contains("/* ... [3 lines omitted: function body] ... */"));
+        assert!(result
+            .compressed
+            .contains("public async fetchData(id: string): Promise<Record<string, any>>"));
+        assert!(result
+            .compressed
+            .contains("/* ... [3 lines omitted: function body] ... */"));
     }
 
     #[test]
     fn code_explorer_query_fallback_on_invalid_binary() {
-        let compressor = SourceCompressor::new(1, 4).with_custom_bin("/nonexistent/code-explorer-fake-bin");
+        let compressor =
+            SourceCompressor::new(1, 4).with_custom_bin("/nonexistent/code-explorer-fake-bin");
         let input = r#"
 pub fn add(a: i32, b: i32) -> i32 {
     let mut sum = a;
