@@ -49,6 +49,19 @@ pub fn process_agent_line(line: &str, pending: &Mutex<HashMap<Value, PendingRequ
     let Ok(req) = serde_json::from_str::<Value>(trimmed) else {
         return;
     };
+    // Une requête annulée n'aura jamais de réponse.
+    //
+    // Sans cela son entrée resterait dans la table pour toute la vie du proxy.
+    // Sur un agent qui annule souvent — et ils annulent — la table ne fait que
+    // croître. C'est discret, cela ne casse rien tout de suite, et cela finit
+    // par coûter.
+    if req.get("method").and_then(Value::as_str) == Some("notifications/cancelled") {
+        if let Some(annule) = req.get("params").and_then(|p| p.get("requestId")) {
+            pending.lock().unwrap().remove(annule);
+        }
+        return;
+    }
+
     if let (Some(id), Some(method)) = (req.get("id"), req.get("method").and_then(Value::as_str)) {
         let query = extract_query_from_params(req.get("params"));
         let tool_name = req
@@ -144,6 +157,17 @@ pub fn compress_tool_call_result(
     let Some(result) = response.get_mut("result") else {
         return false;
     };
+    // Le texte d'une réponse en erreur EST le diagnostic.
+    //
+    // Un appel d'outil qui échoue rend `isError: true` et, dans son contenu, ce
+    // qui explique l'échec : message, trace, valeurs attendues. C'est
+    // exactement ce que l'agent doit lire mot pour mot pour corriger. Le
+    // raccourcir, c'est retirer la seule chose qui rendait la réponse utile —
+    // et sur un tour en erreur, l'agent va de toute façon relire.
+    if result.get("isError").and_then(Value::as_bool) == Some(true) {
+        return false;
+    }
+
     let Some(content) = result.get_mut("content").and_then(Value::as_array_mut) else {
         return false;
     };
@@ -607,6 +631,107 @@ mod tests {
     // Ces tests fixent cette propriété pour qu'on ne l'inverse pas un jour par
     // commodité.
     // ----------------------------------------------------------------
+
+    #[test]
+    fn le_texte_d_une_reponse_en_erreur_n_est_pas_compresse() {
+        // Le diagnostic est la charge utile. Le raccourcir retire la seule
+        // chose qui rendait la reponse utile.
+        let store = InMemoryCcrStore::new();
+        let pipeline = build_pipeline();
+        let pending = Mutex::new(HashMap::new());
+
+        let req = json!({"jsonrpc":"2.0","id":11,"method":"tools/call",
+                         "params":{"name":"un_outil","arguments":{}}})
+        .to_string();
+        process_agent_line(&req, &pending);
+
+        let trace = format!(
+            "Traceback complet\n{}",
+            "  at une::fonction::interne (fichier.rs:42)\n".repeat(400)
+        );
+        let resp = json!({
+            "jsonrpc":"2.0","id":11,
+            "result":{"isError": true, "content":[{"type":"text","text": trace}]}
+        })
+        .to_string();
+
+        assert_eq!(
+            process_upstream_line(&resp, &pending, &store, &pipeline),
+            ProcessOutcome::Unmodified,
+            "une reponse isError doit passer mot pour mot, aussi longue soit-elle"
+        );
+    }
+
+    #[test]
+    fn une_reponse_sans_erreur_reste_compressible() {
+        // La regle ne doit pas se retourner en pretexte pour ne rien faire.
+        let store = InMemoryCcrStore::new();
+        let pipeline = build_pipeline();
+        let pending = Mutex::new(HashMap::new());
+
+        let req = json!({"jsonrpc":"2.0","id":12,"method":"tools/call",
+                         "params":{"name":"un_outil","arguments":{}}})
+        .to_string();
+        process_agent_line(&req, &pending);
+
+        let resp = json!({
+            "jsonrpc":"2.0","id":12,
+            "result":{"isError": false,
+                      "content":[{"type":"text","text": generate_mock_large_text()}]}
+        })
+        .to_string();
+
+        assert!(
+            matches!(
+                process_upstream_line(&resp, &pending, &store, &pipeline),
+                ProcessOutcome::Modified(_)
+            ),
+            "une reponse normale volumineuse doit rester compressee"
+        );
+    }
+
+    #[test]
+    fn une_annulation_libere_la_requete_en_attente() {
+        // Une requete annulee n'aura jamais de reponse : son entree resterait
+        // dans la table pour toute la vie du proxy.
+        let pending = Mutex::new(HashMap::new());
+        let req = json!({"jsonrpc":"2.0","id":13,"method":"tools/call",
+                         "params":{"name":"un_outil","arguments":{}}})
+        .to_string();
+        process_agent_line(&req, &pending);
+        assert_eq!(pending.lock().unwrap().len(), 1);
+
+        let annulation = json!({"jsonrpc":"2.0","method":"notifications/cancelled",
+                                "params":{"requestId": 13, "reason":"l'agent a change d'avis"}})
+        .to_string();
+        process_agent_line(&annulation, &pending);
+        assert_eq!(
+            pending.lock().unwrap().len(),
+            0,
+            "l'entree annulee doit etre liberee"
+        );
+    }
+
+    #[test]
+    fn une_annulation_ne_libere_que_la_bonne_requete() {
+        let pending = Mutex::new(HashMap::new());
+        for id in [20, 21, 22] {
+            let req = json!({"jsonrpc":"2.0","id":id,"method":"tools/call",
+                             "params":{"name":"un_outil","arguments":{}}})
+            .to_string();
+            process_agent_line(&req, &pending);
+        }
+        let annulation = json!({"jsonrpc":"2.0","method":"notifications/cancelled",
+                                "params":{"requestId": 21}})
+        .to_string();
+        process_agent_line(&annulation, &pending);
+
+        let table = pending.lock().unwrap();
+        assert_eq!(table.len(), 2);
+        assert!(table.contains_key(&json!(20)));
+        assert!(!table.contains_key(&json!(21)));
+        assert!(table.contains_key(&json!(22)));
+    }
 
     #[test]
     fn une_reponse_sans_requete_connue_passe_intacte() {
