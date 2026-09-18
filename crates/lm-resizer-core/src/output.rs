@@ -365,6 +365,18 @@ fn append_concision_to_message(message: &mut Value) -> Result<bool, OutputShapin
     }
 }
 
+/// Whether we may add an `output_config` object that the caller did not send.
+///
+/// Off by default: see the comment in [`route_effort`]. Set
+/// `LM_RESIZER_ANTHROPIC_EFFORT=1` to opt in once the field has been confirmed
+/// against the target API.
+fn anthropic_effort_injection_allowed() -> bool {
+    matches!(
+        std::env::var("LM_RESIZER_ANTHROPIC_EFFORT").ok().as_deref(),
+        Some("1") | Some("true")
+    )
+}
+
 /// Route reasoning effort for the current turn.
 ///
 /// On routine turns, dials reasoning effort down to "low". On non-routine turns, leaves
@@ -392,12 +404,20 @@ pub fn route_effort(
             }
         }
         "anthropic" | "claude" => {
-            if classification == TurnClassification::Routine {
-                if let Some(cfg) = body.get_mut("output_config").and_then(Value::as_object_mut) {
-                    cfg.insert("effort".to_string(), serde_json::json!("low"));
-                } else {
-                    body["output_config"] = serde_json::json!({ "effort": "low" });
-                }
+            if classification != TurnClassification::Routine {
+                return Ok(false);
+            }
+            // Conservative by construction: we narrow a field the caller already
+            // sends, we do not invent one. An unknown top-level field makes the
+            // Anthropic API reject the whole request, which would break every
+            // routine turn rather than merely failing to save tokens. Inventing
+            // the field is therefore opt-in, for a caller who has checked it
+            // against the API they actually target.
+            if let Some(cfg) = body.get_mut("output_config").and_then(Value::as_object_mut) {
+                cfg.insert("effort".to_string(), serde_json::json!("low"));
+                Ok(true)
+            } else if anthropic_effort_injection_allowed() {
+                body["output_config"] = serde_json::json!({ "effort": "low" });
                 Ok(true)
             } else {
                 Ok(false)
@@ -534,7 +554,28 @@ mod tests {
     }
 
     #[test]
-    fn effort_routing_anthropic_routine() {
+    fn effort_routing_anthropic_narrows_a_field_the_caller_already_sends() {
+        let mut body_claude = json!({
+            "model": "claude-3-7-sonnet-20250219",
+            "messages": [{"role": "user", "content": "status"}],
+            "output_config": {"max_tokens": 1024}
+        });
+
+        let routed = route_effort(
+            "anthropic",
+            "/v1/messages",
+            &mut body_claude,
+            TurnClassification::Routine,
+        )
+        .unwrap();
+        assert!(routed);
+        assert_eq!(body_claude["output_config"]["effort"], "low");
+        // the caller's own keys survive
+        assert_eq!(body_claude["output_config"]["max_tokens"], 1024);
+    }
+
+    #[test]
+    fn effort_routing_anthropic_does_not_invent_the_field_by_default() {
         let mut body_claude = json!({
             "model": "claude-3-7-sonnet-20250219",
             "messages": [{"role": "user", "content": "status"}]
@@ -547,8 +588,9 @@ mod tests {
             TurnClassification::Routine,
         )
         .unwrap();
-        assert!(routed);
-        assert_eq!(body_claude["output_config"]["effort"], "low");
+        // Not saving tokens is acceptable; making the API reject the request is not.
+        assert!(!routed);
+        assert!(body_claude.get("output_config").is_none());
     }
 
     #[test]

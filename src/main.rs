@@ -1176,12 +1176,16 @@ async fn main() -> Result<()> {
                     "estimated_cost_saved_usd": input_cost_saved,
                 },
                 "output_savings": {
+            "basis": "hypothesis",
+                    "basis": "hypothesis",
                     "estimated_tokens_saved": output_tokens_saved,
                     "estimated_cost_saved_usd": output_cost_saved,
                     "verbosity_turns": proxy_history.get("verbosity_turns").and_then(Value::as_u64).unwrap_or(0),
                     "effort_turns": proxy_history.get("effort_turns").and_then(Value::as_u64).unwrap_or(0),
                 },
                 "total_savings": {
+            "basis": "mixed: measured input + hypothetical output",
+                    "basis": "mixed: measured input + hypothetical output",
                     "estimated_tokens_saved": total_input_tokens + output_tokens_saved,
                     "estimated_cost_saved_usd": total_cost_saved,
                 }
@@ -3804,8 +3808,35 @@ fn summarize_exec_history() -> Result<Value> {
 
 const INPUT_TOKEN_COST_USD: f64 = 0.000003;
 const OUTPUT_TOKEN_COST_USD: f64 = 0.000015;
+// These two are HYPOTHESES, not measurements. The saving from steering is the
+// difference between the output the model produced and the output it would have
+// produced without steering — and the second term does not exist for a turn that
+// only ran once, so it cannot be measured here at any price.
+//
+// They are kept because an order of magnitude is more useful than nothing, they
+// are overridable, and every surface that displays a figure derived from them
+// must label it a hypothesis. Compression of the *input* is measured for real
+// (bytes in, bytes out) and must never be mixed into the same total silently.
+//
+// Grounding them means an A/B run on a real corpus: same turns, steering on and
+// off, real output-token counts from the provider's usage field.
 const ESTIMATED_TOKENS_SAVED_VERBOSITY: usize = 75;
 const ESTIMATED_TOKENS_SAVED_EFFORT: usize = 800;
+
+fn hypothese_verbosite() -> usize {
+    lire_hypothese("LM_RESIZER_HYP_VERBOSITY", ESTIMATED_TOKENS_SAVED_VERBOSITY)
+}
+
+fn hypothese_effort() -> usize {
+    lire_hypothese("LM_RESIZER_HYP_EFFORT", ESTIMATED_TOKENS_SAVED_EFFORT)
+}
+
+fn lire_hypothese(variable: &str, defaut: usize) -> usize {
+    std::env::var(variable)
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(defaut)
+}
 
 fn estimate_tokens_from_bytes(bytes: usize) -> usize {
     bytes / 4
@@ -4073,17 +4104,21 @@ fn format_stats_markdown(report: &Value) -> String {
         let v_turns = outp.get("verbosity_turns").and_then(Value::as_u64).unwrap_or(0);
         let e_turns = outp.get("effort_turns").and_then(Value::as_u64).unwrap_or(0);
         out.push_str("## Output Reduction\n\n");
-        out.push_str(&format!("- Verbosity turns steered: {v_turns}\n"));
-        out.push_str(&format!("- Effort turns routed: {e_turns}\n"));
-        out.push_str(&format!("- Estimated tokens saved: {out_tokens}\n"));
-        out.push_str(&format!("- Estimated cost saved: ${out_cost:.6}\n\n"));
+        out.push_str("> Hypothesis, not a measurement: the turns below really were\n");
+        out.push_str("> steered, but the tokens they saved are inferred from a fixed\n");
+        out.push_str("> per-turn assumption. Only an A/B run gives a real figure.\n\n");
+        out.push_str(&format!("- Verbosity turns steered (measured): {v_turns}\n"));
+        out.push_str(&format!("- Effort turns routed (measured): {e_turns}\n"));
+        out.push_str(&format!("- Tokens saved (hypothesis): {out_tokens}\n"));
+        out.push_str(&format!("- Cost saved (hypothesis): ${out_cost:.6}\n\n"));
 
         if let Some(tot) = report.get("total_savings") {
             let tot_tokens = tot.get("estimated_tokens_saved").and_then(Value::as_u64).unwrap_or(0);
             let tot_cost = tot.get("estimated_cost_saved_usd").and_then(Value::as_f64).unwrap_or(0.0);
             out.push_str("## Total Savings\n\n");
-            out.push_str(&format!("- Estimated total tokens saved: {tot_tokens}\n"));
-            out.push_str(&format!("- Estimated total cost saved: ${tot_cost:.6}\n\n"));
+            out.push_str("> Mixes a measured input figure with a hypothetical output one.\n\n");
+            out.push_str(&format!("- Total tokens saved (mixed): {tot_tokens}\n"));
+            out.push_str(&format!("- Total cost saved (mixed): ${tot_cost:.6}\n\n"));
         }
     }
     out.push_str(&format!(
@@ -6752,6 +6787,7 @@ h2{{margin-top:1.5rem;font-size:1.2rem;color:#334155}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}}
 .card{{background:white;border:1px solid #d4d4d4;border-radius:8px;padding:14px}}
 .metric{{font-size:1.7rem;font-weight:700}}
+.caveat{{background:#fffbeb;border-left:4px solid #d97706;padding:10px 14px;margin:8px 0 14px;color:#78350f;font-size:.9rem}}
 code{{background:#eef2f7;padding:2px 5px;border-radius:4px}}
 </style>
 </head>
@@ -6769,16 +6805,22 @@ code{{background:#eef2f7;padding:2px 5px;border-radius:4px}}
 <div class="card"><div>Est. cost saved</div><div class="metric">${in_cost_saved:.4}</div></div>
 </section>
 <h2>Output Reduction</h2>
+<p class="caveat">Hypothesis, not a measurement. The turn counts are real; the
+tokens and dollars come from a fixed per-turn assumption, because the output the
+model <em>would</em> have produced without steering does not exist to be counted.
+Override with <code>LM_RESIZER_HYP_VERBOSITY</code> and
+<code>LM_RESIZER_HYP_EFFORT</code>.</p>
 <section class="grid">
-<div class="card"><div>Verbosity turns</div><div class="metric">{v_turns}</div></div>
-<div class="card"><div>Effort turns</div><div class="metric">{e_turns}</div></div>
-<div class="card"><div>Output tokens saved</div><div class="metric">{out_tokens_saved}</div></div>
-<div class="card"><div>Est. cost saved</div><div class="metric">${out_cost_saved:.4}</div></div>
+<div class="card"><div>Verbosity turns (measured)</div><div class="metric">{v_turns}</div></div>
+<div class="card"><div>Effort turns (measured)</div><div class="metric">{e_turns}</div></div>
+<div class="card"><div>Output tokens saved (hypothesis)</div><div class="metric">{out_tokens_saved}</div></div>
+<div class="card"><div>Cost saved (hypothesis)</div><div class="metric">${out_cost_saved:.4}</div></div>
 </section>
 <h2>Total Savings</h2>
+<p class="caveat">Mixes a measured input figure with a hypothetical output one.</p>
 <section class="grid">
-<div class="card"><div>Total tokens saved</div><div class="metric">{total_tokens_saved}</div></div>
-<div class="card"><div>Total cost saved</div><div class="metric">${total_cost_saved:.4}</div></div>
+<div class="card"><div>Total tokens saved (mixed)</div><div class="metric">{total_tokens_saved}</div></div>
+<div class="card"><div>Total cost saved (mixed)</div><div class="metric">${total_cost_saved:.4}</div></div>
 </section>
 <p>JSON stats remain available at <code>/stats</code>.</p>
 </main>
@@ -6901,10 +6943,10 @@ async fn proxy_or_preview(
 
     let mut out_tokens = 0usize;
     if stats.verbosity_steering_applied {
-        out_tokens += ESTIMATED_TOKENS_SAVED_VERBOSITY;
+        out_tokens += hypothese_verbosite();
     }
     if stats.effort_routing_applied {
-        out_tokens += ESTIMATED_TOKENS_SAVED_EFFORT;
+        out_tokens += hypothese_effort();
     }
     stats.estimated_output_tokens_saved = out_tokens;
     stats.estimated_output_cost_saved = out_tokens as f64 * OUTPUT_TOKEN_COST_USD;
@@ -9925,12 +9967,15 @@ key = value
         let compression = &preview["compression"];
         assert_eq!(compression["turn_classification"], "routine");
         assert_eq!(compression["verbosity_steering_applied"], true);
-        assert_eq!(compression["effort_routing_applied"], true);
-        assert_eq!(compression["estimated_output_tokens_saved"], 875);
+        // No output_config in the incoming body, and the opt-in is off: we must
+        // not invent an Anthropic field the API may reject. Verbosity steering
+        // still applies, so only its hypothesis counts.
+        assert_eq!(compression["effort_routing_applied"], false);
+        assert_eq!(compression["estimated_output_tokens_saved"], 75);
         assert!(compression["estimated_output_cost_saved"].as_f64().unwrap() > 0.0);
 
         let req = &preview["request"];
-        assert_eq!(req["output_config"]["effort"], "low");
+        assert!(req.get("output_config").is_none());
         let content = req["messages"][0]["content"].as_str().unwrap();
         assert!(content.contains(CONCISION_PROMPT));
     }
@@ -10007,8 +10052,10 @@ key = value
         assert!(md.contains("## Input Compression"));
         assert!(md.contains("## Output Reduction"));
         assert!(md.contains("## Total Savings"));
-        assert!(md.contains("Estimated cost saved: $0.013125"));
-        assert!(md.contains("Estimated total cost saved: $0.013425"));
+        assert!(md.contains("Cost saved (hypothesis): $0.013125"));
+        assert!(md.contains("Total cost saved (mixed): $0.013425"));
+        // The reader must be told which half of this is measured.
+        assert!(md.contains("Hypothesis, not a measurement"));
     }
 
     fn cargo_package_version(path: &Path) -> String {
