@@ -24,6 +24,9 @@ use lm_resizer_core::transforms::{
     compress_openai_responses_live_zone, detect_content_type, AuthMode, CompressionContext,
     CompressionManifest, CompressionPipeline, LiveZoneOutcome,
 };
+use lm_resizer_core::{
+    classify_request_turn, route_effort, steer_verbosity, EffortRoutingError,
+};
 use rayon::prelude::*;
 use regex::{Regex, RegexSet};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -453,6 +456,12 @@ enum Commands {
         /// Enable local HTML dashboard at /dashboard.
         #[arg(long)]
         dashboard: bool,
+        /// Disable output verbosity steering (concision prompt in live zone).
+        #[arg(long, env = "LM_RESIZER_NO_VERBOSITY")]
+        no_verbosity: bool,
+        /// Disable reasoning effort routing on routine turns.
+        #[arg(long, env = "LM_RESIZER_NO_EFFORT_ROUTING")]
+        no_effort_routing: bool,
     },
     /// Start the local proxy, then launch an agent through it.
     Wrap {
@@ -479,6 +488,12 @@ enum Commands {
         /// Kill the wrapped agent after this many seconds. Omit for no timeout.
         #[arg(long)]
         timeout_sec: Option<u64>,
+        /// Disable output verbosity steering (concision prompt in live zone).
+        #[arg(long, env = "LM_RESIZER_NO_VERBOSITY")]
+        no_verbosity: bool,
+        /// Disable reasoning effort routing on routine turns.
+        #[arg(long, env = "LM_RESIZER_NO_EFFORT_ROUTING")]
+        no_effort_routing: bool,
     },
 }
 
@@ -952,6 +967,8 @@ struct AppState {
     provider: ProviderKind,
     client: Client,
     dashboard_enabled: bool,
+    verbosity_enabled: bool,
+    effort_routing_enabled: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -1115,12 +1132,59 @@ async fn main() -> Result<()> {
         Commands::Stats { store, markdown } => {
             let store = open_store(store)?;
             let exec_history = summarize_exec_history().unwrap_or_default();
+            let proxy_history = summarize_proxy_history().unwrap_or_default();
             let retrieval_feedback = summarize_retrieval_feedback().unwrap_or_default();
+
+            let exec_input_tokens = exec_history
+                .get("estimated_tokens_saved")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let proxy_input_tokens = proxy_history
+                .get("input_tokens_saved")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let total_input_tokens = exec_input_tokens + proxy_input_tokens;
+            let total_input_bytes = exec_history
+                .get("bytes_saved")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize
+                + proxy_history
+                    .get("input_bytes_saved")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+            let input_cost_saved = (total_input_tokens as f64) * INPUT_TOKEN_COST_USD;
+
+            let output_tokens_saved = proxy_history
+                .get("output_tokens_saved")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let output_cost_saved = proxy_history
+                .get("output_cost_saved")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            let total_cost_saved = input_cost_saved + output_cost_saved;
+
             let report = json!({
                 "entries": store.len(),
                 "empty": store.is_empty(),
                 "exec_history": exec_history,
+                "proxy_history": proxy_history,
                 "retrieval_feedback": retrieval_feedback,
+                "input_savings": {
+                    "bytes_saved": total_input_bytes,
+                    "estimated_tokens_saved": total_input_tokens,
+                    "estimated_cost_saved_usd": input_cost_saved,
+                },
+                "output_savings": {
+                    "estimated_tokens_saved": output_tokens_saved,
+                    "estimated_cost_saved_usd": output_cost_saved,
+                    "verbosity_turns": proxy_history.get("verbosity_turns").and_then(Value::as_u64).unwrap_or(0),
+                    "effort_turns": proxy_history.get("effort_turns").and_then(Value::as_u64).unwrap_or(0),
+                },
+                "total_savings": {
+                    "estimated_tokens_saved": total_input_tokens + output_tokens_saved,
+                    "estimated_cost_saved_usd": total_cost_saved,
+                }
             });
             if markdown {
                 print!("{}", format_stats_markdown(&report));
@@ -1530,7 +1594,21 @@ async fn main() -> Result<()> {
             provider,
             store,
             dashboard,
-        } => run_http(bind, upstream, api_key, provider.parse()?, store, dashboard).await?,
+            no_verbosity,
+            no_effort_routing,
+        } => {
+            run_http(
+                bind,
+                upstream,
+                api_key,
+                provider.parse()?,
+                store,
+                dashboard,
+                !no_verbosity,
+                !no_effort_routing,
+            )
+            .await?
+        }
         Commands::Wrap {
             agent,
             args,
@@ -1540,6 +1618,8 @@ async fn main() -> Result<()> {
             provider,
             store,
             timeout_sec,
+            no_verbosity,
+            no_effort_routing,
         } => {
             wrap_agent(
                 agent,
@@ -1550,6 +1630,8 @@ async fn main() -> Result<()> {
                 provider.parse()?,
                 store,
                 timeout_sec,
+                !no_verbosity,
+                !no_effort_routing,
             )
             .await?
         }
@@ -3720,6 +3802,135 @@ fn summarize_exec_history() -> Result<Value> {
     }))
 }
 
+const INPUT_TOKEN_COST_USD: f64 = 0.000003;
+const OUTPUT_TOKEN_COST_USD: f64 = 0.000015;
+const ESTIMATED_TOKENS_SAVED_VERBOSITY: usize = 75;
+const ESTIMATED_TOKENS_SAVED_EFFORT: usize = 800;
+
+fn estimate_tokens_from_bytes(bytes: usize) -> usize {
+    bytes / 4
+}
+
+fn record_proxy_history(
+    provider: &str,
+    path: &str,
+    stats: &ProxyCompressionStats,
+) -> Result<()> {
+    if std::env::var("LM_RESIZER_TRACKING").ok().as_deref() == Some("0") {
+        return Ok(());
+    }
+    let dir = default_state_dir()?;
+    std::fs::create_dir_all(&dir)?;
+    let history_path = dir.join("proxy-history.jsonl");
+    let record = json!({
+        "timestamp_unix": unix_timestamp(),
+        "provider": provider,
+        "path": path,
+        "input_bytes_saved": stats.bytes_saved,
+        "input_tokens_saved": stats.estimated_input_tokens_saved,
+        "input_cost_saved": stats.estimated_input_cost_saved,
+        "output_tokens_saved": stats.estimated_output_tokens_saved,
+        "output_cost_saved": stats.estimated_output_cost_saved,
+        "total_cost_saved": stats.estimated_total_cost_saved,
+        "verbosity_steering_applied": stats.verbosity_steering_applied,
+        "effort_routing_applied": stats.effort_routing_applied,
+        "turn_classification": stats.turn_classification,
+    });
+    let line = serde_json::to_string(&record)?;
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(history_path)?;
+    writeln!(file, "{line}")?;
+    Ok(())
+}
+
+fn summarize_proxy_history() -> Result<Value> {
+    let path = default_state_dir()?.join("proxy-history.jsonl");
+    if !path.exists() {
+        return Ok(json!({
+            "requests": 0,
+            "input_bytes_saved": 0,
+            "input_tokens_saved": 0,
+            "input_cost_saved": 0.0,
+            "output_tokens_saved": 0,
+            "output_cost_saved": 0.0,
+            "total_cost_saved": 0.0,
+            "verbosity_turns": 0,
+            "effort_turns": 0,
+        }));
+    }
+
+    let content = std::fs::read_to_string(path)?;
+    let mut requests = 0usize;
+    let mut input_bytes_saved = 0usize;
+    let mut input_tokens_saved = 0usize;
+    let mut input_cost_saved = 0.0f64;
+    let mut output_tokens_saved = 0usize;
+    let mut output_cost_saved = 0.0f64;
+    let mut total_cost_saved = 0.0f64;
+    let mut verbosity_turns = 0usize;
+    let mut effort_turns = 0usize;
+
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        requests += 1;
+        input_bytes_saved += record
+            .get("input_bytes_saved")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        input_tokens_saved += record
+            .get("input_tokens_saved")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        input_cost_saved += record
+            .get("input_cost_saved")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        output_tokens_saved += record
+            .get("output_tokens_saved")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        output_cost_saved += record
+            .get("output_cost_saved")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        total_cost_saved += record
+            .get("total_cost_saved")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        if record
+            .get("verbosity_steering_applied")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            verbosity_turns += 1;
+        }
+        if record
+            .get("effort_routing_applied")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            effort_turns += 1;
+        }
+    }
+
+    Ok(json!({
+        "requests": requests,
+        "input_bytes_saved": input_bytes_saved,
+        "input_tokens_saved": input_tokens_saved,
+        "input_cost_saved": input_cost_saved,
+        "output_tokens_saved": output_tokens_saved,
+        "output_cost_saved": output_cost_saved,
+        "total_cost_saved": total_cost_saved,
+        "verbosity_turns": verbosity_turns,
+        "effort_turns": effort_turns,
+    }))
+}
+
 fn record_retrieval_feedback(hash: &str, bytes: usize, source: &str) -> Result<()> {
     if std::env::var("LM_RESIZER_TRACKING").ok().as_deref() == Some("0") {
         return Ok(());
@@ -3847,6 +4058,34 @@ fn format_stats_markdown(report: &Value) -> String {
             .and_then(Value::as_u64)
             .unwrap_or(0)
     ));
+
+    if let (Some(inp), Some(outp)) = (report.get("input_savings"), report.get("output_savings")) {
+        let in_bytes = inp.get("bytes_saved").and_then(Value::as_u64).unwrap_or(0);
+        let in_tokens = inp.get("estimated_tokens_saved").and_then(Value::as_u64).unwrap_or(0);
+        let in_cost = inp.get("estimated_cost_saved_usd").and_then(Value::as_f64).unwrap_or(0.0);
+        out.push_str("## Input Compression\n\n");
+        out.push_str(&format!("- Bytes saved: {in_bytes}\n"));
+        out.push_str(&format!("- Estimated tokens saved: {in_tokens}\n"));
+        out.push_str(&format!("- Estimated cost saved: ${in_cost:.6}\n\n"));
+
+        let out_tokens = outp.get("estimated_tokens_saved").and_then(Value::as_u64).unwrap_or(0);
+        let out_cost = outp.get("estimated_cost_saved_usd").and_then(Value::as_f64).unwrap_or(0.0);
+        let v_turns = outp.get("verbosity_turns").and_then(Value::as_u64).unwrap_or(0);
+        let e_turns = outp.get("effort_turns").and_then(Value::as_u64).unwrap_or(0);
+        out.push_str("## Output Reduction\n\n");
+        out.push_str(&format!("- Verbosity turns steered: {v_turns}\n"));
+        out.push_str(&format!("- Effort turns routed: {e_turns}\n"));
+        out.push_str(&format!("- Estimated tokens saved: {out_tokens}\n"));
+        out.push_str(&format!("- Estimated cost saved: ${out_cost:.6}\n\n"));
+
+        if let Some(tot) = report.get("total_savings") {
+            let tot_tokens = tot.get("estimated_tokens_saved").and_then(Value::as_u64).unwrap_or(0);
+            let tot_cost = tot.get("estimated_cost_saved_usd").and_then(Value::as_f64).unwrap_or(0.0);
+            out.push_str("## Total Savings\n\n");
+            out.push_str(&format!("- Estimated total tokens saved: {tot_tokens}\n"));
+            out.push_str(&format!("- Estimated total cost saved: ${tot_cost:.6}\n\n"));
+        }
+    }
     out.push_str(&format!(
         "- CCR retrievals: {}\n",
         retrieval_feedback
@@ -6092,6 +6331,7 @@ fn codex_home_dir() -> Result<PathBuf> {
     Ok(home_dir()?.join(".codex"))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn wrap_agent(
     agent: String,
     args: Vec<String>,
@@ -6101,9 +6341,19 @@ async fn wrap_agent(
     provider: ProviderKind,
     store: Option<PathBuf>,
     timeout_sec: Option<u64>,
+    verbosity_enabled: bool,
+    effort_routing_enabled: bool,
 ) -> Result<()> {
     let proxy_url = format!("http://{bind}");
-    let mut proxy = spawn_proxy(bind, upstream, api_key, provider, store)?;
+    let mut proxy = spawn_proxy(
+        bind,
+        upstream,
+        api_key,
+        provider,
+        store,
+        verbosity_enabled,
+        effort_routing_enabled,
+    )?;
     if let Err(err) = wait_for_proxy(&proxy_url).await {
         let _ = proxy.kill();
         return Err(err);
@@ -6150,6 +6400,8 @@ fn spawn_proxy(
     api_key: Option<String>,
     provider: ProviderKind,
     store: Option<PathBuf>,
+    verbosity_enabled: bool,
+    effort_routing_enabled: bool,
 ) -> Result<Child> {
     let exe = std::env::current_exe().context("could not resolve current executable")?;
     let mut cmd = Command::new(exe);
@@ -6163,6 +6415,12 @@ fn spawn_proxy(
     cmd.arg("--provider").arg(provider_label(provider));
     if let Some(store) = store {
         cmd.arg("--store").arg(store);
+    }
+    if !verbosity_enabled {
+        cmd.arg("--no-verbosity");
+    }
+    if !effort_routing_enabled {
+        cmd.arg("--no-effort-routing");
     }
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::null());
@@ -6268,6 +6526,7 @@ fn command_extensions(command: &str) -> Vec<String> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_http(
     bind: SocketAddr,
     upstream: Option<String>,
@@ -6275,6 +6534,8 @@ async fn run_http(
     provider: ProviderKind,
     store: Option<PathBuf>,
     dashboard_enabled: bool,
+    verbosity_enabled: bool,
+    effort_routing_enabled: bool,
 ) -> Result<()> {
     let state = AppState {
         store_path: store.unwrap_or(default_store_path()?),
@@ -6283,6 +6544,8 @@ async fn run_http(
         provider,
         client: Client::new(),
         dashboard_enabled,
+        verbosity_enabled,
+        effort_routing_enabled,
     };
     let app = Router::new()
         .route("/health", get(|| async { Json(json!({"ok": true})) }))
@@ -6344,9 +6607,61 @@ async fn http_retrieve(
 
 async fn http_stats(State(state): State<Arc<AppState>>) -> Result<Json<Value>, HttpError> {
     let store = open_store(Some(state.store_path.clone()))?;
-    Ok(Json(
-        json!({ "entries": store.len(), "empty": store.is_empty() }),
-    ))
+    let exec_history = summarize_exec_history().unwrap_or_default();
+    let proxy_history = summarize_proxy_history().unwrap_or_default();
+    let retrieval_feedback = summarize_retrieval_feedback().unwrap_or_default();
+
+    let exec_input_tokens = exec_history
+        .get("estimated_tokens_saved")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let proxy_input_tokens = proxy_history
+        .get("input_tokens_saved")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let total_input_tokens = exec_input_tokens + proxy_input_tokens;
+    let total_input_bytes = exec_history
+        .get("bytes_saved")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize
+        + proxy_history
+            .get("input_bytes_saved")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+    let input_cost_saved = (total_input_tokens as f64) * INPUT_TOKEN_COST_USD;
+
+    let output_tokens_saved = proxy_history
+        .get("output_tokens_saved")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let output_cost_saved = proxy_history
+        .get("output_cost_saved")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let total_cost_saved = input_cost_saved + output_cost_saved;
+
+    Ok(Json(json!({
+        "entries": store.len(),
+        "empty": store.is_empty(),
+        "exec_history": exec_history,
+        "proxy_history": proxy_history,
+        "retrieval_feedback": retrieval_feedback,
+        "input_savings": {
+            "bytes_saved": total_input_bytes,
+            "estimated_tokens_saved": total_input_tokens,
+            "estimated_cost_saved_usd": input_cost_saved,
+        },
+        "output_savings": {
+            "estimated_tokens_saved": output_tokens_saved,
+            "estimated_cost_saved_usd": output_cost_saved,
+            "verbosity_turns": proxy_history.get("verbosity_turns").and_then(Value::as_u64).unwrap_or(0),
+            "effort_turns": proxy_history.get("effort_turns").and_then(Value::as_u64).unwrap_or(0),
+        },
+        "total_savings": {
+            "estimated_tokens_saved": total_input_tokens + output_tokens_saved,
+            "estimated_cost_saved_usd": total_cost_saved,
+        }
+    })))
 }
 
 async fn http_dashboard(State(state): State<Arc<AppState>>) -> Result<Response, HttpError> {
@@ -6358,7 +6673,8 @@ async fn http_dashboard(State(state): State<Arc<AppState>>) -> Result<Response, 
     }
     let store = open_store(Some(state.store_path.clone()))?;
     let exec_history = summarize_exec_history().unwrap_or_default();
-    let html = dashboard_html(store.len(), store.is_empty(), &exec_history);
+    let proxy_history = summarize_proxy_history().unwrap_or_default();
+    let html = dashboard_html(store.len(), store.is_empty(), &exec_history, &proxy_history);
     Response::builder()
         .status(axum::http::StatusCode::OK)
         .header(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
@@ -6366,19 +6682,62 @@ async fn http_dashboard(State(state): State<Arc<AppState>>) -> Result<Response, 
         .map_err(|err| HttpError(anyhow::anyhow!(err)))
 }
 
-fn dashboard_html(entries: usize, empty: bool, exec_history: &Value) -> String {
+fn dashboard_html(
+    entries: usize,
+    empty: bool,
+    exec_history: &Value,
+    proxy_history: &Value,
+) -> String {
     let commands = exec_history
         .get("commands")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let bytes_saved = exec_history
+    let exec_bytes_saved = exec_history
         .get("bytes_saved")
         .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let tokens_saved = exec_history
+        .unwrap_or(0) as usize;
+    let exec_tokens_saved = exec_history
         .get("estimated_tokens_saved")
         .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+
+    let proxy_in_bytes = proxy_history
+        .get("input_bytes_saved")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let proxy_in_tokens = proxy_history
+        .get("input_tokens_saved")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let in_cost_saved = proxy_history
+        .get("input_cost_saved")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+        + (exec_tokens_saved as f64 * INPUT_TOKEN_COST_USD);
+
+    let total_in_bytes = exec_bytes_saved + proxy_in_bytes;
+    let total_in_tokens = exec_tokens_saved + proxy_in_tokens;
+
+    let v_turns = proxy_history
+        .get("verbosity_turns")
+        .and_then(Value::as_u64)
         .unwrap_or(0);
+    let e_turns = proxy_history
+        .get("effort_turns")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let out_tokens_saved = proxy_history
+        .get("output_tokens_saved")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let out_cost_saved = proxy_history
+        .get("output_cost_saved")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+
+    let total_cost_saved = in_cost_saved + out_cost_saved;
+    let total_tokens_saved = total_in_tokens + out_tokens_saved;
+
     format!(
         r#"<!doctype html>
 <html lang="en">
@@ -6389,6 +6748,7 @@ fn dashboard_html(entries: usize, empty: bool, exec_history: &Value) -> String {
 <style>
 body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:2rem;line-height:1.4;color:#171717;background:#f8fafc}}
 main{{max-width:920px;margin:auto}}
+h2{{margin-top:1.5rem;font-size:1.2rem;color:#334155}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}}
 .card{{background:white;border:1px solid #d4d4d4;border-radius:8px;padding:14px}}
 .metric{{font-size:1.7rem;font-weight:700}}
@@ -6399,12 +6759,26 @@ code{{background:#eef2f7;padding:2px 5px;border-radius:4px}}
 <main>
 <h1>lm-resizer dashboard</h1>
 <p>Local opt-in dashboard. No background telemetry collector is enabled.</p>
+<h2>Input Compression</h2>
 <section class="grid">
 <div class="card"><div>CCR entries</div><div class="metric">{entries}</div></div>
 <div class="card"><div>Store empty</div><div class="metric">{empty}</div></div>
 <div class="card"><div>Exec commands</div><div class="metric">{commands}</div></div>
-<div class="card"><div>Bytes saved</div><div class="metric">{bytes_saved}</div></div>
-<div class="card"><div>Est. tokens saved</div><div class="metric">{tokens_saved}</div></div>
+<div class="card"><div>Bytes saved</div><div class="metric">{total_in_bytes}</div></div>
+<div class="card"><div>Est. tokens saved</div><div class="metric">{total_in_tokens}</div></div>
+<div class="card"><div>Est. cost saved</div><div class="metric">${in_cost_saved:.4}</div></div>
+</section>
+<h2>Output Reduction</h2>
+<section class="grid">
+<div class="card"><div>Verbosity turns</div><div class="metric">{v_turns}</div></div>
+<div class="card"><div>Effort turns</div><div class="metric">{e_turns}</div></div>
+<div class="card"><div>Output tokens saved</div><div class="metric">{out_tokens_saved}</div></div>
+<div class="card"><div>Est. cost saved</div><div class="metric">${out_cost_saved:.4}</div></div>
+</section>
+<h2>Total Savings</h2>
+<section class="grid">
+<div class="card"><div>Total tokens saved</div><div class="metric">{total_tokens_saved}</div></div>
+<div class="card"><div>Total cost saved</div><div class="metric">${total_cost_saved:.4}</div></div>
 </section>
 <p>JSON stats remain available at <code>/stats</code>.</p>
 </main>
@@ -6494,6 +6868,50 @@ async fn proxy_or_preview(
         compress_json_payload(&mut body, store.as_ref(), &pipeline, &mut stats)?;
     }
     stats.provider_cache_policy = provider_cache_policy(state.provider).to_string();
+
+    let provider_name = provider_label(state.provider);
+    let classification = classify_request_turn(provider_name, path, &body);
+    stats.turn_classification = Some(classification.as_str().to_string());
+
+    if state.verbosity_enabled {
+        match steer_verbosity(provider_name, path, &mut body, true) {
+            Ok(steered) => {
+                stats.verbosity_steering_applied = steered;
+            }
+            Err(err) => {
+                eprintln!("lm-resizer: verbosity steering skipped: {err}");
+            }
+        }
+    }
+
+    if state.effort_routing_enabled {
+        match route_effort(provider_name, path, &mut body, classification) {
+            Ok(routed) => {
+                stats.effort_routing_applied = routed;
+            }
+            Err(EffortRoutingError::UnsupportedProvider(p)) => {
+                eprintln!("lm-resizer: effort routing refused for unsupported provider '{p}'");
+            }
+        }
+    }
+
+    stats.estimated_input_tokens_saved = estimate_tokens_from_bytes(stats.bytes_saved);
+    stats.estimated_input_cost_saved =
+        stats.estimated_input_tokens_saved as f64 * INPUT_TOKEN_COST_USD;
+
+    let mut out_tokens = 0usize;
+    if stats.verbosity_steering_applied {
+        out_tokens += ESTIMATED_TOKENS_SAVED_VERBOSITY;
+    }
+    if stats.effort_routing_applied {
+        out_tokens += ESTIMATED_TOKENS_SAVED_EFFORT;
+    }
+    stats.estimated_output_tokens_saved = out_tokens;
+    stats.estimated_output_cost_saved = out_tokens as f64 * OUTPUT_TOKEN_COST_USD;
+    stats.estimated_total_cost_saved =
+        stats.estimated_input_cost_saved + stats.estimated_output_cost_saved;
+
+    let _ = record_proxy_history(provider_name, path, &stats);
 
     if let Some(upstream) = &state.upstream {
         let url = format!("{}{}", upstream.trim_end_matches('/'), path);
@@ -7515,7 +7933,7 @@ fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 struct ProxyCompressionStats {
     fields_seen: usize,
     fields_compressed: usize,
@@ -7524,6 +7942,22 @@ struct ProxyCompressionStats {
     bytes_saved: usize,
     cache_keys: Vec<String>,
     provider_cache_policy: String,
+    #[serde(default)]
+    estimated_input_tokens_saved: usize,
+    #[serde(default)]
+    estimated_input_cost_saved: f64,
+    #[serde(default)]
+    estimated_output_tokens_saved: usize,
+    #[serde(default)]
+    estimated_output_cost_saved: f64,
+    #[serde(default)]
+    estimated_total_cost_saved: f64,
+    #[serde(default)]
+    verbosity_steering_applied: bool,
+    #[serde(default)]
+    effort_routing_applied: bool,
+    #[serde(default)]
+    turn_classification: Option<String>,
 }
 
 fn provider_cache_policy(provider: ProviderKind) -> &'static str {
@@ -7703,6 +8137,7 @@ fn should_compress_json_string(key: &str) -> bool {
     )
 }
 
+#[derive(Debug)]
 struct HttpError(anyhow::Error);
 
 impl<E> From<E> for HttpError
@@ -7726,6 +8161,9 @@ impl axum::response::IntoResponse for HttpError {
 mod tests {
     use super::*;
     use lm_resizer_core::ccr::InMemoryCcrStore;
+    use lm_resizer_core::{
+        classify_turn, has_concision_instruction, TurnClassification, CONCISION_PROMPT,
+    };
 
     #[test]
     fn codex_config_replaces_existing_table() {
@@ -8894,11 +9332,25 @@ expected = "error: bad\n"
             2,
             false,
             &json!({"commands": 3, "bytes_saved": 120, "estimated_tokens_saved": 30}),
+            &json!({
+                "requests": 2,
+                "input_bytes_saved": 80,
+                "input_tokens_saved": 20,
+                "input_cost_saved": 0.00006,
+                "output_tokens_saved": 875,
+                "output_cost_saved": 0.013125,
+                "total_cost_saved": 0.013185,
+                "verbosity_turns": 1,
+                "effort_turns": 1,
+            }),
         );
         assert!(html.contains("lm-resizer dashboard"));
         assert!(html.contains(">2</div>"));
         assert!(html.contains(">3</div>"));
         assert!(html.contains("No background telemetry collector"));
+        assert!(html.contains("Input Compression"));
+        assert!(html.contains("Output Reduction"));
+        assert!(html.contains("Total Savings"));
     }
 
     #[test]
@@ -9293,6 +9745,270 @@ key = value
         assert_eq!(core_version, root_version);
         assert_eq!(wasm_version, root_version);
         assert_eq!(npm_version, root_version);
+    }
+
+    #[test]
+    fn test_verbosity_steering_idempotence() {
+        let mut body = json!({
+            "model": "claude-test",
+            "messages": [
+                { "role": "user", "content": "Please analyze this file." }
+            ]
+        });
+        let applied_first = steer_verbosity("anthropic", "/v1/messages", &mut body, true).unwrap();
+        assert!(applied_first);
+        assert!(has_concision_instruction(&body));
+
+        let body_after_first = body.clone();
+        let applied_second = steer_verbosity("anthropic", "/v1/messages", &mut body, true).unwrap();
+        assert!(!applied_second);
+        assert_eq!(body, body_after_first);
+    }
+
+    #[test]
+    fn test_verbosity_steering_deactivation_flag() {
+        let mut body = json!({
+            "model": "claude-test",
+            "messages": [
+                { "role": "user", "content": "Please analyze this file." }
+            ]
+        });
+        let applied = steer_verbosity("anthropic", "/v1/messages", &mut body, false).unwrap();
+        assert!(!applied);
+        assert!(!has_concision_instruction(&body));
+    }
+
+    #[test]
+    fn test_turn_classification_routine_vs_doubtful() {
+        // Routine: reading source code
+        let code = "fn compute(x: i32) -> i32 { x * 2 }";
+        assert_eq!(classify_turn(code, true), TurnClassification::Routine);
+
+        // Routine: passing test output with 0 failed
+        let test_pass = "test result: ok. 42 passed; 0 failed; 0 ignored";
+        assert_eq!(classify_turn(test_pass, true), TurnClassification::Routine);
+
+        // Routine: JSON data array
+        let json_arr = r#"[{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}]"#;
+        assert_eq!(classify_turn(json_arr, true), TurnClassification::Routine);
+
+        // Doubtful: direct user question
+        let question = "Why does this function return 0 instead of 42?";
+        assert_eq!(classify_turn(question, false), TurnClassification::NonRoutine);
+
+        // Doubtful: build error output
+        let error_out = "error[E0425]: cannot find value `x` in this scope\n  --> src/main.rs:10:5";
+        assert_eq!(classify_turn(error_out, true), TurnClassification::NonRoutine);
+
+        // Doubtful: plain text with question
+        let ambiguous = "Did the process exit correctly?";
+        assert_eq!(classify_turn(ambiguous, true), TurnClassification::NonRoutine);
+    }
+
+    #[test]
+    fn test_effort_routing_unsupported_providers_refused() {
+        let mut body = json!({
+            "messages": [{ "role": "user", "content": "echo hi" }]
+        });
+        let err_bedrock = route_effort("bedrock", "/model/anthropic.claude/invoke", &mut body, TurnClassification::Routine).unwrap_err();
+        assert_eq!(err_bedrock, EffortRoutingError::UnsupportedProvider("bedrock".to_string()));
+
+        let err_vertex = route_effort("vertex", "/v1/projects/p/locations/l/publishers/google/models/gemini:predict", &mut body, TurnClassification::Routine).unwrap_err();
+        assert_eq!(err_vertex, EffortRoutingError::UnsupportedProvider("vertex".to_string()));
+    }
+
+    #[test]
+    fn test_provider_cache_prefix_invariance_with_fixture() {
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/provider-cache/anthropic-messages.json");
+        let raw_fixture = std::fs::read_to_string(&fixture_path).expect("fixture must exist");
+        let fixture_template: Value = serde_json::from_str(&raw_fixture).expect("valid fixture JSON");
+
+        let mut body = json!({
+            "model": fixture_template["model"],
+            "messages": [
+                fixture_template["messages"][0].clone(),
+                {
+                    "role": "assistant",
+                    "content": "I received the data. How can I help?"
+                },
+                {
+                    "role": "user",
+                    "content": "What is the second item?"
+                }
+            ]
+        });
+
+        let frozen_count = compute_frozen_count(&body);
+        assert_eq!(frozen_count, 1, "First message has cache_control so frozen_count is 1");
+
+        let prefix_before_bytes = serde_json::to_vec(&body["messages"][0]).unwrap();
+        let mut hasher_before = Sha256::new();
+        hasher_before.update(&prefix_before_bytes);
+        let prefix_hash_before = format!("{:x}", hasher_before.finalize());
+
+        // 1. NAIVE APPROACH: prepending concision to message 0 or system breaks cache prefix
+        let mut naive_body = body.clone();
+        if let Some(content) = naive_body["messages"][0].get_mut("content") {
+            if let Some(arr) = content.as_array_mut() {
+                arr.insert(0, json!({ "type": "text", "text": CONCISION_PROMPT }));
+            }
+        }
+        let naive_prefix_bytes = serde_json::to_vec(&naive_body["messages"][0]).unwrap();
+        let mut naive_hasher = Sha256::new();
+        naive_hasher.update(&naive_prefix_bytes);
+        let naive_hash = format!("{:x}", naive_hasher.finalize());
+        assert_ne!(
+            naive_hash, prefix_hash_before,
+            "Naive steering mutates frozen prefix and breaks prompt cache"
+        );
+
+        // 2. LIVE-ZONE STEERING: strictly targets the live zone (index >= frozen_count)
+        let steered = steer_verbosity("anthropic", "/v1/messages", &mut body, true).unwrap();
+        assert!(steered, "Live-zone verbosity steering must succeed");
+
+        let prefix_after_bytes = serde_json::to_vec(&body["messages"][0]).unwrap();
+        let mut hasher_after = Sha256::new();
+        hasher_after.update(&prefix_after_bytes);
+        let prefix_hash_after = format!("{:x}", hasher_after.finalize());
+
+        assert_eq!(
+            prefix_before_bytes, prefix_after_bytes,
+            "Frozen prefix bytes must remain identical byte-for-byte"
+        );
+        assert_eq!(
+            prefix_hash_before, prefix_hash_after,
+            "Frozen prefix SHA-256 hash must be identical before and after steering"
+        );
+
+        let live_msg = &body["messages"][2];
+        let live_content = live_msg["content"].as_str().unwrap();
+        assert!(live_content.contains(CONCISION_PROMPT));
+    }
+
+    #[tokio::test]
+    async fn test_proxy_or_preview_output_shaping_in_preview() {
+        let store_path = std::env::temp_dir().join(format!(
+            "lmr-test-store-{}.sqlite3",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let state = Arc::new(AppState {
+            store_path,
+            upstream: None,
+            api_key: None,
+            provider: ProviderKind::Anthropic,
+            client: Client::new(),
+            dashboard_enabled: true,
+            verbosity_enabled: true,
+            effort_routing_enabled: true,
+        });
+
+        // Routine turn: JSON structured data
+        let body = json!({
+            "model": "claude-test",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "[{\"id\": 1, \"status\": \"ok\"}, {\"id\": 2, \"status\": \"ok\"}]"
+                }
+            ]
+        });
+
+        let resp = proxy_or_preview(state, "/v1/messages", body).await.unwrap();
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let preview: Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(preview["mode"], "preview");
+        let compression = &preview["compression"];
+        assert_eq!(compression["turn_classification"], "routine");
+        assert_eq!(compression["verbosity_steering_applied"], true);
+        assert_eq!(compression["effort_routing_applied"], true);
+        assert_eq!(compression["estimated_output_tokens_saved"], 875);
+        assert!(compression["estimated_output_cost_saved"].as_f64().unwrap() > 0.0);
+
+        let req = &preview["request"];
+        assert_eq!(req["output_config"]["effort"], "low");
+        let content = req["messages"][0]["content"].as_str().unwrap();
+        assert!(content.contains(CONCISION_PROMPT));
+    }
+
+    #[tokio::test]
+    async fn test_proxy_or_preview_flags_deactivated() {
+        let store_path = std::env::temp_dir().join(format!(
+            "lmr-test-store-deact-{}.sqlite3",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let state = Arc::new(AppState {
+            store_path,
+            upstream: None,
+            api_key: None,
+            provider: ProviderKind::Anthropic,
+            client: Client::new(),
+            dashboard_enabled: true,
+            verbosity_enabled: false,
+            effort_routing_enabled: false,
+        });
+
+        let body = json!({
+            "model": "claude-test",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "pub fn hello() -> &'static str { \"hello\" }"
+                }
+            ]
+        });
+
+        let resp = proxy_or_preview(state, "/v1/messages", body).await.unwrap();
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let preview: Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        let compression = &preview["compression"];
+        assert_eq!(compression["verbosity_steering_applied"], false);
+        assert_eq!(compression["effort_routing_applied"], false);
+        assert_eq!(compression["estimated_output_tokens_saved"], 0);
+
+        let req = &preview["request"];
+        assert!(req.get("output_config").is_none());
+        let content = req["messages"][0]["content"].as_str().unwrap();
+        assert!(!content.contains(CONCISION_PROMPT));
+    }
+
+    #[test]
+    fn test_format_stats_markdown_includes_output_and_costs() {
+        let report = json!({
+            "entries": 5,
+            "exec_history": { "commands": 2, "bytes_saved": 400, "estimated_tokens_saved": 100 },
+            "input_savings": {
+                "bytes_saved": 400,
+                "estimated_tokens_saved": 100,
+                "estimated_cost_saved_usd": 0.0003,
+            },
+            "output_savings": {
+                "estimated_tokens_saved": 875,
+                "estimated_cost_saved_usd": 0.013125,
+                "verbosity_turns": 1,
+                "effort_turns": 1,
+            },
+            "total_savings": {
+                "estimated_tokens_saved": 975,
+                "estimated_cost_saved_usd": 0.013425,
+            },
+            "retrieval_feedback": { "retrievals": 0 }
+        });
+
+        let md = format_stats_markdown(&report);
+        assert!(md.contains("## Input Compression"));
+        assert!(md.contains("## Output Reduction"));
+        assert!(md.contains("## Total Savings"));
+        assert!(md.contains("Estimated cost saved: $0.013125"));
+        assert!(md.contains("Estimated total cost saved: $0.013425"));
     }
 
     fn cargo_package_version(path: &Path) -> String {
