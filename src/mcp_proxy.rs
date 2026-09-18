@@ -234,7 +234,8 @@ pub fn write_raw_line<W: Write>(out: &mut W, line: &str) -> io::Result<()> {
 
 /// Helper to serialize and write JSON value.
 pub fn write_json_value<W: Write>(out: &mut W, val: &Value) -> io::Result<()> {
-    let mut bytes = serde_json::to_vec(val).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let mut bytes =
+        serde_json::to_vec(val).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     bytes.push(b'\n');
     out.write_all(&bytes)?;
     out.flush()
@@ -245,7 +246,9 @@ pub fn run_mcp_proxy(command: Vec<String>, store_path: Option<PathBuf>) -> Resul
     if command.is_empty() {
         anyhow::bail!("missing command for mcp-proxy");
     }
-    let (program, args) = command.split_first().context("missing command for mcp-proxy")?;
+    let (program, args) = command
+        .split_first()
+        .context("missing command for mcp-proxy")?;
     let resolved_program = resolve_command_path(program).unwrap_or_else(|| PathBuf::from(program));
     let store = open_store(store_path)?;
     let pipeline = build_pipeline();
@@ -259,12 +262,21 @@ pub fn run_mcp_proxy(command: Vec<String>, store_path: Option<PathBuf>) -> Resul
     {
         Ok(c) => c,
         Err(err) => {
-            anyhow::bail!("failed to start upstream MCP server '{}': {err}", command.join(" "));
+            anyhow::bail!(
+                "failed to start upstream MCP server '{}': {err}",
+                command.join(" ")
+            );
         }
     };
 
-    let mut child_in = child.stdin.take().context("failed to capture child stdin")?;
-    let child_out = child.stdout.take().context("failed to capture child stdout")?;
+    let mut child_in = child
+        .stdin
+        .take()
+        .context("failed to capture child stdin")?;
+    let child_out = child
+        .stdout
+        .take()
+        .context("failed to capture child stdout")?;
 
     let pending: Arc<Mutex<HashMap<Value, PendingRequest>>> = Arc::new(Mutex::new(HashMap::new()));
     let pending_in = Arc::clone(&pending);
@@ -630,11 +642,13 @@ mod tests {
         let pending = Mutex::new(HashMap::new());
 
         let outils: Vec<Value> = (0..300)
-            .map(|n| json!({
-                "name": format!("outil_{n}"),
-                "description": "description deliberement longue ".repeat(20),
-                "inputSchema": {"type": "object"}
-            }))
+            .map(|n| {
+                json!({
+                    "name": format!("outil_{n}"),
+                    "description": "description deliberement longue ".repeat(20),
+                    "inputSchema": {"type": "object"}
+                })
+            })
             .collect();
         let resp = json!({"jsonrpc":"2.0","id":7,"result":{"tools": outils}}).to_string();
 
@@ -654,7 +668,8 @@ mod tests {
         let pending = Mutex::new(HashMap::new());
 
         let req = json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
-                         "params":{"name":"un_outil","arguments":{}}}).to_string();
+                         "params":{"name":"un_outil","arguments":{}}})
+        .to_string();
         process_agent_line(&req, &pending);
 
         let resp = json!({
@@ -678,7 +693,12 @@ mod tests {
         let pipeline = build_pipeline();
         let pending = Mutex::new(HashMap::new());
 
-        for ligne in ["{ ceci n'est pas du json", "null", "[]", "\u{feff}{\"a\":1}"] {
+        for ligne in [
+            "{ ceci n'est pas du json",
+            "null",
+            "[]",
+            "\u{feff}{\"a\":1}",
+        ] {
             let outcome = process_upstream_line(ligne, &pending, &store, &pipeline);
             assert!(
                 matches!(outcome, ProcessOutcome::Unmodified | ProcessOutcome::Ignore),
@@ -694,7 +714,8 @@ mod tests {
         let pending = Mutex::new(HashMap::new());
 
         let req = json!({"jsonrpc":"2.0","id":9,"method":"tools/call",
-                         "params":{"name":"un_outil","arguments":{}}}).to_string();
+                         "params":{"name":"un_outil","arguments":{}}})
+        .to_string();
         process_agent_line(&req, &pending);
 
         let resp = json!({
@@ -744,7 +765,8 @@ mod tests {
         let pipeline = build_pipeline();
         let pending = Mutex::new(HashMap::new());
 
-        let req = json!({"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{}}).to_string();
+        let req =
+            json!({"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{}}).to_string();
         process_agent_line(&req, &pending);
 
         let resp = json!({
@@ -803,7 +825,8 @@ mod tests {
             panic!("expected ProcessOutcome::Modified for large tool response");
         };
 
-        let parsed: Value = serde_json::from_str(&mod_str).expect("modified response must be valid JSON");
+        let parsed: Value =
+            serde_json::from_str(&mod_str).expect("modified response must be valid JSON");
         assert_eq!(parsed["id"], 42);
         assert_eq!(parsed["result"]["isError"], false);
 
@@ -831,7 +854,9 @@ mod tests {
 
         // Point 3: Full original must be recoverable from CCR store
         let hash = compute_key(original_text.as_bytes());
-        let retrieved = store.get(&hash).expect("original must be recoverable from CCR store");
+        let retrieved = store
+            .get(&hash)
+            .expect("original must be recoverable from CCR store");
         assert_eq!(retrieved, original_text);
     }
 
@@ -949,7 +974,8 @@ mod tests {
         // Agent sends 3 requests: req-A, req-B, req-C
         let req_a = json!({"jsonrpc":"2.0","id":"req-A","method":"tools/call","params":{"name":"large_tool"}}).to_string();
         let req_b = json!({"jsonrpc":"2.0","id":"req-B","method":"tools/call","params":{"name":"compact_tool"}}).to_string();
-        let req_c = json!({"jsonrpc":"2.0","id":"req-C","method":"tools/list","params":{}}).to_string();
+        let req_c =
+            json!({"jsonrpc":"2.0","id":"req-C","method":"tools/list","params":{}}).to_string();
 
         process_agent_line(&req_a, &pending);
         process_agent_line(&req_b, &pending);
@@ -1001,7 +1027,9 @@ mod tests {
         let pipeline = build_pipeline();
         let pending = Mutex::new(HashMap::new());
 
-        let req = json!({"jsonrpc":"2.0","id":999,"method":"tools/call","params":{"name":"err_tool"}}).to_string();
+        let req =
+            json!({"jsonrpc":"2.0","id":999,"method":"tools/call","params":{"name":"err_tool"}})
+                .to_string();
         process_agent_line(&req, &pending);
 
         let err_resp = json!({
@@ -1056,7 +1084,8 @@ mod tests {
         let mut reader = BufReader::new(stdout);
 
         // 1. Initialize succeeds
-        let init_req = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}).to_string();
+        let init_req =
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}).to_string();
         stdin.write_all(init_req.as_bytes()).unwrap();
         stdin.write_all(b"\n").unwrap();
         stdin.flush().unwrap();
@@ -1067,7 +1096,9 @@ mod tests {
         assert_eq!(parsed_init["id"], 1);
 
         // 2. tools/call causes upstream to die
-        let call_req = json!({"jsonrpc":"2.0","id":99,"method":"tools/call","params":{"name":"any"}}).to_string();
+        let call_req =
+            json!({"jsonrpc":"2.0","id":99,"method":"tools/call","params":{"name":"any"}})
+                .to_string();
         stdin.write_all(call_req.as_bytes()).unwrap();
         stdin.write_all(b"\n").unwrap();
         stdin.flush().unwrap();
@@ -1075,9 +1106,13 @@ mod tests {
         // Proxy must return a clean error with id=99 instead of hanging
         let mut call_res = String::new();
         reader.read_line(&mut call_res).unwrap();
-        let parsed_call: Value = serde_json::from_str(&call_res).expect("proxy must emit valid JSON error response");
+        let parsed_call: Value =
+            serde_json::from_str(&call_res).expect("proxy must emit valid JSON error response");
         assert_eq!(parsed_call["id"], 99);
-        assert!(parsed_call.get("error").is_some(), "response must have error field");
+        assert!(
+            parsed_call.get("error").is_some(),
+            "response must have error field"
+        );
         assert_eq!(parsed_call["error"]["code"], -32000);
 
         let status = proxy.wait().expect("proxy must exit without hanging");
@@ -1133,7 +1168,9 @@ mod tests {
         assert!(res1["result"]["tools"].as_array().unwrap().len() >= 4);
 
         // 2. large_tool compressed + CCR
-        let req2 = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"large_tool"}}).to_string();
+        let req2 =
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"large_tool"}})
+                .to_string();
         stdin.write_all(req2.as_bytes()).unwrap();
         stdin.write_all(b"\n").unwrap();
         stdin.flush().unwrap();
@@ -1147,7 +1184,9 @@ mod tests {
         assert!(text2.contains("[full output: <<ccr:"));
 
         // 3. compact_tool unchanged
-        let req3 = json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"compact_tool"}}).to_string();
+        let req3 =
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"compact_tool"}})
+                .to_string();
         stdin.write_all(req3.as_bytes()).unwrap();
         stdin.write_all(b"\n").unwrap();
         stdin.flush().unwrap();
@@ -1156,10 +1195,15 @@ mod tests {
         reader.read_line(&mut line3).unwrap();
         let res3: Value = serde_json::from_str(&line3).unwrap();
         assert_eq!(res3["id"], 3);
-        assert_eq!(res3["result"]["content"][0]["text"], "compact result below threshold");
+        assert_eq!(
+            res3["result"]["content"][0]["text"],
+            "compact result below threshold"
+        );
 
         // 4. image_tool unchanged
-        let req4 = json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"image_tool"}}).to_string();
+        let req4 =
+            json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"image_tool"}})
+                .to_string();
         stdin.write_all(req4.as_bytes()).unwrap();
         stdin.write_all(b"\n").unwrap();
         stdin.flush().unwrap();
@@ -1213,7 +1257,8 @@ mod tests {
 
         let req1 = json!({"jsonrpc":"2.0","id":"req-1","method":"tools/call","params":{"name":"large_tool"}}).to_string();
         let req2 = json!({"jsonrpc":"2.0","id":"req-2","method":"tools/call","params":{"name":"compact_tool"}}).to_string();
-        let req3 = json!({"jsonrpc":"2.0","id":"req-3","method":"tools/list","params":{}}).to_string();
+        let req3 =
+            json!({"jsonrpc":"2.0","id":"req-3","method":"tools/list","params":{}}).to_string();
 
         // Write all 3 concurrently before reading responses
         stdin.write_all(req1.as_bytes()).unwrap();
