@@ -48,7 +48,9 @@ impl TurnClassification {
 /// Error returned when effort routing is attempted on a provider with no standard effort parameter.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum EffortRoutingError {
-    #[error("effort routing is not supported for provider '{0}': refusing to inject invented parameter")]
+    #[error(
+        "effort routing is not supported for provider '{0}': refusing to inject invented parameter"
+    )]
     UnsupportedProvider(String),
 }
 
@@ -218,11 +220,8 @@ pub fn classify_request_turn(provider_name: &str, path: &str, body: &Value) -> T
         };
         let i_type = last_item.get("type").and_then(Value::as_str).unwrap_or("");
         let is_tool = i_type == "function_call_output";
-        let content_text = extract_block_text(
-            last_item
-                .get("output")
-                .or_else(|| last_item.get("content")),
-        );
+        let content_text =
+            extract_block_text(last_item.get("output").or_else(|| last_item.get("content")));
         classify_turn(&content_text, is_tool)
     } else {
         // OpenAI chat completions or generic chat
@@ -290,9 +289,9 @@ pub fn steer_verbosity(
             }
 
             // Find latest user message index
-            let latest_user_idx = messages.iter().rposition(|m| {
-                m.get("role").and_then(Value::as_str) == Some("user")
-            });
+            let latest_user_idx = messages
+                .iter()
+                .rposition(|m| m.get("role").and_then(Value::as_str) == Some("user"));
             let Some(target_idx) = latest_user_idx else {
                 return Ok(false);
             };
@@ -423,9 +422,9 @@ pub fn route_effort(
                 Ok(false)
             }
         }
-        "bedrock" | "aws-bedrock" | "vertex" | "vertexai" | "vertex-ai" | "google-vertex" => {
-            Err(EffortRoutingError::UnsupportedProvider(provider_name.to_string()))
-        }
+        "bedrock" | "aws-bedrock" | "vertex" | "vertexai" | "vertex-ai" | "google-vertex" => Err(
+            EffortRoutingError::UnsupportedProvider(provider_name.to_string()),
+        ),
         other => Err(EffortRoutingError::UnsupportedProvider(other.to_string())),
     }
 }
@@ -445,17 +444,11 @@ mod tests {
 
         // Routine: passing tests
         let test_pass = "running 10 tests\ntest test_one ... ok\ntest test_two ... ok\ntest result: ok. 10 passed; 0 failed";
-        assert_eq!(
-            classify_turn(test_pass, true),
-            TurnClassification::Routine
-        );
+        assert_eq!(classify_turn(test_pass, true), TurnClassification::Routine);
 
         // Routine: listing
         let listing = "[{\"id\": 1, \"name\": \"alpha\"}, {\"id\": 2, \"name\": \"beta\"}]";
-        assert_eq!(
-            classify_turn(listing, true),
-            TurnClassification::Routine
-        );
+        assert_eq!(classify_turn(listing, true), TurnClassification::Routine);
 
         // Routine: clean command output
         assert_eq!(
@@ -464,7 +457,8 @@ mod tests {
         );
 
         // Non-routine: error / failure
-        let test_fail = "running 2 tests\ntest test_one ... FAILED\nfailures:\nerror: assertion failed";
+        let test_fail =
+            "running 2 tests\ntest test_one ... FAILED\nfailures:\nerror: assertion failed";
         assert_eq!(
             classify_turn(test_fail, true),
             TurnClassification::NonRoutine
@@ -472,7 +466,10 @@ mod tests {
 
         // Non-routine: real question from user
         assert_eq!(
-            classify_turn("How can I fix the bug in the authentication handler?", false),
+            classify_turn(
+                "How can I fix the bug in the authentication handler?",
+                false
+            ),
             TurnClassification::NonRoutine
         );
 

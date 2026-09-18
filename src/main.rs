@@ -24,9 +24,7 @@ use lm_resizer_core::transforms::{
     compress_openai_responses_live_zone, detect_content_type, AuthMode, CompressionContext,
     CompressionManifest, CompressionPipeline, LiveZoneOutcome,
 };
-use lm_resizer_core::{
-    classify_request_turn, route_effort, steer_verbosity, EffortRoutingError,
-};
+use lm_resizer_core::{classify_request_turn, route_effort, steer_verbosity, EffortRoutingError};
 use rayon::prelude::*;
 use regex::{Regex, RegexSet};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -3863,11 +3861,7 @@ fn estimate_tokens_from_bytes(bytes: usize) -> usize {
     bytes / 4
 }
 
-fn record_proxy_history(
-    provider: &str,
-    path: &str,
-    stats: &ProxyCompressionStats,
-) -> Result<()> {
+fn record_proxy_history(provider: &str, path: &str, stats: &ProxyCompressionStats) -> Result<()> {
     if std::env::var("LM_RESIZER_TRACKING").ok().as_deref() == Some("0") {
         return Ok(());
     }
@@ -4113,29 +4107,55 @@ fn format_stats_markdown(report: &Value) -> String {
 
     if let (Some(inp), Some(outp)) = (report.get("input_savings"), report.get("output_savings")) {
         let in_bytes = inp.get("bytes_saved").and_then(Value::as_u64).unwrap_or(0);
-        let in_tokens = inp.get("estimated_tokens_saved").and_then(Value::as_u64).unwrap_or(0);
-        let in_cost = inp.get("estimated_cost_saved_usd").and_then(Value::as_f64).unwrap_or(0.0);
+        let in_tokens = inp
+            .get("estimated_tokens_saved")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let in_cost = inp
+            .get("estimated_cost_saved_usd")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
         out.push_str("## Input Compression\n\n");
         out.push_str(&format!("- Bytes saved: {in_bytes}\n"));
         out.push_str(&format!("- Estimated tokens saved: {in_tokens}\n"));
         out.push_str(&format!("- Estimated cost saved: ${in_cost:.6}\n\n"));
 
-        let out_tokens = outp.get("estimated_tokens_saved").and_then(Value::as_u64).unwrap_or(0);
-        let out_cost = outp.get("estimated_cost_saved_usd").and_then(Value::as_f64).unwrap_or(0.0);
-        let v_turns = outp.get("verbosity_turns").and_then(Value::as_u64).unwrap_or(0);
-        let e_turns = outp.get("effort_turns").and_then(Value::as_u64).unwrap_or(0);
+        let out_tokens = outp
+            .get("estimated_tokens_saved")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let out_cost = outp
+            .get("estimated_cost_saved_usd")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        let v_turns = outp
+            .get("verbosity_turns")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let e_turns = outp
+            .get("effort_turns")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         out.push_str("## Output Reduction\n\n");
         out.push_str("> Hypothesis, not a measurement: the turns below really were\n");
         out.push_str("> steered, but the tokens they saved are inferred from a fixed\n");
         out.push_str("> per-turn assumption. Only an A/B run gives a real figure.\n\n");
-        out.push_str(&format!("- Verbosity turns steered (measured): {v_turns}\n"));
+        out.push_str(&format!(
+            "- Verbosity turns steered (measured): {v_turns}\n"
+        ));
         out.push_str(&format!("- Effort turns routed (measured): {e_turns}\n"));
         out.push_str(&format!("- Tokens saved (hypothesis): {out_tokens}\n"));
         out.push_str(&format!("- Cost saved (hypothesis): ${out_cost:.6}\n\n"));
 
         if let Some(tot) = report.get("total_savings") {
-            let tot_tokens = tot.get("estimated_tokens_saved").and_then(Value::as_u64).unwrap_or(0);
-            let tot_cost = tot.get("estimated_cost_saved_usd").and_then(Value::as_f64).unwrap_or(0.0);
+            let tot_tokens = tot
+                .get("estimated_tokens_saved")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let tot_cost = tot
+                .get("estimated_cost_saved_usd")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
             out.push_str("## Total Savings\n\n");
             out.push_str("> Mixes a measured input figure with a hypothetical output one.\n\n");
             out.push_str(&format!("- Total tokens saved (mixed): {tot_tokens}\n"));
@@ -5957,9 +5977,11 @@ fn run_doctor(json_output: bool, store: Option<PathBuf>) -> Result<()> {
             check_client("Aider", "aider", &["--version"]),
             check_client("Copilot", "copilot", &["--version"]),
         ],
-        companions: vec![
-            check_companion("Code Explorer", "code-explorer", "code-explorer"),
-        ],
+        companions: vec![check_companion(
+            "Code Explorer",
+            "code-explorer",
+            "code-explorer",
+        )],
     };
 
     if json_output {
@@ -9926,15 +9948,24 @@ key = value
 
         // Doubtful: direct user question
         let question = "Why does this function return 0 instead of 42?";
-        assert_eq!(classify_turn(question, false), TurnClassification::NonRoutine);
+        assert_eq!(
+            classify_turn(question, false),
+            TurnClassification::NonRoutine
+        );
 
         // Doubtful: build error output
         let error_out = "error[E0425]: cannot find value `x` in this scope\n  --> src/main.rs:10:5";
-        assert_eq!(classify_turn(error_out, true), TurnClassification::NonRoutine);
+        assert_eq!(
+            classify_turn(error_out, true),
+            TurnClassification::NonRoutine
+        );
 
         // Doubtful: plain text with question
         let ambiguous = "Did the process exit correctly?";
-        assert_eq!(classify_turn(ambiguous, true), TurnClassification::NonRoutine);
+        assert_eq!(
+            classify_turn(ambiguous, true),
+            TurnClassification::NonRoutine
+        );
     }
 
     #[test]
@@ -9942,11 +9973,29 @@ key = value
         let mut body = json!({
             "messages": [{ "role": "user", "content": "echo hi" }]
         });
-        let err_bedrock = route_effort("bedrock", "/model/anthropic.claude/invoke", &mut body, TurnClassification::Routine).unwrap_err();
-        assert_eq!(err_bedrock, EffortRoutingError::UnsupportedProvider("bedrock".to_string()));
+        let err_bedrock = route_effort(
+            "bedrock",
+            "/model/anthropic.claude/invoke",
+            &mut body,
+            TurnClassification::Routine,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err_bedrock,
+            EffortRoutingError::UnsupportedProvider("bedrock".to_string())
+        );
 
-        let err_vertex = route_effort("vertex", "/v1/projects/p/locations/l/publishers/google/models/gemini:predict", &mut body, TurnClassification::Routine).unwrap_err();
-        assert_eq!(err_vertex, EffortRoutingError::UnsupportedProvider("vertex".to_string()));
+        let err_vertex = route_effort(
+            "vertex",
+            "/v1/projects/p/locations/l/publishers/google/models/gemini:predict",
+            &mut body,
+            TurnClassification::Routine,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err_vertex,
+            EffortRoutingError::UnsupportedProvider("vertex".to_string())
+        );
     }
 
     #[test]
@@ -9954,7 +10003,8 @@ key = value
         let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("fixtures/provider-cache/anthropic-messages.json");
         let raw_fixture = std::fs::read_to_string(&fixture_path).expect("fixture must exist");
-        let fixture_template: Value = serde_json::from_str(&raw_fixture).expect("valid fixture JSON");
+        let fixture_template: Value =
+            serde_json::from_str(&raw_fixture).expect("valid fixture JSON");
 
         let mut body = json!({
             "model": fixture_template["model"],
@@ -9972,7 +10022,10 @@ key = value
         });
 
         let frozen_count = compute_frozen_count(&body);
-        assert_eq!(frozen_count, 1, "First message has cache_control so frozen_count is 1");
+        assert_eq!(
+            frozen_count, 1,
+            "First message has cache_control so frozen_count is 1"
+        );
 
         let prefix_before_bytes = serde_json::to_vec(&body["messages"][0]).unwrap();
         let mut hasher_before = Sha256::new();
@@ -10050,7 +10103,9 @@ key = value
         });
 
         let resp = proxy_or_preview(state, "/v1/messages", body).await.unwrap();
-        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let preview: Value = serde_json::from_slice(&body_bytes).unwrap();
 
         assert_eq!(preview["mode"], "preview");
@@ -10101,7 +10156,9 @@ key = value
         });
 
         let resp = proxy_or_preview(state, "/v1/messages", body).await.unwrap();
-        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let preview: Value = serde_json::from_slice(&body_bytes).unwrap();
 
         let compression = &preview["compression"];
