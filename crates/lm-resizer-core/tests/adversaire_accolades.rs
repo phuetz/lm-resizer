@@ -76,3 +76,95 @@ fn aucune_panique_sur_entrees_hostiles() {
         let _ = c.compress(src);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Synergie n°1 : le conseiller de plages. On vérifie ici la seule propriété qui
+// compte vraiment — un conseil ne fait jamais perdre de code.
+// ---------------------------------------------------------------------------
+use lm_resizer_core::ccr::{CcrStore, InMemoryCcrStore};
+use lm_resizer_core::transforms::retention_advice::RetentionAdvice;
+use lm_resizer_core::transforms::source_compressor::advice_from_symbols;
+
+const SOURCE: &str = "// en-tete jetable\npub fn premiere() -> u32 {\n    // commentaire interne\n    1\n}\n\n\n\n// autre commentaire\npub fn seconde() -> u32 {\n    2\n}\n";
+
+#[test]
+fn une_plage_protegee_survit_meme_si_c_est_un_commentaire() {
+    let c = SourceCompressor::default();
+    // Ligne 3 : un commentaire que la compression jetterait normalement.
+    let advice =
+        RetentionAdvice::from_json(r#"{"ranges":[{"start_line":3,"end_line":3}]}"#).unwrap();
+
+    let sans = c.compress_with_advice(SOURCE, &RetentionAdvice::default(), None);
+    let avec = c.compress_with_advice(SOURCE, &advice, None);
+
+    assert!(!sans.compressed.contains("commentaire interne"));
+    assert!(avec.compressed.contains("commentaire interne"));
+}
+
+#[test]
+fn un_conseil_vide_se_comporte_comme_l_absence_de_conseil() {
+    let c = SourceCompressor::default();
+    let vide = c.compress_with_advice(SOURCE, &RetentionAdvice::default(), None);
+    let parse = RetentionAdvice::from_json(r#"{"ranges":[]}"#).unwrap();
+    assert_eq!(
+        vide.compressed,
+        c.compress_with_advice(SOURCE, &parse, None).compressed
+    );
+}
+
+#[test]
+fn le_conseil_ne_fait_jamais_perdre_de_code_par_rapport_a_l_absence_de_conseil() {
+    // La propriété qui rend le mécanisme sûr : protéger ne peut qu'ajouter.
+    let c = SourceCompressor::default();
+    let sans = c.compress_with_advice(SOURCE, &RetentionAdvice::default(), None);
+    for plage in [
+        r#"{"ranges":[{"start_line":1,"end_line":1}]}"#,
+        r#"{"ranges":[{"start_line":6,"end_line":8}]}"#,
+        r#"{"ranges":[{"start_line":1,"end_line":12}]}"#,
+    ] {
+        let advice = RetentionAdvice::from_json(plage).unwrap();
+        let avec = c.compress_with_advice(SOURCE, &advice, None);
+        assert!(
+            avec.compressed.len() >= sans.compressed.len(),
+            "protéger a fait perdre du texte avec {plage}"
+        );
+    }
+}
+
+#[test]
+fn ce_qui_est_retire_reste_recuperable() {
+    let c = SourceCompressor::default();
+    let store = InMemoryCcrStore::default();
+    let advice =
+        RetentionAdvice::from_json(r#"{"ranges":[{"start_line":2,"end_line":5}]}"#).unwrap();
+    let res = c.compress_with_advice(SOURCE, &advice, Some(&store));
+    assert!(res.compressed.len() < SOURCE.len());
+    let cle = res.ccr_key.expect("une compression effective doit deposer une cle");
+    assert_eq!(store.get(&cle).as_deref(), Some(SOURCE));
+}
+
+#[test]
+fn code_explorer_n_est_qu_un_producteur_parmi_d_autres() {
+    use lm_resizer_core::transforms::source_compressor::AstSymbol;
+    let symboles = vec![
+        AstSymbol { name: "premiere".into(), label: "function".into(), start_line: 2, end_line: 5 },
+        // Une plage absurde que le graphe pourrait produire : elle est écartée
+        // sans faire tomber les autres.
+        AstSymbol { name: "bruit".into(), label: "function".into(), start_line: 9, end_line: 4 },
+    ];
+    let advice = advice_from_symbols(&symboles);
+    assert_eq!(advice.advisor.as_deref(), Some("code-explorer"));
+    assert_eq!(advice.ranges.len(), 1);
+    assert_eq!(advice.ranges[0].label.as_deref(), Some("premiere"));
+
+    // Le compresseur ne sait pas d'où vient le conseil : un document écrit à la
+    // main donne exactement le même résultat.
+    let c = SourceCompressor::default();
+    let a_la_main =
+        RetentionAdvice::from_json(r#"{"advisor":"ctags","ranges":[{"start_line":2,"end_line":5,"weight":4.0,"label":"premiere"}]}"#)
+            .unwrap();
+    assert_eq!(
+        c.compress_with_advice(SOURCE, &advice, None).compressed,
+        c.compress_with_advice(SOURCE, &a_la_main, None).compressed
+    );
+}

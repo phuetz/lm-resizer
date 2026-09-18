@@ -11,6 +11,7 @@
 use std::sync::LazyLock;
 use regex::Regex;
 
+use crate::transforms::retention_advice::{RetentionAdvice, RetentionRange};
 use crate::ccr::{compute_key, CcrStore};
 
 /// Supported target languages for structural compression.
@@ -280,6 +281,105 @@ impl SourceCompressor {
     }
 
     /// Conservative line-by-line compression fallback.
+    /// Line-by-line compression that never touches a line an advisor protects.
+    ///
+    /// This is the point of the whole advice mechanism. Cutting by lines keeps
+    /// the beginning of a file, which is rarely the part that matters; with
+    /// advice, the parts that matter survive wherever they sit in the file.
+    ///
+    /// Advice only ever protects. A line nobody mentioned is compressed by the
+    /// ordinary rules, never dropped *because* it was unmentioned — an advisor
+    /// that says nothing about a range is an advisor that does not know, and a
+    /// call graph is known to miss calls through interfaces and dynamic
+    /// dispatch. With empty advice this behaves exactly like
+    /// [`Self::compress_conservative`].
+    pub fn compress_with_advice(
+        &self,
+        input: &str,
+        advice: &RetentionAdvice,
+        store: Option<&dyn CcrStore>,
+    ) -> SourceCompressionResult {
+        if advice.ranges.is_empty() {
+            return self.compress_conservative(input);
+        }
+
+        let mut output = String::with_capacity(input.len());
+        let mut blank_run = 0usize;
+        let mut removed_comment_lines = 0usize;
+        let mut removed_blank_lines = 0usize;
+        let mut protected_lines = 0usize;
+
+        for (index, line) in input.lines().enumerate() {
+            // Les numéros de ligne d'un conseiller commencent à 1, comme ceux
+            // d'un éditeur et d'un compilateur.
+            if advice.protects(index + 1) {
+                protected_lines += 1;
+                blank_run = 0;
+                output.push_str(line);
+                output.push('\n');
+                continue;
+            }
+
+            let trimmed = line.trim_start();
+
+            if is_full_line_comment(trimmed) {
+                removed_comment_lines += 1;
+                continue;
+            }
+
+            if trimmed.is_empty() {
+                blank_run += 1;
+                if blank_run > self.max_blank_run {
+                    removed_blank_lines += 1;
+                    continue;
+                }
+            } else {
+                blank_run = 0;
+            }
+
+            output.push_str(line);
+            output.push('\n');
+        }
+
+        if !input.ends_with('\n') && output.ends_with('\n') {
+            output.pop();
+        }
+
+        // Une compression qui grossit n'est pas une compression. On rend
+        // l'original, qui est toujours correct.
+        if output.len() >= input.len() {
+            output.clear();
+            output.push_str(input);
+        }
+
+        // Ce qu'on retire doit rester récupérable, sans quoi aucun taux de
+        // compression n'est défendable.
+        let ccr_key = if output.len() < input.len() {
+            let key = compute_key(input.as_bytes());
+            if let Some(s) = store {
+                s.put(&key, input);
+            }
+            Some(key)
+        } else {
+            None
+        };
+
+        let _ = protected_lines;
+        SourceCompressionResult {
+            original: input.to_string(),
+            compressed: output,
+            removed_comment_lines,
+            removed_blank_lines,
+            omitted_body_lines: 0,
+            omitted_import_lines: 0,
+            omitted_functions: 0,
+            language: detect_language(input),
+            ccr_key,
+            is_approximate: true,
+            engine_used: "advice-guided",
+        }
+    }
+
     fn compress_conservative(&self, input: &str) -> SourceCompressionResult {
         let mut output = String::with_capacity(input.len());
         let mut blank_run = 0usize;
@@ -330,6 +430,34 @@ impl SourceCompressor {
             is_approximate: true,
             engine_used: "conservative-fallback",
         }
+    }
+}
+
+/// Turn Code Explorer symbols into advice — one producer among several.
+///
+/// Deliberately a free function on the *output* type rather than a method on
+/// the compressor: it proves the interface is not Code Explorer's. `ctags`,
+/// tree-sitter or a symbol grep produce the same document, and the compressor
+/// cannot tell which one wrote it.
+///
+/// Weighting is by span length, which is a poor proxy for importance and is
+/// meant to be replaced. The honest signal would be in-degree and out-degree
+/// from the graph, which `code-explorer` does not expose in machine-readable
+/// form today: at 0.2.1 `--json` is offered by `doctor`, `hotspots`, `coupling`
+/// and `ownership`, and not by `impact`, which is the one that carries it.
+pub fn advice_from_symbols(symbols: &[AstSymbol]) -> RetentionAdvice {
+    RetentionAdvice {
+        advisor: Some("code-explorer".to_string()),
+        ranges: symbols
+            .iter()
+            .filter(|s| s.start_line >= 1 && s.end_line >= s.start_line)
+            .map(|s| RetentionRange {
+                start_line: s.start_line,
+                end_line: s.end_line,
+                weight: (s.end_line - s.start_line + 1) as f64,
+                label: Some(s.name.clone()),
+            })
+            .collect(),
     }
 }
 
