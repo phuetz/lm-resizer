@@ -9,6 +9,7 @@ pub mod relevance;
 pub mod signals;
 // Token counting (tiktoken / HF tokenizers) is native-only and reached only by
 // the live-zone dispatcher — never on the wasm `compress` path. See Cargo.toml.
+pub mod output;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tokenizer;
 pub mod transforms;
@@ -33,6 +34,10 @@ use transforms::{
 // `cache_control` module public too means downstream code can reach
 // the helper types directly when needed.
 pub use cache_control::compute_frozen_count;
+pub use output::{
+    classify_request_turn, classify_turn, has_concision_instruction, route_effort, steer_verbosity,
+    EffortRoutingError, OutputShapingError, TurnClassification, CONCISION_PROMPT,
+};
 
 /// Stable high-level compression report for embedding applications.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
