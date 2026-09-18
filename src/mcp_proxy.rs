@@ -588,6 +588,128 @@ mod tests {
     use super::*;
     use lm_resizer_core::ccr::InMemoryCcrStore;
 
+    // ----------------------------------------------------------------
+    // Contre-vérification : la propriété qui rend le proxy sûr est que la
+    // compression marche par liste d'AUTORISATION. Seul tools/call est touché.
+    // Tout le reste passe intact, y compris ce qu'on n'a pas su interpréter.
+    // Ces tests fixent cette propriété pour qu'on ne l'inverse pas un jour par
+    // commodité.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn une_reponse_sans_requete_connue_passe_intacte() {
+        // Cas réel : le proxy a redémarré, ou l'agent avait envoyé sa requête
+        // avant lui. La méthode est alors inconnue — et une réponse dont on
+        // ignore la nature ne doit surtout pas être compressée : elle pourrait
+        // être un tools/list, dont la troncature casserait l'agent.
+        let store = InMemoryCcrStore::new();
+        let pipeline = build_pipeline();
+        let pending = Mutex::new(HashMap::new());
+
+        let enorme = "x".repeat(200_000);
+        let resp = json!({
+            "jsonrpc": "2.0",
+            "id": 4242,
+            "result": {"content": [{"type": "text", "text": enorme}]}
+        })
+        .to_string();
+
+        // Aucune requête enregistrée pour cet identifiant.
+        let outcome = process_upstream_line(&resp, &pending, &store, &pipeline);
+        assert_eq!(
+            outcome,
+            ProcessOutcome::Unmodified,
+            "une reponse dont on ignore la methode doit passer intacte, meme enorme"
+        );
+    }
+
+    #[test]
+    fn un_tools_list_non_enregistre_passe_intact() {
+        let store = InMemoryCcrStore::new();
+        let pipeline = build_pipeline();
+        let pending = Mutex::new(HashMap::new());
+
+        let outils: Vec<Value> = (0..300)
+            .map(|n| json!({
+                "name": format!("outil_{n}"),
+                "description": "description deliberement longue ".repeat(20),
+                "inputSchema": {"type": "object"}
+            }))
+            .collect();
+        let resp = json!({"jsonrpc":"2.0","id":7,"result":{"tools": outils}}).to_string();
+
+        assert_eq!(
+            process_upstream_line(&resp, &pending, &store, &pipeline),
+            ProcessOutcome::Unmodified
+        );
+    }
+
+    #[test]
+    fn un_identifiant_de_type_different_n_est_pas_confondu() {
+        // L'identifiant 1 (nombre) et "1" (chaine) sont deux requetes
+        // distinctes selon JSON-RPC. Les confondre reviendrait a appliquer a
+        // une reponse la methode d'une autre.
+        let store = InMemoryCcrStore::new();
+        let pipeline = build_pipeline();
+        let pending = Mutex::new(HashMap::new());
+
+        let req = json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+                         "params":{"name":"un_outil","arguments":{}}}).to_string();
+        process_agent_line(&req, &pending);
+
+        let resp = json!({
+            "jsonrpc":"2.0","id":"1",
+            "result":{"content":[{"type":"text","text":"y".repeat(200_000)}]}
+        })
+        .to_string();
+
+        assert_eq!(
+            process_upstream_line(&resp, &pending, &store, &pipeline),
+            ProcessOutcome::Unmodified,
+            "un identifiant chaine ne doit pas consommer la requete numerique"
+        );
+    }
+
+    #[test]
+    fn une_ligne_illisible_passe_au_lieu_d_etre_perdue() {
+        // Un proxy qui avale ce qu'il ne comprend pas fait disparaitre des
+        // reponses. Passer sans toucher est toujours le bon choix.
+        let store = InMemoryCcrStore::new();
+        let pipeline = build_pipeline();
+        let pending = Mutex::new(HashMap::new());
+
+        for ligne in ["{ ceci n'est pas du json", "null", "[]", "\u{feff}{\"a\":1}"] {
+            let outcome = process_upstream_line(ligne, &pending, &store, &pipeline);
+            assert!(
+                matches!(outcome, ProcessOutcome::Unmodified | ProcessOutcome::Ignore),
+                "ligne avalee : {ligne}"
+            );
+        }
+    }
+
+    #[test]
+    fn une_erreur_sur_tools_call_passe_intacte() {
+        let store = InMemoryCcrStore::new();
+        let pipeline = build_pipeline();
+        let pending = Mutex::new(HashMap::new());
+
+        let req = json!({"jsonrpc":"2.0","id":9,"method":"tools/call",
+                         "params":{"name":"un_outil","arguments":{}}}).to_string();
+        process_agent_line(&req, &pending);
+
+        let resp = json!({
+            "jsonrpc":"2.0","id":9,
+            "error":{"code":-32000,"message":"echec cote serveur","data":"z".repeat(100_000)}
+        })
+        .to_string();
+
+        assert_eq!(
+            process_upstream_line(&resp, &pending, &store, &pipeline),
+            ProcessOutcome::Unmodified,
+            "une erreur doit rester lisible telle quelle"
+        );
+    }
+
     #[test]
     fn test_tools_list_response_intact() {
         let store = InMemoryCcrStore::new();
