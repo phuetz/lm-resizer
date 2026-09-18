@@ -576,6 +576,11 @@ struct ExecReport {
     command: String,
     exit_code: i32,
     filter: String,
+    /// The no-growth gate fired: the filter (or the recovery marker) made this
+    /// output bigger, so the original was handed back untouched. Recorded so a
+    /// filter that keeps hitting it can be found and fixed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    filter_not_smaller: bool,
     original_bytes: usize,
     filtered_bytes: usize,
     compressed_bytes: usize,
@@ -1619,6 +1624,34 @@ fn compress_text_with_pipeline(
         token_budget,
     };
     let result = pipeline.run(content, detection.content_type, &ctx, store);
+
+    // Porte de non-croissance, posée ici parce que c'est le seul endroit que
+    // tous les chemins traversent : `exec`, les hooks natifs, les shims et
+    // l'outil MCP `lm_resizer_compress` passent tous par cette fonction. La
+    // poser plus haut, au cas par cas, laissait des entrées non couvertes —
+    // c'est le reproche que la contre-revue a fait à une première version, et
+    // il était juste.
+    //
+    // Elle compare la sortie FINALE, notices et marqueur de récupération
+    // compris : un résultat plus gros que l'entrée n'est pas une compression,
+    // quelle que soit la part du texte qui l'a fait grossir.
+    //
+    // Quand elle tire, on rend le contenu tel quel et on n'annonce aucune clé
+    // de récupération : rien n'a été retiré, il n'y a rien à récupérer, et
+    // promettre une récupération qui ne sert à rien coûte une écriture dans le
+    // magasin à chaque appel.
+    if !content.is_empty() && result.output.len() >= content.len() {
+        return Ok(CompressReport {
+            content_type: detection.content_type.as_str().to_string(),
+            original_bytes: content.len(),
+            compressed_bytes: content.len(),
+            bytes_saved: 0,
+            steps_applied: Vec::new(),
+            cache_keys: Vec::new(),
+            output: content.to_string(),
+        });
+    }
+
     Ok(CompressReport {
         content_type: detection.content_type.as_str().to_string(),
         original_bytes: content.len(),
@@ -1653,10 +1686,10 @@ fn run_exec_command(
         )
     };
 
-    let (filter, filtered) = if raw_on_failure && exit_code != 0 {
-        ("raw_on_failure".to_string(), raw.clone())
+    let (filter, filtered, gated) = if raw_on_failure && exit_code != 0 {
+        ("raw_on_failure".to_string(), raw.clone(), false)
     } else {
-        filter_command_output(command, &raw)
+        filter_command_output_gated(command, &raw)
     };
 
     let compressed = compress_text(&filtered, query, store)?;
@@ -1670,10 +1703,24 @@ fn run_exec_command(
         final_output.push('\n');
     }
 
+    // Seconde porte, après la compression et l'ajout de l'indication de tee.
+    //
+    // Le filtre ne peut plus grossir. Il reste le cas mesuré sur 469 commandes
+    // — 11,1 % des croissances — où le filtre n'avait rien changé et où
+    // l'étape suivante ajoutait exactement 108 octets de marqueur. Poser un
+    // marqueur de récupération sur un texte dont rien n'a été retiré ne sert à
+    // rien : il n'y a rien à récupérer.
+    let mut gated = gated;
+    if !raw.is_empty() && final_output.len() >= raw.len() {
+        final_output = raw.clone();
+        gated = true;
+    }
+
     let report = ExecReport {
         command: command.join(" "),
         exit_code,
         filter,
+        filter_not_smaller: gated,
         original_bytes: raw.len(),
         filtered_bytes: filtered.len(),
         compressed_bytes: final_output.len(),
@@ -1969,7 +2016,53 @@ fn shell_join(args: &[String]) -> String {
         .join(" ")
 }
 
+/// Route a command's output to its filter, and refuse a filter that made it
+/// bigger.
+///
+/// # Why the gate lives here
+///
+/// Measured on 32 483 real commands from `exec-history.jsonl`: **4 207 outputs,
+/// 12.95 %, came out larger than they went in** — up to +39 % on a 15 KB `rg`
+/// search.
+///
+/// The cause is not the recovery marker, which is what one assumes. In 88.9 %
+/// of those cases the *filter itself* added text: `search_results` annotates
+/// and groups `rg` output, which costs more than it saves on a short result.
+/// So the gate belongs at the filter boundary, where every caller crosses it,
+/// not at one call site.
+///
+/// Returning the raw output loses nothing, and that is checked rather than
+/// assumed: across those 4 207 cases **the filter had removed text in none of
+/// them**. Where output grew it contained the original plus annotations, so
+/// handing back the original only drops the annotations.
+///
+/// The filter *name* is left untouched when the gate fires. It identifies which
+/// filter was chosen, and callers rely on that identity — `rewrite_command_report`
+/// decides whether a command is supported from it. Whether the filter helped on
+/// one particular input is a different question, reported separately by
+/// [`filter_command_output_gated`].
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
+    let (filter, filtered, _gated) = filter_command_output_gated(command, raw);
+    (filter, filtered)
+}
+
+/// As [`filter_command_output`], plus whether the no-growth gate fired.
+///
+/// The flag exists so history stays attributable: a filter that keeps hitting
+/// the gate is a filter to fix, and that is invisible if we only record the
+/// name of the filter that was chosen.
+fn filter_command_output_gated(command: &[String], raw: &str) -> (String, String, bool) {
+    let (filter, filtered) = route_command_filter(command, raw);
+    // Empty output is not a growth case; it is nothing to do. Firing the gate
+    // there would be noise, and it is the common case for the callers that only
+    // ask which filter *would* apply.
+    if !raw.is_empty() && filtered.len() >= raw.len() {
+        return (filter, raw.to_string(), true);
+    }
+    (filter, filtered, false)
+}
+
+fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     let command_text = normalized_command_text(command);
     if let Some((filter, filtered)) = apply_toml_filters(&command_text, raw) {
         return (filter, filtered);
@@ -3500,6 +3593,7 @@ fn run_native_hook(client: &str, event: &str) -> NativeHookRunReport {
                 command: command.clone(),
                 exit_code: extract_hook_exit_code(value.as_ref()).unwrap_or(0),
                 filter: filter.clone(),
+                filter_not_smaller: false,
                 original_bytes: output.len(),
                 filtered_bytes: filtered.len(),
                 compressed_bytes: compressed.compressed_bytes,
@@ -8363,6 +8457,123 @@ expected = "error: bad\n"
         assert!(!filtered.contains("Duration  117ms"));
         // and it is genuinely shorter than the raw
         assert!(filtered.len() < raw.len());
+    }
+
+    #[test]
+    fn compress_text_ne_rend_jamais_plus_gros_que_ce_qu_on_lui_donne() {
+        // compress_text est le seul point que TOUS les chemins traversent :
+        // exec, les hooks natifs, les shims et l'outil MCP lm_resizer_compress.
+        // Verrouiller la propriete ici la verrouille partout ; la poser au cas
+        // par cas laissait des entrees non couvertes.
+        let store = InMemoryCcrStore::default();
+        for contenu in [
+            "",
+            "x",
+            "court\n",
+            "a.rs:1:x\nb.rs:2:y\n",
+            "{\"cle\": 1}",
+            "\u{feff}entete\ncorps\n",
+            "ligne unique sans retour",
+        ] {
+            let rapport = compress_text(contenu, "une requete", &store).unwrap();
+            assert!(
+                rapport.output.len() <= contenu.len(),
+                "sortie de {} octets pour {} en entree : {contenu:?}",
+                rapport.output.len(),
+                contenu.len()
+            );
+            // Et quand rien n'a ete gagne, on rend le contenu exact : jamais une
+            // troncature, jamais une approximation.
+            if rapport.output.len() == contenu.len() {
+                assert_eq!(rapport.output, contenu);
+            }
+        }
+    }
+
+    #[test]
+    fn une_compression_sans_gain_ne_promet_pas_de_recuperation() {
+        // Annoncer une cle de recuperation quand rien n'a ete retire coute une
+        // ecriture dans le magasin a chaque appel, pour rien.
+        let store = InMemoryCcrStore::default();
+        let contenu = "deja compact\n";
+        let rapport = compress_text(contenu, "", &store).unwrap();
+        if rapport.bytes_saved == 0 {
+            assert!(
+                rapport.cache_keys.is_empty(),
+                "aucune cle ne doit etre annoncee sans gain"
+            );
+            assert!(rapport.steps_applied.is_empty());
+        }
+    }
+
+    #[test]
+    fn un_filtre_qui_grossit_est_refuse() {
+        // Cas réel le plus coûteux du corpus : une recherche `rg` de 15 Ko que
+        // le filtre `search_results` rendait à 21 Ko en l'annotant.
+        let commande = vec!["rg".to_string(), "-n".to_string(), "motif".to_string()];
+        // Une sortie courte et dense, que l'annotation par fichier fait grossir.
+        let brut = "a.rs:1:x\nb.rs:2:y\nc.rs:3:z\n";
+        let (filtre, sortie, porte) = filter_command_output_gated(&commande, brut);
+        assert!(
+            sortie.len() <= brut.len(),
+            "le filtre a rendu {} octets pour {} en entree",
+            sortie.len(),
+            brut.len()
+        );
+        // Le nom du filtre ne change pas : il dit lequel a ete choisi, pas s'il
+        // a servi. C'est le drapeau qui porte cette seconde information.
+        assert_eq!(filtre, "search_results");
+        if porte {
+            assert_eq!(
+                sortie, brut,
+                "quand la porte tire, on rend l'original exact"
+            );
+        } else {
+            assert!(sortie.len() < brut.len());
+        }
+    }
+
+    #[test]
+    fn la_porte_ne_gene_pas_un_filtre_qui_gagne() {
+        // Une sortie volumineuse et répétitive : le filtre doit gagner, et la
+        // porte ne doit pas s'interposer ni renommer le filtre.
+        let commande = vec!["rg".to_string(), "-n".to_string(), "motif".to_string()];
+        let brut: String = (0..500)
+            .map(|n| format!("fichier{n}.rs:{n}:une ligne de resultat assez longue pour compter\n"))
+            .collect();
+        let (filtre, sortie, porte) = filter_command_output_gated(&commande, &brut);
+        assert!(sortie.len() < brut.len());
+        assert_eq!(filtre, "search_results");
+        assert!(
+            !porte,
+            "la porte ne doit pas s'interposer quand le filtre gagne"
+        );
+    }
+
+    #[test]
+    fn la_porte_ne_perd_jamais_d_information() {
+        // La propriété qui rend la porte acceptable : quand elle tire, la
+        // sortie est l'original, octet pour octet. Jamais une troncature.
+        for brut in ["x", "a\nb\n", "\u{feff}entete\ncorps\n"] {
+            for prog in ["rg", "ls", "git", "inconnu"] {
+                let commande = vec![prog.to_string(), "arg".to_string()];
+                let (_filtre, sortie, porte) = filter_command_output_gated(&commande, brut);
+                assert!(
+                    sortie.len() <= brut.len(),
+                    "sortie plus grosse que l'entree pour {prog}"
+                );
+                if porte {
+                    assert_eq!(
+                        sortie, brut,
+                        "la porte rend l'original, jamais une troncature"
+                    );
+                }
+            }
+        }
+        // Une sortie vide n'est pas un cas de croissance : rien a faire.
+        let (_f, sortie, porte) = filter_command_output_gated(&["rg".into(), "x".into()], "");
+        assert!(!porte);
+        assert!(sortie.is_empty());
     }
 
     #[test]
