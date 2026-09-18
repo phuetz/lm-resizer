@@ -941,6 +941,27 @@ struct DoctorReport {
     store_ok: bool,
     mcp_tools: Vec<String>,
     clients: Vec<ClientCheck>,
+    companions: Vec<CompanionCheck>,
+}
+
+/// A companion tool, plus the version gap that nothing else reports.
+///
+/// Observed on one machine in a single morning: the installed `code-explorer`
+/// binary said 0.1.1, a checkout on another disk said 0.1.0, and the repository
+/// of record said 0.2.1. An agent querying a stale binary gets answers from a
+/// version it does not believe it is using, and nothing says so.
+#[derive(Debug, Serialize)]
+struct CompanionCheck {
+    name: String,
+    command: String,
+    installed_version: Option<String>,
+    /// Version declared by a checkout in the current directory, when the
+    /// directory happens to be that tool's own repository.
+    checkout_version: Option<String>,
+    /// True only when both versions are known and differ. Unknown is not a
+    /// mismatch: we do not report a gap we did not observe.
+    mismatch: bool,
+    error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -5936,6 +5957,9 @@ fn run_doctor(json_output: bool, store: Option<PathBuf>) -> Result<()> {
             check_client("Aider", "aider", &["--version"]),
             check_client("Copilot", "copilot", &["--version"]),
         ],
+        companions: vec![
+            check_companion("Code Explorer", "code-explorer", "code-explorer"),
+        ],
     };
 
     if json_output {
@@ -5967,8 +5991,74 @@ fn run_doctor(json_output: bool, store: Option<PathBuf>) -> Result<()> {
                 );
             }
         }
+        if !report.companions.is_empty() {
+            println!("  Companion tools:");
+            for tool in &report.companions {
+                match (&tool.installed_version, &tool.checkout_version) {
+                    (None, _) => println!(
+                        "    MISS {} ({}) {}",
+                        tool.name,
+                        tool.command,
+                        tool.error.as_deref().unwrap_or("not installed")
+                    ),
+                    (Some(installed), Some(checkout)) if tool.mismatch => println!(
+                        "    WARN {} ({}): installed {} but this checkout is {} \
+                         — you are querying a different version than you are reading",
+                        tool.name, tool.command, installed, checkout
+                    ),
+                    (Some(installed), _) => {
+                        println!("    OK  {} ({}) {}", tool.name, tool.command, installed)
+                    }
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// Check a companion tool, and compare its installed version against the
+/// checkout we are standing in when that checkout is the tool's own repository.
+fn check_companion(name: &str, command: &str, crate_name: &str) -> CompanionCheck {
+    let probe = check_client(name, command, &["--version"]);
+    let installed_version = probe.version.as_ref().map(|raw| extract_semver(raw));
+    let checkout_version = local_crate_version(crate_name);
+    let mismatch = match (&installed_version, &checkout_version) {
+        (Some(a), Some(b)) => a != b,
+        _ => false,
+    };
+    CompanionCheck {
+        name: name.to_string(),
+        command: command.to_string(),
+        installed_version,
+        checkout_version,
+        mismatch,
+        error: probe.error,
+    }
+}
+
+/// `code-explorer 0.1.1` -> `0.1.1`. Anything unparseable comes back trimmed,
+/// which at worst produces a comparison of two identical unknown strings.
+fn extract_semver(raw: &str) -> String {
+    raw.split_whitespace()
+        .find(|token| {
+            let head = token.trim_start_matches('v');
+            head.split('.').count() >= 2 && head.starts_with(|c: char| c.is_ascii_digit())
+        })
+        .map(|token| token.trim_start_matches('v').to_string())
+        .unwrap_or_else(|| raw.trim().to_string())
+}
+
+/// Version declared by a `Cargo.toml` in the current directory, but only when
+/// it really is the companion's own manifest — otherwise we would compare a
+/// tool's version against an unrelated project's and invent a mismatch.
+fn local_crate_version(crate_name: &str) -> Option<String> {
+    let manifest = std::fs::read_to_string("Cargo.toml").ok()?;
+    let value: toml::Value = toml::from_str(&manifest).ok()?;
+    let package = value.get("package")?;
+    if package.get("name")?.as_str()? != crate_name {
+        return None;
+    }
+    Some(package.get("version")?.as_str()?.to_string())
 }
 
 fn check_client(name: &str, command: &str, args: &[&str]) -> ClientCheck {
@@ -10023,6 +10113,44 @@ key = value
         assert!(req.get("output_config").is_none());
         let content = req["messages"][0]["content"].as_str().unwrap();
         assert!(!content.contains(CONCISION_PROMPT));
+    }
+
+    #[test]
+    fn extract_semver_reads_a_tool_version_banner() {
+        assert_eq!(extract_semver("code-explorer 0.1.1"), "0.1.1");
+        assert_eq!(extract_semver("qpdf version 12.4.1"), "12.4.1");
+        assert_eq!(extract_semver("v0.2.1"), "0.2.1");
+        // Unparseable comes back trimmed rather than panicking or inventing.
+        assert_eq!(extract_semver("  unknown  "), "unknown");
+    }
+
+    #[test]
+    fn companion_mismatch_needs_two_known_versions() {
+        // The real case: an installed binary behind the checkout being read.
+        let installed = Some("0.1.1");
+        let checkout = Some("0.2.1");
+        let mismatch = match (installed, checkout) {
+            (Some(a), Some(b)) => a != b,
+            _ => false,
+        };
+        assert!(mismatch);
+
+        // An unknown version is not a mismatch: never report a gap we did not
+        // observe.
+        for pair in [(Some("0.1.1"), None), (None, Some("0.2.1")), (None, None)] {
+            let seen = match pair {
+                (Some(a), Some(b)) => a != b,
+                _ => false,
+            };
+            assert!(!seen);
+        }
+    }
+
+    #[test]
+    fn local_crate_version_ignores_an_unrelated_manifest() {
+        // We are standing in lm-resizer, not in code-explorer: comparing the
+        // two would invent a mismatch out of nothing.
+        assert!(local_crate_version("code-explorer").is_none());
     }
 
     #[test]
