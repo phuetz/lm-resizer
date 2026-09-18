@@ -85,17 +85,27 @@ fn aucune_panique_sur_entrees_hostiles() {
 // compte vraiment — un conseil ne fait jamais perdre de code.
 // ---------------------------------------------------------------------------
 use lm_resizer_core::ccr::{CcrStore, InMemoryCcrStore};
-use lm_resizer_core::transforms::retention_advice::RetentionAdvice;
+use lm_resizer_core::transforms::retention_advice::{sha256_hex_public, RetentionAdvice};
 use lm_resizer_core::transforms::source_compressor::advice_from_symbols;
 
 const SOURCE: &str = "// en-tete jetable\npub fn premiere() -> u32 {\n    // commentaire interne\n    1\n}\n\n\n\n// autre commentaire\npub fn seconde() -> u32 {\n    2\n}\n";
+
+/// Un conseil portant l'empreinte du SOURCE : sans elle il serait refuse, et
+/// c'est voulu — des numeros de ligne sans fichier identifie ne veulent rien
+/// dire.
+fn conseil_sur_source(plages: &str) -> RetentionAdvice {
+    let empreinte = sha256_hex_public(SOURCE.as_bytes());
+    RetentionAdvice::from_json(&format!(
+        r#"{{"source_sha256":"{empreinte}","ranges":{plages}}}"#
+    ))
+    .unwrap()
+}
 
 #[test]
 fn une_plage_protegee_survit_meme_si_c_est_un_commentaire() {
     let c = SourceCompressor::default();
     // Ligne 3 : un commentaire que la compression jetterait normalement.
-    let advice =
-        RetentionAdvice::from_json(r#"{"ranges":[{"start_line":3,"end_line":3}]}"#).unwrap();
+    let advice = conseil_sur_source(r#"[{"start_line":3,"end_line":3}]"#);
 
     let sans = c.compress_with_advice(SOURCE, &RetentionAdvice::default(), None);
     let avec = c.compress_with_advice(SOURCE, &advice, None);
@@ -121,11 +131,11 @@ fn le_conseil_ne_fait_jamais_perdre_de_code_par_rapport_a_l_absence_de_conseil()
     let c = SourceCompressor::default();
     let sans = c.compress_with_advice(SOURCE, &RetentionAdvice::default(), None);
     for plage in [
-        r#"{"ranges":[{"start_line":1,"end_line":1}]}"#,
-        r#"{"ranges":[{"start_line":6,"end_line":8}]}"#,
-        r#"{"ranges":[{"start_line":1,"end_line":12}]}"#,
+        r#"[{"start_line":1,"end_line":1}]"#,
+        r#"[{"start_line":6,"end_line":8}]"#,
+        r#"[{"start_line":1,"end_line":12}]"#,
     ] {
-        let advice = RetentionAdvice::from_json(plage).unwrap();
+        let advice = conseil_sur_source(plage);
         let avec = c.compress_with_advice(SOURCE, &advice, None);
         assert!(
             avec.compressed.len() >= sans.compressed.len(),
@@ -138,8 +148,7 @@ fn le_conseil_ne_fait_jamais_perdre_de_code_par_rapport_a_l_absence_de_conseil()
 fn ce_qui_est_retire_reste_recuperable() {
     let c = SourceCompressor::default();
     let store = InMemoryCcrStore::default();
-    let advice =
-        RetentionAdvice::from_json(r#"{"ranges":[{"start_line":2,"end_line":5}]}"#).unwrap();
+    let advice = conseil_sur_source(r#"[{"start_line":2,"end_line":5}]"#);
     let res = c.compress_with_advice(SOURCE, &advice, Some(&store));
     assert!(res.compressed.len() < SOURCE.len());
     let cle = res
@@ -167,19 +176,55 @@ fn code_explorer_n_est_qu_un_producteur_parmi_d_autres() {
             end_line: 4,
         },
     ];
-    let advice = advice_from_symbols(&symboles);
+    let advice = advice_from_symbols(&symboles, SOURCE);
     assert_eq!(advice.advisor.as_deref(), Some("code-explorer"));
     assert_eq!(advice.ranges.len(), 1);
     assert_eq!(advice.ranges[0].label.as_deref(), Some("premiere"));
+    // Le producteur estampille ce qu'il a lu, sans quoi son conseil ne pourra
+    // pas être vérifié plus tard.
+    assert!(advice.source_sha256.is_some());
 
     // Le compresseur ne sait pas d'où vient le conseil : un document écrit à la
-    // main donne exactement le même résultat.
+    // main, portant la même empreinte, donne exactement le même résultat.
     let c = SourceCompressor::default();
-    let a_la_main =
-        RetentionAdvice::from_json(r#"{"advisor":"ctags","ranges":[{"start_line":2,"end_line":5,"weight":4.0,"label":"premiere"}]}"#)
-            .unwrap();
+    let empreinte = advice.source_sha256.clone().unwrap();
+    let a_la_main = RetentionAdvice::from_json(&format!(
+        r#"{{"advisor":"ctags","source_sha256":"{empreinte}","ranges":[{{"start_line":2,"end_line":5,"weight":4.0,"label":"premiere"}}]}}"#
+    ))
+    .unwrap();
     assert_eq!(
         c.compress_with_advice(SOURCE, &advice, None).compressed,
         c.compress_with_advice(SOURCE, &a_la_main, None).compressed
     );
+}
+
+#[test]
+fn un_conseil_perime_ne_protege_plus_rien() {
+    use lm_resizer_core::transforms::source_compressor::AstSymbol;
+    // Le defaut que la contre-verification d'Astra a fait apparaitre : un
+    // conseil calcule sur une version anterieure du fichier protegerait les
+    // mauvaises lignes, avec le meme aplomb que s'il etait juste.
+    let c = SourceCompressor::default();
+    let symboles = vec![AstSymbol {
+        name: "premiere".into(),
+        label: "function".into(),
+        start_line: 2,
+        end_line: 5,
+    }];
+    let advice = advice_from_symbols(&symboles, SOURCE);
+
+    // Meme fichier : le conseil s'applique.
+    let frais = c.compress_with_advice(SOURCE, &advice, None);
+
+    // Fichier modifie depuis : le conseil est refuse, on retombe sur la
+    // compression ligne a ligne, identique a l'absence de conseil.
+    let modifie = format!("// une ligne ajoutee en tete\n{SOURCE}");
+    let perime = c.compress_with_advice(&modifie, &advice, None);
+    let sans = c.compress_with_advice(&modifie, &RetentionAdvice::default(), None);
+    assert_eq!(
+        perime.compressed, sans.compressed,
+        "un conseil perime doit se comporter comme une absence de conseil"
+    );
+    // Et il ne doit surtout pas ressembler au resultat frais.
+    assert_ne!(frais.compressed, perime.compressed);
 }

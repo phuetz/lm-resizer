@@ -299,6 +299,15 @@ impl SourceCompressor {
         advice: &RetentionAdvice,
         store: Option<&dyn CcrStore>,
     ) -> SourceCompressionResult {
+        // Line numbers only mean something for one version of a file. Advice
+        // that cannot be tied to the bytes in hand is refused rather than
+        // trusted: applying stale ranges protects the wrong lines, silently and
+        // with the same confidence as if they were right. Refusing costs a
+        // compression opportunity and falls back to line-by-line, which is the
+        // cheap side of the trade.
+        let Some(advice) = advice.applies_to(input) else {
+            return self.compress_conservative(input);
+        };
         if advice.ranges.is_empty() {
             return self.compress_conservative(input);
         }
@@ -445,9 +454,15 @@ impl SourceCompressor {
 /// from the graph, which `code-explorer` does not expose in machine-readable
 /// form today: at 0.2.1 `--json` is offered by `doctor`, `hotspots`, `coupling`
 /// and `ownership`, and not by `impact`, which is the one that carries it.
-pub fn advice_from_symbols(symbols: &[AstSymbol]) -> RetentionAdvice {
+pub fn advice_from_symbols(symbols: &[AstSymbol], source: &str) -> RetentionAdvice {
     RetentionAdvice {
         advisor: Some("code-explorer".to_string()),
+        // The bytes the symbols were read from. Without this the advice cannot
+        // be checked against the file it is later applied to.
+        source_sha256: Some(crate::transforms::retention_advice::sha256_hex_public(
+            source.as_bytes(),
+        )),
+        source_path: None,
         ranges: symbols
             .iter()
             .filter(|s| s.start_line >= 1 && s.end_line >= s.start_line)

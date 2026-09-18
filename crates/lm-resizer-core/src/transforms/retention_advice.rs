@@ -62,8 +62,38 @@ pub struct RetentionAdvice {
     /// range from `ctags` is worth exactly as much as one from Code Explorer.
     #[serde(default)]
     pub advisor: Option<String>,
+    /// SHA-256 of the exact bytes the advisor read, lowercase hex.
+    ///
+    /// Line numbers only mean something for one version of a file. An advisor
+    /// works from an index, and an index goes stale: between the moment it was
+    /// built and the moment we compress, lines move. Applying yesterday's
+    /// ranges to today's file protects the wrong lines — silently, and with the
+    /// same confidence as if it were right.
+    ///
+    /// Absent means "unverifiable", which is treated as stale: see
+    /// [`Self::applies_to`].
+    #[serde(default)]
+    pub source_sha256: Option<String>,
+    /// Path the advisor read, for diagnostics only. Never used to decide:
+    /// comparing paths across worktrees, symlinks and separators invites false
+    /// negatives, and the hash already settles identity.
+    #[serde(default)]
+    pub source_path: Option<String>,
     #[serde(default)]
     pub ranges: Vec<RetentionRange>,
+}
+
+/// Whether advice may be applied to the content in hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdviceFreshness {
+    /// The advisor read exactly these bytes. Ranges mean what they say.
+    Fresh,
+    /// The advisor read different bytes. The line numbers refer to a file that
+    /// no longer exists; using them would protect the wrong lines.
+    Stale,
+    /// No hash was supplied, so nothing can be checked. Treated as stale when
+    /// deciding, and reported distinctly so a caller can say why.
+    Unknown,
 }
 
 impl RetentionAdvice {
@@ -77,6 +107,35 @@ impl RetentionAdvice {
         let mut advice: Self = serde_json::from_str(raw).ok()?;
         advice.ranges.retain(range_is_usable);
         Some(advice)
+    }
+
+    /// Does this advice describe the content in hand?
+    ///
+    /// The conservative reading is the safe one: only [`AdviceFreshness::Fresh`]
+    /// licenses using the ranges. Unknown is not optimism — an advisor that did
+    /// not say what it read cannot be taken at its word about line numbers.
+    pub fn freshness(&self, content: &str) -> AdviceFreshness {
+        match self.source_sha256.as_deref() {
+            None => AdviceFreshness::Unknown,
+            Some(declare) => {
+                if declare.eq_ignore_ascii_case(&sha256_hex(content.as_bytes())) {
+                    AdviceFreshness::Fresh
+                } else {
+                    AdviceFreshness::Stale
+                }
+            }
+        }
+    }
+
+    /// Advice that may be acted upon, or nothing.
+    ///
+    /// Returning `None` costs a compression opportunity. Returning stale ranges
+    /// costs correctness, silently. The trade is not close.
+    pub fn applies_to<'a>(&'a self, content: &str) -> Option<&'a Self> {
+        match self.freshness(content) {
+            AdviceFreshness::Fresh => Some(self),
+            AdviceFreshness::Stale | AdviceFreshness::Unknown => None,
+        }
     }
 
     /// True when the advice protects this line.
@@ -128,6 +187,20 @@ impl RetentionAdvice {
     }
 }
 
+/// Lowercase hex SHA-256 of the bytes an advisor read, for producers that need
+/// to stamp their advice.
+pub fn sha256_hex_public(bytes: &[u8]) -> String {
+    sha256_hex(bytes)
+}
+
+/// Lowercase hex SHA-256, using the digest the crate already depends on.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(bytes);
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// A range we can act on: ordered, in-file, and not a weight we cannot compare.
 fn range_is_usable(r: &RetentionRange) -> bool {
     r.start_line >= 1 && r.end_line >= r.start_line && r.weight.is_finite()
@@ -136,6 +209,64 @@ fn range_is_usable(r: &RetentionRange) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn un_conseil_sans_empreinte_n_est_pas_applicable() {
+        // Ne rien savoir n'est pas une raison de faire confiance.
+        let advice =
+            RetentionAdvice::from_json(r#"{"ranges":[{"start_line":1,"end_line":2}]}"#).unwrap();
+        assert_eq!(advice.freshness("peu importe"), AdviceFreshness::Unknown);
+        assert!(advice.applies_to("peu importe").is_none());
+    }
+
+    #[test]
+    fn un_conseil_perime_est_refuse() {
+        // Le cas qui rend le mecanisme dangereux sans cette verification : un
+        // index construit hier, un fichier modifie depuis, et des plages qui
+        // protegent les mauvaises lignes avec le meme aplomb que si elles
+        // etaient justes.
+        let hier = "fn a() {}\n";
+        let aujourdhui = "// une ligne ajoutee en tete\nfn a() {}\n";
+        let empreinte = super::sha256_hex(hier.as_bytes());
+        let brut = format!(
+            r#"{{"source_sha256":"{empreinte}","ranges":[{{"start_line":1,"end_line":1}}]}}"#
+        );
+        let advice = RetentionAdvice::from_json(&brut).unwrap();
+
+        assert_eq!(advice.freshness(hier), AdviceFreshness::Fresh);
+        assert!(advice.applies_to(hier).is_some());
+
+        assert_eq!(advice.freshness(aujourdhui), AdviceFreshness::Stale);
+        assert!(advice.applies_to(aujourdhui).is_none());
+    }
+
+    #[test]
+    fn une_empreinte_en_majuscules_reste_reconnue() {
+        let contenu = "fn a() {}\n";
+        let empreinte = super::sha256_hex(contenu.as_bytes()).to_uppercase();
+        let brut = format!(
+            r#"{{"source_sha256":"{empreinte}","ranges":[{{"start_line":1,"end_line":1}}]}}"#
+        );
+        let advice = RetentionAdvice::from_json(&brut).unwrap();
+        assert_eq!(advice.freshness(contenu), AdviceFreshness::Fresh);
+    }
+
+    #[test]
+    fn meme_taille_et_meme_date_ne_suffisent_pas() {
+        // Cas signale par la contre-revue : deux contenus de taille identique.
+        // Une comparaison par taille ou par date les confondrait ; l'empreinte
+        // ne les confond pas.
+        let a = "fn alpha() {}\n";
+        let b = "fn gamma() {}\n";
+        assert_eq!(a.len(), b.len());
+        let empreinte = super::sha256_hex(a.as_bytes());
+        let brut = format!(
+            r#"{{"source_sha256":"{empreinte}","ranges":[{{"start_line":1,"end_line":1}}]}}"#
+        );
+        let advice = RetentionAdvice::from_json(&brut).unwrap();
+        assert_eq!(advice.freshness(a), AdviceFreshness::Fresh);
+        assert_eq!(advice.freshness(b), AdviceFreshness::Stale);
+    }
 
     #[test]
     fn parse_un_document_simple() {
