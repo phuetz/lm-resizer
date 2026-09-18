@@ -8506,6 +8506,163 @@ expected = "error: bad\n"
         }
     }
 
+    /// Le corpus figé, côté filtres par commande.
+    ///
+    /// Le corpus de `crates/lm-resizer-core/tests/corpus_fige.rs` mesure le
+    /// pipeline seul, et il a montré que celui-ci ne réduit qu'un cas sur
+    /// quatorze. C'est normal : l'essentiel du gain vient des filtres par
+    /// commande, qui vivent ici, dans le binaire, et s'appliquent AVANT le
+    /// pipeline sur le chemin `exec`.
+    ///
+    /// Sans ce pendant, la mesure publiée serait trompeuse : on rapporterait le
+    /// maillon qui gagne le moins.
+    fn corpus_commandes() -> Vec<(&'static str, Vec<String>, String)> {
+        let cmd = |parts: &[&str]| parts.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        vec![
+            (
+                "rg, resultat court",
+                cmd(&["rg", "-n", "motif"]),
+                "a.rs:1:x\nb.rs:2:y\n".to_string(),
+            ),
+            (
+                "rg, resultat volumineux",
+                cmd(&["rg", "-n", "motif"]),
+                (0..600)
+                    .map(|n| format!("src/module{n}.rs:{n}:une ligne de resultat plutot longue\n"))
+                    .collect(),
+            ),
+            (
+                "git status propre",
+                cmd(&["git", "status"]),
+                "On branch main\nnothing to commit, working tree clean\n".to_string(),
+            ),
+            (
+                "git status charge",
+                cmd(&["git", "status"]),
+                format!(
+                    "On branch main\nChanges not staged for commit:\n{}",
+                    (0..300)
+                        .map(|n| format!("\tmodified:   src/fichier{n}.rs\n"))
+                        .collect::<String>()
+                ),
+            ),
+            (
+                "cargo test vert",
+                cmd(&["cargo", "test"]),
+                format!(
+                    "{}test result: ok. 400 passed; 0 failed; 0 ignored\n",
+                    (0..400)
+                        .map(|n| format!("test module::cas_{n} ... ok\n"))
+                        .collect::<String>()
+                ),
+            ),
+            (
+                "cargo test rouge",
+                cmd(&["cargo", "test"]),
+                format!(
+                    "{}test result: FAILED. 398 passed; 2 failed; 0 ignored\n",
+                    (0..400)
+                        .map(|n| if n % 200 == 3 {
+                            format!("test module::cas_{n} ... FAILED\n")
+                        } else {
+                            format!("test module::cas_{n} ... ok\n")
+                        })
+                        .collect::<String>()
+                ),
+            ),
+            ("git diff volumineux", cmd(&["git", "diff"]), {
+                let mut d = String::from("diff --git a/gros.rs b/gros.rs\n");
+                for n in 0..1500 {
+                    d.push_str(&format!("+    let variable_{n} = calcul({n});\n"));
+                }
+                d
+            }),
+            (
+                "listing volumineux",
+                cmd(&["ls", "-la"]),
+                (0..500)
+                    .map(|n| format!("-rw-r--r-- 1 u u {n} fichier{n}.txt\n"))
+                    .collect(),
+            ),
+            (
+                "commande inconnue, sortie longue",
+                cmd(&["outil-inconnu", "--tout"]),
+                "une ligne de sortie quelconque\n".repeat(800),
+            ),
+            (
+                "unicode et ANSI",
+                cmd(&["rg", "motif"]),
+                (0..200)
+                    .map(|n| format!("\u{1b}[31msrc/é{n}.rs\u{1b}[0m:{n}:中文 🙂\n"))
+                    .collect(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn aucun_filtre_du_corpus_ne_fait_grossir_sa_sortie() {
+        // La propriete que la porte garantit, verifiee sur des formes reelles
+        // plutot que sur un seul exemple.
+        let mut fautes = Vec::new();
+        for (nom, commande, brut) in corpus_commandes() {
+            let (filtre, sortie, porte) = filter_command_output_gated(&commande, &brut);
+            if sortie.len() > brut.len() {
+                fautes.push(format!(
+                    "« {nom} » [{filtre}] : {} octets pour {} en entree",
+                    sortie.len(),
+                    brut.len()
+                ));
+            }
+            if porte && sortie != brut {
+                fautes.push(format!(
+                    "« {nom} » : la porte a tire mais la sortie n'est pas l'original exact"
+                ));
+            }
+        }
+        assert!(fautes.is_empty(), "\n{}", fautes.join("\n"));
+    }
+
+    #[test]
+    fn le_corpus_de_commandes_mesure_octets_et_jetons() {
+        // Octets ET jetons, cote a cote, avec le tokenizer nomme et sans
+        // promettre d'equivalence : ils ne bougent pas du meme pas.
+        let tokenizer = lm_resizer_core::tokenizer::get_tokenizer("gpt-4o");
+        eprintln!("\n=== corpus fige, filtres par commande — tokenizer gpt-4o ===");
+        for (nom, commande, brut) in corpus_commandes() {
+            let (filtre, sortie, porte) = filter_command_output_gated(&commande, &brut);
+            let pct = |a: usize, b: usize| {
+                if a == 0 {
+                    0.0
+                } else {
+                    (1.0 - b as f64 / a as f64) * 100.0
+                }
+            };
+            eprintln!(
+                "{:<30} [{:<16}]{} octets {:>7} -> {:>7} ({:>5.1} %)   jetons {:>6} -> {:>6} ({:>5.1} %)",
+                nom,
+                filtre,
+                if porte { " porte" } else { "      " },
+                brut.len(),
+                sortie.len(),
+                pct(brut.len(), sortie.len()),
+                tokenizer.count_text(&brut),
+                tokenizer.count_text(&sortie),
+                pct(tokenizer.count_text(&brut), tokenizer.count_text(&sortie))
+            );
+        }
+        eprintln!("\nLes pourcentages d'octets et de jetons ne sont pas interchangeables.\n");
+    }
+
+    #[test]
+    fn les_filtres_du_corpus_sont_deterministes() {
+        for (nom, commande, brut) in corpus_commandes() {
+            let a = filter_command_output(&commande, &brut);
+            let b = filter_command_output(&commande, &brut);
+            assert_eq!(a.0, b.0, "« {nom} » change de filtre d'une fois a l'autre");
+            assert_eq!(a.1, b.1, "« {nom} » ne rend pas le meme resultat deux fois");
+        }
+    }
+
     #[test]
     fn un_filtre_qui_grossit_est_refuse() {
         // Cas réel le plus coûteux du corpus : une recherche `rg` de 15 Ko que
