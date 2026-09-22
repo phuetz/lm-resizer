@@ -231,6 +231,7 @@ pub fn compress_tool_call_result(
                 command: format!("mcp:{tool_name}"),
                 exit_code: 0,
                 filter: "mcp_proxy".to_string(),
+                filter_not_smaller: false,
                 original_bytes,
                 filtered_bytes: original_bytes,
                 compressed_bytes,
