@@ -2206,6 +2206,13 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
         return ("js_test_runner".to_string(), filter_vitest(raw));
     }
 
+    // `docker build` sous ses quatre formes. Les filtres intégrés couvraient
+    // `docker ps` et `docker logs` ; le build, lui, tombait dans le générique
+    // alors que c'est la commande docker la plus bavarde.
+    if command_runs_docker_build(command) {
+        return ("docker_build".to_string(), filter_docker_build(raw));
+    }
+
     match (program.as_str(), sub) {
         ("git", "status") => ("git_status".to_string(), filter_git_status(raw)),
         ("git", "diff") => ("diff_summary".to_string(), filter_diff_summary(raw)),
@@ -3157,6 +3164,143 @@ fn filter_cargo_test(raw: &str) -> String {
 
     if kept.is_empty() {
         "cargo test: passed\n".to_string()
+    } else {
+        append_omitted(kept, skipped)
+    }
+}
+
+/// Les verbes docker qui excluent un build s'ils viennent en premier.
+///
+/// Ils servent de butée : `build` ne compte que s'il arrive avant eux. Sans
+/// cette butée, `docker run build` — une image nommée « build » — serait pris
+/// pour un build, et `docker ps` / `docker logs` se verraient voler leur
+/// filtre.
+const DOCKER_NON_BUILD_VERBS: [&str; 14] = [
+    "run", "ps", "logs", "exec", "pull", "push", "up", "down", "images", "inspect", "rm", "rmi",
+    "cp", "start",
+];
+
+/// Reconnaît un build d'image, sous les formes que docker et podman acceptent.
+///
+/// La position du verbe n'est pas fixe : `docker --context distant build .`
+/// place un drapeau global et **sa valeur** avant `build`. On cherche donc
+/// `build` parmi les arguments, en s'arrêtant au premier verbe concurrent.
+///
+/// Limite assumée : un contexte ou un réseau qui s'appellerait littéralement
+/// « build » (`docker --context build ps`) serait pris à tort. Le coût se
+/// limite à un filtre mal choisi, que la porte de non-croissance borne.
+fn command_runs_docker_build(command: &[String]) -> bool {
+    let Some(first) = command.first().map(|s| command_basename(s)) else {
+        return false;
+    };
+    if !matches!(
+        first.as_str(),
+        "docker" | "podman" | "docker-compose" | "podman-compose"
+    ) {
+        return false;
+    }
+    command
+        .iter()
+        .skip(1)
+        .filter(|tok| !tok.starts_with('-'))
+        .map(String::as_str)
+        .take_while(|tok| !DOCKER_NON_BUILD_VERBS.contains(tok))
+        .any(|tok| tok == "build")
+}
+
+/// Une ligne de `docker build` qui annonce un échec.
+///
+/// BuildKit dit l'échec trois fois — sur l'étape (`#8 ERROR:`), dans le rappel
+/// (`> [4/9] RUN …`) et en conclusion (`failed to solve:`). Reconnaître
+/// n'importe laquelle suffit à basculer le filtre en mode « tout garder ».
+fn docker_build_line_is_failure(line: &str) -> bool {
+    line.contains("ERROR:")
+        || line.contains("failed to solve")
+        || line.contains("did not complete successfully")
+}
+
+/// Le bruit mécanique de BuildKit : un préfixe `#N` suivi d'un mot d'état.
+///
+/// Ces lignes ne portent que des octets transférés, des durées et des
+/// condensats de couches. Elles ne disent rien qu'un agent puisse utiliser, et
+/// elles constituent l'essentiel du volume d'un build qui se passe bien.
+fn docker_build_line_is_mechanical(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix('#') else {
+        return false;
+    };
+    let Some((step, rest)) = rest.split_once(' ') else {
+        return false;
+    };
+    if !step.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    // `writing image` et `naming to` portent l'identité de ce qui a été
+    // produit : ce sont les deux lignes d'export qu'on garde.
+    matches!(
+        rest.split_whitespace().next(),
+        Some(
+            "DONE"
+                | "CACHED"
+                | "CANCELED"
+                | "transferring"
+                | "extracting"
+                | "resolve"
+                | "preparing"
+                | "sha256:"
+        )
+    ) || rest.starts_with("exporting layers")
+        || rest.starts_with("exporting manifest")
+        || rest.starts_with("exporting config")
+        || rest.starts_with("sha256:")
+}
+
+/// Sortie d'un `docker build` (BuildKit).
+///
+/// Un build qui réussit est presque entièrement mécanique : numéros d'étape,
+/// octets transférés, durées, couches en cache. Un build qui échoue se lit au
+/// contraire en entier — le bloc `ERROR:`, le rappel de l'étape fautive et
+/// l'extrait du Dockerfile sont la seule chose qui compte, et les couper
+/// rendrait la sortie inutile. Le filtre traite donc les deux cas séparément
+/// plutôt que d'appliquer la même coupe aux deux.
+fn filter_docker_build(raw: &str) -> String {
+    let mut kept = Vec::new();
+    let mut skipped = 0usize;
+    let mut in_failure = false;
+
+    for line in raw.lines() {
+        if !in_failure && docker_build_line_is_failure(line) {
+            in_failure = true;
+        }
+        // À partir du premier signe d'échec, on ne trie plus : le diagnostic
+        // est un bloc, et une ligne retirée au milieu le rend illisible.
+        if in_failure {
+            kept.push(line.to_string());
+            continue;
+        }
+        if line.trim().is_empty() || docker_build_line_is_mechanical(line) {
+            skipped += 1;
+            continue;
+        }
+        let lower = line.to_ascii_lowercase();
+        // `npm ERR!` et consorts ne contiennent pas le mot « error » : sans ce
+        // motif-là, une sortie d'outil en détresse passerait pour du bruit.
+        if lower.contains("error")
+            || lower.contains("err!")
+            || lower.contains("warn")
+            || lower.contains("deprecated")
+            || lower.contains("failed")
+            || lower.contains("fatal")
+            || line.contains("writing image")
+            || line.contains("naming to")
+        {
+            kept.push(line.to_string());
+        } else {
+            skipped += 1;
+        }
+    }
+
+    if kept.is_empty() {
+        "docker build: completed\n".to_string()
     } else {
         append_omitted(kept, skipped)
     }
@@ -9226,6 +9370,194 @@ expected = "error: bad\n"
         }
     }
 
+    /// Un `docker build` BuildKit qui se termine bien.
+    ///
+    /// Forme reproduite depuis la sortie réelle de BuildKit : une étape produit
+    /// trois à quatre lignes (en-tête, transfert, `DONE`), et un Dockerfile
+    /// ordinaire en compte des dizaines. C'est ce volume-là qui entrait entier
+    /// dans le contexte.
+    fn docker_build_reussi() -> String {
+        let mut out = String::from(
+            "#1 [internal] load build definition from Dockerfile\n\
+             #1 transferring dockerfile: 1.42kB done\n\
+             #1 DONE 0.0s\n\
+             \n\
+             #2 [internal] load metadata for docker.io/library/node:20-alpine\n\
+             #2 DONE 0.4s\n\
+             \n\
+             #3 [internal] load .dockerignore\n\
+             #3 transferring context: 128B done\n\
+             #3 DONE 0.0s\n\
+             \n",
+        );
+        for n in 4..40 {
+            out.push_str(&format!("#{n} [{}/40] RUN etape numero {n}\n", n - 3));
+            out.push_str(&format!("#{n} sha256:c0ffee{n} 32.4MB / 64.8MB 1.2s\n"));
+            out.push_str(&format!("#{n} extracting sha256:c0ffee{n} 0.3s done\n"));
+            out.push_str(&format!("#{n} DONE 1.{n}s\n\n"));
+        }
+        out.push_str(
+            "#40 [runtime 8/8] RUN npm ci --omit=dev\n\
+             #40 12.34 npm warn deprecated inflight@1.0.6: This module is not supported\n\
+             #40 45.67 added 1204 packages in 45s\n\
+             #40 DONE 46.1s\n\
+             \n\
+             #41 exporting to image\n\
+             #41 exporting layers 2.10s done\n\
+             #41 writing image sha256:9f1c2b3a4d5e6f70 done\n\
+             #41 naming to docker.io/library/app:latest done\n\
+             #41 DONE 2.3s\n",
+        );
+        out
+    }
+
+    /// Le même build, mais l'étape `npm ci` échoue.
+    ///
+    /// BuildKit répète alors le diagnostic sous trois formes — `#N ERROR:`, le
+    /// rappel encadré de l'étape, puis l'extrait du Dockerfile avec la ligne
+    /// fautive marquée `>>>`. C'est exactement ce qu'un agent doit recevoir.
+    fn docker_build_echoue() -> String {
+        let mut out = docker_build_reussi();
+        // On remplace la queue « export réussi » par la queue d'échec réelle.
+        let coupe = out.find("#41 exporting to image").expect("queue d'export");
+        out.truncate(coupe);
+        out.push_str(
+            "#40 45.31 npm ERR! code ELIFECYCLE\n\
+             #40 45.31 npm ERR! errno 1\n\
+             #40 ERROR: process \"/bin/sh -c npm ci --omit=dev\" did not complete successfully: exit code 1\n\
+             ------\n\
+             \u{a0}> [runtime 8/8] RUN npm ci --omit=dev:\n\
+             45.31 npm ERR! code ELIFECYCLE\n\
+             45.31 npm ERR! errno 1\n\
+             ------\n\
+             Dockerfile:24\n\
+             --------------------\n\
+             \u{a0}\u{a0}22 |     COPY package*.json ./\n\
+             \u{a0}\u{a0}23 |\n\
+             \u{a0}\u{a0}24 | >>> RUN npm ci --omit=dev\n\
+             \u{a0}\u{a0}25 |\n\
+             --------------------\n\
+             ERROR: failed to solve: process \"/bin/sh -c npm ci --omit=dev\" did not complete successfully: exit code 1\n",
+        );
+        out
+    }
+
+    #[test]
+    fn docker_build_est_route_sous_ses_quatre_formes() {
+        let v = |args: &[&str]| {
+            command_runs_docker_build(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+        };
+        assert!(v(&["docker", "build", "."]));
+        assert!(v(&["podman", "build", "-t", "app", "."]));
+        assert!(v(&["docker", "buildx", "build", "--push", "."]));
+        assert!(v(&["docker", "compose", "build"]));
+        assert!(v(&["docker-compose", "build", "web"]));
+        // Un drapeau avant le verbe ne doit pas masquer la sous-commande.
+        assert!(v(&["docker", "--context", "distant", "build", "."]));
+        // Et surtout, rien ne doit être pris aux commandes docker déjà filtrées
+        // ailleurs, ni aux commandes qui parlent seulement de build.
+        assert!(!v(&["docker", "ps", "-a"]));
+        assert!(!v(&["docker", "logs", "app"]));
+        assert!(!v(&["docker", "compose", "up", "-d"]));
+        assert!(!v(&["docker", "run", "build"]));
+        assert!(!v(&["grep", "build", "Dockerfile"]));
+    }
+
+    #[test]
+    fn docker_build_reussi_est_reduit_sans_perdre_ce_qui_sert() {
+        let brut = docker_build_reussi();
+        let (filtre, sortie) = filter_command_output(
+            &["docker", "build", "-t", "app:latest", "."]
+                .map(String::from)
+                .to_vec(),
+            &brut,
+        );
+        assert_eq!(filtre, "docker_build");
+        // L'identité de l'image produite survit : sans elle, la sortie ne dit
+        // plus ce qui a été construit.
+        assert!(sortie.contains("writing image sha256:9f1c2b3a4d5e6f70"));
+        assert!(sortie.contains("naming to docker.io/library/app:latest"));
+        // L'avertissement de dépendance aussi — c'est une information, pas du
+        // bruit de progression.
+        assert!(sortie.contains("npm warn deprecated inflight@1.0.6"));
+        // Le bruit mécanique, lui, disparaît.
+        assert!(!sortie.contains("DONE 46.1s"));
+        assert!(!sortie.contains("transferring dockerfile"));
+        assert!(!sortie.contains("extracting sha256:"));
+        // Et le compte des lignes retirées reste visible.
+        assert!(sortie.contains("omitted"));
+        assert!(
+            sortie.len() < brut.len() / 10,
+            "reduction insuffisante : {} octets pour {}",
+            sortie.len(),
+            brut.len()
+        );
+        // Le banc doit tomber contre l'ancienne logique, sinon il ne prouve
+        // rien : avant ce filtre, `docker build` tombait dans le générique, qui
+        // garde ses 240 premières lignes — c'est-à-dire tout ce build.
+        let ancien = filter_generic(&brut, 240);
+        assert_eq!(
+            ancien.len(),
+            brut.len(),
+            "le generique ne rendait pas la sortie entiere : le gain mesure serait faux"
+        );
+        assert!(sortie.len() * 10 < ancien.len());
+    }
+
+    #[test]
+    fn docker_build_echoue_conserve_le_diagnostic_entier() {
+        let brut = docker_build_echoue();
+        let (filtre, sortie) =
+            filter_command_output(&["docker", "build", "."].map(String::from).to_vec(), &brut);
+        assert_eq!(filtre, "docker_build");
+        // Les trois formes du diagnostic doivent être là, en entier : la cause,
+        // l'étape fautive, et la ligne du Dockerfile.
+        for attendu in [
+            "npm ERR! code ELIFECYCLE",
+            "npm ERR! errno 1",
+            "ERROR: process \"/bin/sh -c npm ci --omit=dev\" did not complete successfully: exit code 1",
+            "> [runtime 8/8] RUN npm ci --omit=dev:",
+            "Dockerfile:24",
+            "24 | >>> RUN npm ci --omit=dev",
+            "ERROR: failed to solve:",
+        ] {
+            assert!(
+                sortie.contains(attendu),
+                "diagnostic ampute, manque : {attendu:?}"
+            );
+        }
+        // Le bloc encadré garde ses séparateurs : coupés, il devient illisible.
+        assert_eq!(
+            sortie.matches("------\n").count(),
+            brut.matches("------\n").count(),
+            "separateurs du bloc d'erreur perdus"
+        );
+        // Réduction tout de même réelle : les 36 étapes mécaniques d'avant
+        // l'échec sont parties.
+        assert!(
+            sortie.len() < brut.len() / 4,
+            "reduction insuffisante : {} octets pour {}",
+            sortie.len(),
+            brut.len()
+        );
+    }
+
+    #[test]
+    fn docker_build_ne_fait_pas_grossir_une_sortie_deja_courte() {
+        // La porte de non-croissance couvre le cas général ; on vérifie ici
+        // qu'elle s'applique bien à ce filtre-ci, et que le texte rendu reste
+        // celui du brut plutôt qu'une version gonflée.
+        let brut = "#1 [internal] load build definition from Dockerfile\n#1 DONE 0.0s\n";
+        let (filtre, sortie, porte) =
+            filter_command_output_gated(&["docker", "build", "."].map(String::from).to_vec(), brut);
+        assert_eq!(filtre, "docker_build");
+        assert!(sortie.len() <= brut.len());
+        // Si la porte a tiré, c'est le brut qui ressort : rien n'est inventé.
+        if porte {
+            assert_eq!(sortie, brut);
+        }
+    }
+
     /// Le corpus figé, côté filtres par commande.
     ///
     /// Le corpus de `crates/lm-resizer-core/tests/corpus_fige.rs` mesure le
@@ -9308,6 +9640,16 @@ expected = "error: bad\n"
                 "commande inconnue, sortie longue",
                 cmd(&["outil-inconnu", "--tout"]),
                 "une ligne de sortie quelconque\n".repeat(800),
+            ),
+            (
+                "docker build reussi",
+                cmd(&["docker", "build", "-t", "app:latest", "."]),
+                docker_build_reussi(),
+            ),
+            (
+                "docker build echoue",
+                cmd(&["docker", "build", "."]),
+                docker_build_echoue(),
             ),
             (
                 "unicode et ANSI",
