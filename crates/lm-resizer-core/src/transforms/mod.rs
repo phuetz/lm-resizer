@@ -16,6 +16,7 @@
 //! prod and are returned alongside the parity-equal output for tests.
 
 pub mod adaptive_sizer;
+pub mod advice_structural;
 pub mod anchor_selector;
 pub mod content_detector;
 pub mod detection;
@@ -35,6 +36,7 @@ pub mod pipeline;
 // and is not on the wasm `compress` path — native-only.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod recommendations;
+pub mod retention_advice;
 pub mod safety;
 pub mod search_compressor;
 pub mod smart_crusher;
