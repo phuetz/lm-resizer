@@ -39,6 +39,7 @@ use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use walkdir::WalkDir;
 
 mod advice_cli;
+mod parity_filters;
 mod provider_usage;
 
 use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
@@ -2189,6 +2190,9 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
         .is_some_and(|p| matches!(command_basename(p).as_str(), "rtk" | "rtk.exe"))
     {
         return ("rtk_owned".to_string(), raw.to_string());
+    }
+    if let Some((name, summary)) = parity_filters::summarize_for_command(command, raw) {
+        return (format!("structured:{name}"), summary);
     }
     let command_text = normalized_command_text(command);
     if let Some((filter, filtered)) = apply_toml_filters(&command_text, raw) {
@@ -5805,6 +5809,23 @@ keep_lines_matching = [
 max_lines = 180
 on_empty = "dotnet: completed"
 
+# `dotnet format --verify-no-changes` prints one diagnostic per line, then
+# analyzer noise ("Running 154 analyzers") that is not a formatting fact.
+[[filters]]
+name = "dotnet-format"
+match_command = "^dotnet\\s+format\\b|^dotnet-format\\b"
+strip_ansi = true
+keep_lines_matching = [
+  "\\berror\\b",
+  "\\bwarning\\b",
+  "WHITESPACE",
+  "Formatted ",
+  "Format complete",
+  "verify",
+]
+max_lines = 80
+on_empty = "dotnet format: no changes"
+
 [[filters]]
 name = "jvm-build"
 match_command = "^(mvn|gradle|\\.\\/gradlew|gradlew)(\\s|$)"
@@ -8489,6 +8510,220 @@ command = "node"
             assert!(out.contains(attendu), "{attendu} absent de:\n{out}");
         }
         assert!(!out.contains("✓"), "{out}");
+    }
+
+    /// Extrait du TRX réel du 23/09 (SDK 10.0.300, xUnit 2.9.3), pas une
+    /// reconstitution : nom, message, Expected/Actual, pile `fichier:ligne`.
+    const TRX_REEL: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Results>
+    <UnitTestResult testName="Calc.Tests.CalculTests.Passe_01" outcome="Passed" />
+    <UnitTestResult testName="Calc.Tests.CalculTests.Liste_contient_element" outcome="Failed">
+      <Output><ErrorInfo>
+        <Message>Assert.Contains() Failure: Item not found in collection
+Collection: ["alpha", "beta"]
+Not found:  "gamma"</Message>
+        <StackTrace>   at Calc.Tests.CalculTests.Liste_contient_element() in /tmp/work/src/Calc.Tests/CalculTests.cs:line 32
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+      </ErrorInfo></Output>
+    </UnitTestResult>
+    <UnitTestResult testName="Calc.Tests.CalculTests.Somme_theorie(a: 200, b: 1, attendu: 201)" outcome="Failed">
+      <Output><ErrorInfo>
+        <Message>Assert.Equal() Failure: Values differ
+Expected: 201
+Actual:   202</Message>
+        <StackTrace>   at Calc.Tests.CalculTests.Somme_theorie(Int32 a, Int32 b, Int32 attendu) in /tmp/work/src/Calc.Tests/CalculTests.cs:line 26</StackTrace>
+      </ErrorInfo></Output>
+    </UnitTestResult>
+    <UnitTestResult testName="Calc.Tests.CalculTests.Division_par_zero_leve" outcome="Failed">
+      <Output><ErrorInfo>
+        <Message>System.DivideByZeroException : Attempted to divide by zero.</Message>
+        <StackTrace>   at Calc.Tests.Calcul.Diviser(Int32 a, Int32 b) in /tmp/work/src/Calc.Tests/CalculTests.cs:line 8
+   at Calc.Tests.CalculTests.Division_par_zero_leve() in /tmp/work/src/Calc.Tests/CalculTests.cs:line 20</StackTrace>
+      </ErrorInfo></Output>
+    </UnitTestResult>
+  </Results>
+  <ResultSummary outcome="Failed">
+    <Counters total="18" passed="13" failed="4" />
+  </ResultSummary>
+</TestRun>"#;
+
+    #[test]
+    fn trx_reel_garde_le_nom_le_message_et_la_pile() {
+        let (filter, out) = route_command_filter(&cmd(&["dotnet", "test"]), TRX_REEL);
+        assert_eq!(filter, "structured:trx");
+        for fact in [
+            "total=\"18\"",
+            "passed=\"13\"",
+            "failed=\"4\"",
+            "Calc.Tests.CalculTests.Liste_contient_element",
+            "Collection: [\"alpha\", \"beta\"]",
+            "Not found:  \"gamma\"",
+            "CalculTests.cs:line 32",
+            "Calc.Tests.CalculTests.Somme_theorie(a: 200, b: 1, attendu: 201)",
+            "Expected: 201",
+            "Actual:   202",
+            "CalculTests.cs:line 26",
+            "System.DivideByZeroException : Attempted to divide by zero.",
+            "CalculTests.cs:line 8",
+            "CalculTests.cs:line 20",
+        ] {
+            assert!(out.contains(fact), "{fact} absent de:\n{out}");
+        }
+        assert!(!out.contains("Passe_01"), "{out}");
+        assert!(!out.contains("MethodBaseInvoker"), "{out}");
+    }
+
+    #[test]
+    fn binlog_relie_par_le_chemin_bl_garde_code_et_colonne() {
+        let dir = std::env::temp_dir().join(format!("lm-binlog-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("build.binlog");
+        let bytes = binlog_minimal_cs0103();
+        std::fs::write(&path, &bytes).expect("écrire le binlog");
+        let (filter, out) = route_command_filter(
+            &cmd(&["dotnet", "build", &format!("-bl:{}", path.display())]),
+            "Build FAILED.\n",
+        );
+        assert_eq!(filter, "structured:binlog");
+        for fact in [
+            "CS0103",
+            "The name 'inconnu' does not exist in the current context",
+            "(2,19)",
+            "CS0219",
+            "(1,5)",
+        ] {
+            assert!(out.contains(fact), "{fact} absent de:\n{out}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn binlog_minimal_cs0103() -> Vec<u8> {
+        fn i32(buf: &mut Vec<u8>, value: i32) {
+            buf.extend(value.to_le_bytes());
+        }
+        fn i7(buf: &mut Vec<u8>, mut value: u32) {
+            loop {
+                let mut byte = (value & 0x7f) as u8;
+                value >>= 7;
+                if value != 0 {
+                    byte |= 0x80;
+                }
+                buf.push(byte);
+                if value == 0 {
+                    break;
+                }
+            }
+        }
+        fn string_rec(buf: &mut Vec<u8>, text: &str) {
+            i7(buf, 24);
+            i7(buf, text.len() as u32);
+            buf.extend(text.as_bytes());
+        }
+        fn diag(
+            buf: &mut Vec<u8>,
+            kind: u32,
+            message: u32,
+            code: u32,
+            file: u32,
+            line: u32,
+            col: u32,
+        ) {
+            let mut body = Vec::new();
+            i7(&mut body, 4);
+            i7(&mut body, message);
+            i7(&mut body, 2);
+            i7(&mut body, 1);
+            i7(&mut body, code);
+            i7(&mut body, file);
+            i7(&mut body, 13);
+            i7(&mut body, line);
+            i7(&mut body, col);
+            i7(buf, kind);
+            i7(buf, body.len() as u32);
+            buf.extend(body);
+        }
+        let mut buf = Vec::new();
+        i32(&mut buf, 25);
+        i32(&mut buf, 18);
+        string_rec(
+            &mut buf,
+            "The name 'inconnu' does not exist in the current context",
+        );
+        string_rec(&mut buf, "CS0103");
+        string_rec(&mut buf, "/tmp/work/src/BuildFail/Program.cs");
+        string_rec(&mut buf, "/tmp/work/src/BuildFail/BuildFail.csproj");
+        string_rec(
+            &mut buf,
+            "The variable 'jamaisUtilisee' is assigned but its value is never used",
+        );
+        string_rec(&mut buf, "CS0219");
+        diag(&mut buf, 9, 10, 11, 12, 2, 19);
+        diag(&mut buf, 10, 14, 15, 12, 1, 5);
+        i7(&mut buf, 0);
+        buf
+    }
+
+    #[test]
+    fn dotnet_format_json_garde_le_fichier_et_le_diagnostic() {
+        let raw = r#"[{"FilePath":"/tmp/work/src/FormatMe/Program.cs","FileChanges":[{"LineNumber":1,"CharNumber":15,"DiagnosticId":"WHITESPACE","FormatDescription":"Fix whitespace formatting. Insert '\\n'."},{"LineNumber":5,"CharNumber":28,"DiagnosticId":"WHITESPACE","FormatDescription":"Fix whitespace formatting. Delete 1 characters."}]}]"#;
+        let (filter, out) =
+            route_command_filter(&cmd(&["dotnet", "format", "--verify-no-changes"]), raw);
+        assert_eq!(filter, "structured:dotnet-format");
+        assert!(out.contains("/tmp/work/src/FormatMe/Program.cs(1,15): error WHITESPACE"));
+        assert!(out.contains("Delete 1 characters."));
+        assert!(out.contains("(5,28)"));
+    }
+
+    #[test]
+    fn dotnet_format_console_ecarte_le_bruit_des_analyseurs() {
+        let raw = "\
+Formatting code files in workspace '/tmp/work/src/FormatMe/FormatMe.csproj'.\n\
+Project FormatMe is using configuration from '/opt/dotnet/sdk/10.0.300/Sdks/Microsoft.NET.Sdk/analyzers/build/config/analysislevel_10_default.globalconfig'.\n\
+/tmp/work/src/FormatMe/Program.cs(1,15): error WHITESPACE: Fix whitespace formatting. Insert '\\n'. [/tmp/work/src/FormatMe/FormatMe.csproj]\n\
+/tmp/work/src/FormatMe/Program.cs(3,24): error WHITESPACE: Fix whitespace formatting. Delete 1 characters. [/tmp/work/src/FormatMe/FormatMe.csproj]\n\
+Running 154 analyzers on FormatMe.\n\
+Format complete in 2674ms.\n";
+        let (filter, out) =
+            route_command_filter(&cmd(&["dotnet", "format", "--verify-no-changes"]), raw);
+        assert_eq!(filter, "toml:dotnet-format");
+        assert!(out.contains("Program.cs(1,15): error WHITESPACE"));
+        assert!(out.contains("Delete 1 characters."));
+        assert!(!out.contains("Running 154 analyzers"), "{out}");
+        assert!(!out.contains("analysislevel"), "{out}");
+    }
+
+    #[test]
+    fn playwright_json_garde_expected_received_et_le_titre() {
+        let raw = r#"{"config":{"version":"1.60.0"},"stats":{"expected":12,"unexpected":2,"skipped":0,"flaky":0,"duration":8602.1},"suites":[{"title":"panier.spec.js","file":"panier.spec.js","specs":[
+            {"title":"article 3 visible","ok":true,"tests":[{"results":[{"status":"passed","errors":[]}]}]},
+            {"title":"le total est juste","ok":false,"file":"panier.spec.js","tests":[{"results":[{"status":"failed","error":{"message":"Error: expect(locator).toHaveText(expected) failed\nLocator: locator('#total')\nExpected: \"42,90 €\"\nReceived: \"41,90 €\"\n","stack":"at /tmp/pw/tests/panier.spec.js:11:40","location":{"file":"/tmp/pw/tests/panier.spec.js","line":11,"column":40}}}]}]},
+            {"title":"le bouton confirmer existe","ok":false,"file":"panier.spec.js","tests":[{"results":[{"status":"failed","error":{"message":"TimeoutError: locator.click: Timeout 1000ms exceeded.\n","location":{"file":"/tmp/pw/tests/panier.spec.js","line":15,"column":36}}}]}]}
+        ],"suites":[]}],"errors":[]}"#;
+        let (filter, out) =
+            route_command_filter(&cmd(&["playwright", "test", "--reporter=json"]), raw);
+        assert_eq!(filter, "structured:playwright-json");
+        for fact in [
+            "\"expected\": 12",
+            "\"unexpected\": 2",
+            "le total est juste",
+            "Expected: \"42,90 €\"",
+            "Received: \"41,90 €\"",
+            "locator('#total')",
+            "panier.spec.js:11:40",
+            "le bouton confirmer existe",
+            "TimeoutError: locator.click: Timeout 1000ms exceeded.",
+            "panier.spec.js:15:36",
+        ] {
+            assert!(out.contains(fact), "{fact} absent de:\n{out}");
+        }
+        assert!(!out.contains("article 3 visible"), "{out}");
+        assert!(
+            out.len() < raw.len() / 2,
+            "pas de réduction: {} -> {}",
+            raw.len(),
+            out.len()
+        );
     }
 
     #[test]
