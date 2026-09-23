@@ -1388,6 +1388,32 @@ enum DispatchResult {
 /// - `PlainText` → no-op (PR-B4 wires Kompress)
 /// - `Html` → no-op (no compressor)
 fn dispatch_compressor(text: &str, content_type: ContentType, query: &str) -> DispatchResult {
+    // Whatever a compressor keeps, the failure lines of the block stay in
+    // front of the model: see `diagnostic_gate`. Measured through this very
+    // path (proxy, `/v1/messages`): a real 84 KB GitHub Actions log reached
+    // the upstream with 0 of its 2 `##[error]` lines.
+    match dispatch_compressor_raw(text, content_type, query) {
+        DispatchResult::Compressed {
+            strategy,
+            compressed,
+        } => {
+            let (compressed, _reinjected) =
+                crate::transforms::diagnostic_gate::reinject_lost_failure_lines(text, &compressed);
+            if compressed.len() >= text.len() {
+                return DispatchResult::NoOp {
+                    content_type: content_type.as_str(),
+                };
+            }
+            DispatchResult::Compressed {
+                strategy,
+                compressed,
+            }
+        }
+        other => other,
+    }
+}
+
+fn dispatch_compressor_raw(text: &str, content_type: ContentType, query: &str) -> DispatchResult {
     if text.is_empty() {
         return DispatchResult::NoOp {
             content_type: content_type.as_str(),

@@ -19,6 +19,7 @@ pub mod adaptive_sizer;
 pub mod anchor_selector;
 pub mod content_detector;
 pub mod detection;
+pub mod diagnostic_gate;
 pub mod diff_compressor;
 // The live-zone dispatcher depends on `crate::tokenizer` (native-only), so it
 // is excluded from wasm32 builds; the wasm `compress` path never uses it.
