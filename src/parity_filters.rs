@@ -5,6 +5,7 @@
 //! `2` suivis de l'index véritable. Sans cette indirection, le code `CS0103`
 //! est lu comme un chemin et la colonne 19 devient un autre champ.
 
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -160,19 +161,277 @@ fn arg_mentions(arg: &str, needle: &str) -> bool {
 
 fn trx_from_command(command: &[String], raw: &str) -> Option<String> {
     if looks_like_trx(raw) {
-        if let Some(summary) = summarize_trx(raw) {
-            return Some(summary);
-        }
+        return summarize_trx(raw);
     }
-    for path in trx_paths(command) {
-        let Ok(text) = std::fs::read_to_string(&path) else {
+    let paths = execution_trx_paths(command, raw);
+    if paths.is_empty() {
+        return None;
+    }
+    let (reports, unreadable) = collect_trx_reports(&paths);
+    if reports.is_empty() && unreadable.is_empty() {
+        return None;
+    }
+    Some(format_trx_reports(&reports, &unreadable))
+}
+
+/// Les lignes « Results File » sont les TRX de cette exécution. Sans elles,
+/// on ne garde que la cohorte de la fin la plus récente : un trou de plus
+/// de trois heures sépare une exécution précédente.
+const TRX_COHORT_GAP_MS: i64 = 3 * 60 * 60 * 1000;
+
+fn execution_trx_paths(command: &[String], raw: &str) -> Vec<PathBuf> {
+    let listed = results_file_paths(raw);
+    let mut paths = if !listed.is_empty() {
+        listed
+    } else {
+        bound_to_latest_cohort(trx_paths(command))
+    };
+    paths.sort();
+    dedup_paths(paths)
+}
+
+fn results_file_paths(raw: &str) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for line in raw.lines() {
+        let Some(rest) = results_file_rest(line) else {
             continue;
         };
-        if let Some(summary) = summarize_trx(&text) {
-            return Some(summary);
+        let path = rest.trim().trim_matches('"');
+        if path.to_ascii_lowercase().ends_with(".trx") {
+            paths.push(PathBuf::from(path));
         }
     }
+    paths
+}
+
+fn results_file_rest(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if let Some(idx) = lower.find("results file:") {
+        return Some(trimmed[idx + "results file:".len()..].trim());
+    }
+    if let Some(idx) = lower.find("fichier de résultats") {
+        return Some(
+            trimmed[idx + "fichier de résultats".len()..]
+                .trim()
+                .trim_start_matches(':')
+                .trim(),
+        );
+    }
     None
+}
+
+fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for path in paths {
+        let key = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        if seen.insert(key) {
+            out.push(path);
+        }
+    }
+    out
+}
+
+fn bound_to_latest_cohort(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    if paths.len() <= 1 {
+        return paths;
+    }
+    let mut dated = Vec::new();
+    let mut undated = Vec::new();
+    for path in paths {
+        match trx_stamp(&path) {
+            Some(when) => dated.push((when, path)),
+            None => undated.push(path),
+        }
+    }
+    if dated.is_empty() {
+        return undated;
+    }
+    dated.sort_by_key(|(when, _)| std::cmp::Reverse(*when));
+    let mut cursor = dated[0].0;
+    let mut kept = Vec::new();
+    for (when, path) in dated {
+        if cursor.saturating_sub(when) <= TRX_COHORT_GAP_MS {
+            cursor = when;
+            kept.push(path);
+        }
+    }
+    kept.extend(undated);
+    kept
+}
+
+fn trx_stamp(path: &Path) -> Option<i64> {
+    if let Ok(bytes) = std::fs::read(path) {
+        if let Ok(text) = String::from_utf8(bytes) {
+            if let Some(ms) =
+                times_attr_millis(&text, "finish").or_else(|| times_attr_millis(&text, "creation"))
+            {
+                return Some(ms);
+            }
+        }
+    }
+    mtime_millis(path)
+}
+
+fn times_attr_millis(xml: &str, name: &str) -> Option<i64> {
+    let times_at = xml.find("<Times")?;
+    let tag = xml[times_at..].split('>').next()?;
+    let key = format!("{name}=\"");
+    let idx = tag.find(&key)?;
+    let value = tag[idx + key.len()..].split('"').next()?;
+    parse_rfc3339_millis(value)
+}
+
+fn mtime_millis(path: &Path) -> Option<i64> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let dur = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(dur.as_millis() as i64)
+}
+
+fn parse_rfc3339_millis(text: &str) -> Option<i64> {
+    if text.len() < 19 || text.as_bytes().get(10) != Some(&b'T') {
+        return None;
+    }
+    let year: i32 = text[0..4].parse().ok()?;
+    let month: u32 = text[5..7].parse().ok()?;
+    let day: u32 = text[8..10].parse().ok()?;
+    let hour: u32 = text[11..13].parse().ok()?;
+    let min: u32 = text[14..16].parse().ok()?;
+    let sec: u32 = text[17..19].parse().ok()?;
+    let mut rest = &text[19..];
+    let mut millis: i64 = 0;
+    if let Some(stripped) = rest.strip_prefix('.') {
+        let digits: String = stripped
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        rest = &stripped[digits.len()..];
+        let mut ms = digits;
+        while ms.len() < 3 {
+            ms.push('0');
+        }
+        millis = ms[..3].parse().ok()?;
+    }
+    let offset_min: i64 = if rest.is_empty() || rest == "Z" {
+        0
+    } else if rest.starts_with('+') || rest.starts_with('-') {
+        let sign: i64 = if rest.starts_with('-') { -1 } else { 1 };
+        let hh: i64 = rest.get(1..3)?.parse().ok()?;
+        let mm: i64 = if rest.len() >= 6 {
+            rest.get(4..6)?.parse().ok()?
+        } else {
+            0
+        };
+        sign * (hh * 60 + mm)
+    } else {
+        return None;
+    };
+    let days = days_from_civil(year, month, day)?;
+    let unix_sec = days * 86400 + i64::from(hour) * 3600 + i64::from(min) * 60 + i64::from(sec)
+        - offset_min * 60;
+    Some(unix_sec * 1000 + millis)
+}
+
+/// Jours écoulés depuis 1970-01-01 (algorithme de Howard Hinnant).
+fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
+    if !(1..=12).contains(&month) || day == 0 || day > 31 {
+        return None;
+    }
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u64;
+    let mp = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + u64::from(doy);
+    Some(i64::from(era) * 146097 + doe as i64 - 719468)
+}
+
+fn collect_trx_reports(paths: &[PathBuf]) -> (Vec<TrxReport>, Vec<String>) {
+    let mut reports = Vec::new();
+    let mut unreadable = Vec::new();
+    for path in paths {
+        match read_trx_report(path) {
+            TrxRead::Ok(report) => reports.push(report),
+            TrxRead::Unreadable => unreadable.push(path.display().to_string()),
+        }
+    }
+    (reports, unreadable)
+}
+
+enum TrxRead {
+    Ok(TrxReport),
+    Unreadable,
+}
+
+fn read_trx_report(path: &Path) -> TrxRead {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => return TrxRead::Unreadable,
+    };
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(_) => return TrxRead::Unreadable,
+    };
+    match parse_trx(&text) {
+        Some(report) => TrxRead::Ok(report),
+        None => TrxRead::Unreadable,
+    }
+}
+
+struct TrxReport {
+    total: u32,
+    passed: u32,
+    failed: u32,
+    failures: Vec<Failure>,
+}
+
+fn format_trx_reports(reports: &[TrxReport], unreadable: &[String]) -> String {
+    let total: u32 = reports.iter().map(|report| report.total).sum();
+    let passed: u32 = reports.iter().map(|report| report.passed).sum();
+    let failed: u32 = reports.iter().map(|report| report.failed).sum();
+    let mut out = if reports.len() > 1 {
+        format!(
+            "dotnet trx: total=\"{total}\" passed=\"{passed}\" failed=\"{failed}\" projects=\"{}\"\n",
+            reports.len()
+        )
+    } else {
+        format!("dotnet trx: total=\"{total}\" passed=\"{passed}\" failed=\"{failed}\"\n")
+    };
+    for path in unreadable {
+        out.push_str("unreadable trx: ");
+        out.push_str(path);
+        out.push('\n');
+    }
+    let failures: Vec<&Failure> = reports
+        .iter()
+        .flat_map(|report| report.failures.iter())
+        .collect();
+    if failures.is_empty() && failed == 0 && unreadable.is_empty() {
+        out.push_str("no failed tests\n");
+        return out;
+    }
+    for failure in failures {
+        out.push_str("Failed ");
+        out.push_str(failure.name.trim());
+        if let Some(project) = &failure.project {
+            out.push_str(" [");
+            out.push_str(project);
+            out.push(']');
+        }
+        out.push('\n');
+        let message = failure.message.trim();
+        if !message.is_empty() {
+            out.push_str(message);
+            out.push('\n');
+        }
+        let stack = useful_stack(&failure.stack);
+        if !stack.is_empty() {
+            out.push_str(&stack);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 fn looks_like_trx(raw: &str) -> bool {
@@ -331,6 +590,11 @@ fn format_report_paths(command: &[String]) -> Vec<PathBuf> {
 }
 
 pub fn summarize_trx(raw: &str) -> Option<String> {
+    let report = parse_trx(raw)?;
+    Some(format_trx_reports(std::slice::from_ref(&report), &[]))
+}
+
+fn parse_trx(raw: &str) -> Option<TrxReport> {
     let xml = raw.trim_start_matches('\u{feff}');
     if !looks_like_trx(xml) {
         return None;
@@ -346,6 +610,9 @@ pub fn summarize_trx(raw: &str) -> Option<String> {
     let mut current: Option<Failure> = None;
     let mut in_error = false;
     let mut capture: Option<Capture> = None;
+    let mut projects: HashMap<String, String> = HashMap::new();
+    let mut assemblies: HashSet<String> = HashSet::new();
+    let mut current_test_id: Option<String> = None;
 
     while let Some(ev) = events.next() {
         match ev {
@@ -366,6 +633,8 @@ pub fn summarize_trx(raw: &str) -> Option<String> {
                             name: attr(&attrs, "testName").unwrap_or_else(|| "unknown".into()),
                             message: String::new(),
                             stack: String::new(),
+                            project: None,
+                            test_id: attr(&attrs, "testId"),
                         });
                     }
                     "Passed" => passed_n += 1,
@@ -405,6 +674,29 @@ pub fn summarize_trx(raw: &str) -> Option<String> {
             XmlEv::End { name } if name == "Message" || name == "StackTrace" => {
                 capture = None;
             }
+            XmlEv::Start { name, empty, attrs } if name == "UnitTest" => {
+                current_test_id = attr(&attrs, "id");
+                if let (Some(id), Some(storage)) = (&current_test_id, attr(&attrs, "storage")) {
+                    if let Some(stem) = assembly_stem(&storage) {
+                        assemblies.insert(stem.clone());
+                        projects.entry(id.clone()).or_insert(stem);
+                    }
+                }
+                if empty {
+                    current_test_id = None;
+                }
+            }
+            XmlEv::End { name } if name == "UnitTest" => {
+                current_test_id = None;
+            }
+            XmlEv::Start { name, attrs, .. } if name == "TestMethod" => {
+                if let Some(stem) = attr(&attrs, "codeBase").and_then(|path| assembly_stem(&path)) {
+                    assemblies.insert(stem.clone());
+                    if let Some(id) = &current_test_id {
+                        projects.insert(id.clone(), stem);
+                    }
+                }
+            }
             XmlEv::Text(text) => {
                 if let Some(failure) = current.as_mut() {
                     match capture {
@@ -421,46 +713,56 @@ pub fn summarize_trx(raw: &str) -> Option<String> {
     if total.is_none() && passed_n + failed_n + other_n == 0 {
         return None;
     }
-    let mut out = String::new();
-    match (total, passed, failed) {
-        (Some(total), Some(passed), Some(failed)) => {
-            out.push_str(&format!(
-                "dotnet trx: total=\"{total}\" passed=\"{passed}\" failed=\"{failed}\"\n"
-            ));
+    let (total, passed, failed) = match (total, passed, failed) {
+        (Some(total), Some(passed), Some(failed)) => (total, passed, failed),
+        _ => (
+            (passed_n + failed_n + other_n) as u32,
+            passed_n as u32,
+            failed_n as u32,
+        ),
+    };
+    for failure in &mut failures {
+        if let Some(id) = &failure.test_id {
+            if let Some(project) = projects.get(id) {
+                failure.project = Some(project.clone());
+            }
         }
-        _ => {
-            out.push_str(&format!(
-                "dotnet trx: total=\"{}\" passed=\"{passed_n}\" failed=\"{failed_n}\"\n",
-                passed_n + failed_n + other_n
-            ));
-        }
-    }
-    if failures.is_empty() && failed.unwrap_or(0) == 0 && failed_n == 0 {
-        out.push_str("no failed tests\n");
-        return Some(out);
-    }
-    for failure in failures {
-        out.push_str("Failed ");
-        out.push_str(failure.name.trim());
-        out.push('\n');
-        let message = failure.message.trim();
-        if !message.is_empty() {
-            out.push_str(message);
-            out.push('\n');
-        }
-        let stack = useful_stack(&failure.stack);
-        if !stack.is_empty() {
-            out.push_str(&stack);
-            out.push('\n');
+        if failure.project.is_none() && assemblies.len() == 1 {
+            failure.project = assemblies.iter().next().cloned();
         }
     }
-    Some(out)
+    Some(TrxReport {
+        total,
+        passed,
+        failed,
+        failures,
+    })
+}
+
+fn assembly_stem(path: &str) -> Option<String> {
+    let name = path
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())?;
+    let dot = name.rfind('.')?;
+    let ext = &name[dot + 1..];
+    if !ext.eq_ignore_ascii_case("dll") && !ext.eq_ignore_ascii_case("exe") {
+        return None;
+    }
+    let stem = &name[..dot];
+    if stem.is_empty() {
+        None
+    } else {
+        Some(stem.to_string())
+    }
 }
 
 struct Failure {
     name: String,
     message: String,
     stack: String,
+    project: Option<String>,
+    test_id: Option<String>,
 }
 
 enum Capture {
@@ -1276,5 +1578,279 @@ Actual:   301</Message>
             assert!(out.contains(fact), "{fact} absent de:\n{out}");
         }
         assert!(!out.contains("article 1 visible"), "{out}");
+    }
+
+    /// Trois TRX d'une même exécution : le premier trié passe, deux échouent.
+    /// Un quatrième, plus ancien dans le tri, n'est pas cité par « Results File ».
+    #[test]
+    fn trx_solution_additionne_les_compteurs_et_nomme_le_projet() {
+        let dir = std::env::temp_dir().join(format!(
+            "lm-trx-solution-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let passe = dir.join("aaa-passe.trx");
+        let beta = dir.join("bbb-beta.trx");
+        let gamma = dir.join("ccc-gamma.trx");
+        let ancien = dir.join("zzz-ancien.trx");
+        let finish = "2026-09-23T16:12:33.0000000Z";
+        std::fs::write(
+            &passe,
+            mini_trx(
+                "AlphaPasse",
+                finish,
+                &[
+                    ("AlphaPasse.AlphaTests.Deux_plus_deux", "Passed", ""),
+                    ("AlphaPasse.AlphaTests.Chaine_stable", "Passed", ""),
+                ],
+                (2, 2, 0),
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &beta,
+            mini_trx(
+                "BetaEchoue",
+                finish,
+                &[(
+                    "BetaEchoue.BetaTests.Attendu_quarante_deux",
+                    "Failed",
+                    "Assert.Equal() Failure: Values differ\nExpected: 42\nActual:   43",
+                )],
+                (1, 0, 1),
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &gamma,
+            mini_trx(
+                "GammaEchoue",
+                finish,
+                &[(
+                    "GammaEchoue.GammaTests.Attendu_sept",
+                    "Failed",
+                    "Assert.Equal() Failure: Values differ\nExpected: 7\nActual:   9",
+                )],
+                (1, 0, 1),
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &ancien,
+            mini_trx(
+                "Ancien",
+                finish,
+                &[(
+                    "Ancien.Tests.AncienHorsExecution",
+                    "Failed",
+                    "ANCIEN_HORS_EXECUTION",
+                )],
+                (1, 0, 1),
+            ),
+        )
+        .unwrap();
+        let raw = format!(
+            "Passed! Alpha\nResults File: {}\nFailed! Beta\nResults File: {}\nFailed! Gamma\nResults File: {}\n",
+            passe.display(),
+            beta.display(),
+            gamma.display()
+        );
+        let command = vec![
+            "dotnet".to_string(),
+            "test".to_string(),
+            "Trois.sln".to_string(),
+            "--results-directory".to_string(),
+            dir.display().to_string(),
+        ];
+        let (_kind, out) = summarize_for_command(&command, &raw).expect("résumé trx");
+        for fact in [
+            "total=\"4\"",
+            "passed=\"2\"",
+            "failed=\"2\"",
+            "BetaEchoue.BetaTests.Attendu_quarante_deux",
+            "[BetaEchoue]",
+            "Expected: 42",
+            "Actual:   43",
+            "BetaEchoue.cs:line 3",
+            "GammaEchoue.GammaTests.Attendu_sept",
+            "[GammaEchoue]",
+            "Expected: 7",
+            "Actual:   9",
+            "GammaEchoue.cs:line 3",
+        ] {
+            assert!(out.contains(fact), "{fact} absent de:\n{out}");
+        }
+        assert!(!out.contains("no failed tests"), "{out}");
+        assert!(!out.contains("AncienHorsExecution"), "{out}");
+        assert!(!out.contains("ANCIEN_HORS_EXECUTION"), "{out}");
+        assert!(!out.contains("Deux_plus_deux"), "{out}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Sans « Results File », la date de fin écarte un TRX d'une exécution précédente.
+    #[test]
+    fn trx_vieux_hors_cohorte_nest_pas_agrege() {
+        let dir = std::env::temp_dir().join(format!(
+            "lm-trx-cohorte-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ancien = dir.join("000-ancien.trx");
+        let hors = dir.join("111-hors.trx");
+        let passe = dir.join("222-passe.trx");
+        let echec = dir.join("333-echec.trx");
+        std::fs::write(
+            &ancien,
+            mini_trx(
+                "Ancien",
+                "2020-01-01T00:00:00.0000000Z",
+                &[(
+                    "Ancien.Tests.AncienHorsExecution",
+                    "Failed",
+                    "ANCIEN_HORS_EXECUTION",
+                )],
+                (1, 0, 1),
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &hors,
+            mini_trx(
+                "Hors",
+                "2026-09-23T12:00:00.0000000Z",
+                &[("Hors.Tests.HorsCohorte", "Failed", "HORS_COHORTE")],
+                (1, 0, 1),
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &passe,
+            mini_trx(
+                "RecentPasse",
+                "2026-09-23T16:00:00.0000000Z",
+                &[("RecentPasse.Tests.Ok", "Passed", "")],
+                (1, 1, 0),
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &echec,
+            mini_trx(
+                "RecentEchec",
+                "2026-09-23T16:05:00.0000000Z",
+                &[(
+                    "RecentEchec.Tests.Boom",
+                    "Failed",
+                    "RECENT_ECHEC Expected: 1\nActual:   2",
+                )],
+                (1, 0, 1),
+            ),
+        )
+        .unwrap();
+        let command = vec![
+            "dotnet".to_string(),
+            "test".to_string(),
+            "--results-directory".to_string(),
+            dir.display().to_string(),
+        ];
+        let (_kind, out) = summarize_for_command(&command, "Passed!  - Failed: 0\n").expect("trx");
+        assert!(out.contains("total=\"2\""), "{out}");
+        assert!(out.contains("passed=\"1\""), "{out}");
+        assert!(out.contains("failed=\"1\""), "{out}");
+        assert!(out.contains("RecentEchec.Tests.Boom"), "{out}");
+        assert!(out.contains("[RecentEchec]"), "{out}");
+        assert!(out.contains("RECENT_ECHEC"), "{out}");
+        assert!(!out.contains("AncienHorsExecution"), "{out}");
+        assert!(!out.contains("ANCIEN_HORS_EXECUTION"), "{out}");
+        assert!(!out.contains("HorsCohorte"), "{out}");
+        assert!(!out.contains("HORS_COHORTE"), "{out}");
+        assert!(!out.contains("no failed tests"), "{out}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Un TRX illisible ne doit pas laisser conclure « no failed tests ».
+    #[test]
+    fn trx_illisible_empeche_de_conclure_aucun_echec() {
+        let dir = std::env::temp_dir().join(format!(
+            "lm-trx-illisible-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let passe = dir.join("aaa-passe.trx");
+        let casse = dir.join("bbb-casse.trx");
+        std::fs::write(
+            &passe,
+            mini_trx(
+                "SeulPasse",
+                "2026-09-23T16:12:33.0000000Z",
+                &[("SeulPasse.Tests.Ok", "Passed", "")],
+                (1, 1, 0),
+            ),
+        )
+        .unwrap();
+        std::fs::write(&casse, [0xff, 0xfe, b'<', b'T']).unwrap();
+        let raw = format!(
+            "Results File: {}\nResults File: {}\n",
+            passe.display(),
+            casse.display()
+        );
+        let command = vec![
+            "dotnet".to_string(),
+            "test".to_string(),
+            "--results-directory".to_string(),
+            dir.display().to_string(),
+        ];
+        let (_kind, out) = summarize_for_command(&command, &raw).expect("trx");
+        assert!(out.contains("unreadable trx:"), "{out}");
+        assert!(out.contains(casse.display().to_string().as_str()), "{out}");
+        assert!(!out.contains("no failed tests"), "{out}");
+        assert!(out.contains("total=\"1\""), "{out}");
+        assert!(out.contains("passed=\"1\""), "{out}");
+        assert!(out.contains("failed=\"0\""), "{out}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn mini_trx(
+        project: &str,
+        finish: &str,
+        cases: &[(&str, &str, &str)],
+        counters: (u32, u32, u32),
+    ) -> String {
+        let (total, passed, failed) = counters;
+        let mut results = String::new();
+        let mut defs = String::new();
+        for (i, (name, outcome, message)) in cases.iter().enumerate() {
+            let id = format!("id-{project}-{i}");
+            if *outcome == "Failed" {
+                results.push_str(&format!(
+                    "<UnitTestResult testId=\"{id}\" testName=\"{name}\" outcome=\"Failed\"><Output><ErrorInfo><Message>{message}</Message><StackTrace>   at {name}() in /tmp/{project}/{project}.cs:line 3</StackTrace></ErrorInfo></Output></UnitTestResult>"
+                ));
+            } else {
+                results.push_str(&format!(
+                    "<UnitTestResult testId=\"{id}\" testName=\"{name}\" outcome=\"{outcome}\" />"
+                ));
+            }
+            defs.push_str(&format!(
+                "<UnitTest name=\"{name}\" storage=\"/tmp/{project}/bin/{project}.dll\" id=\"{id}\"><TestMethod codeBase=\"/tmp/{project}/bin/{project}.dll\" className=\"{project}.Tests\" name=\"{name}\" /></UnitTest>"
+            ));
+        }
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<TestRun xmlns=\"http://microsoft.com/schemas/VisualStudio/TeamTest/2010\">\n  <Times creation=\"{finish}\" finish=\"{finish}\" />\n  <Results>{results}</Results>\n  <TestDefinitions>{defs}</TestDefinitions>\n  <ResultSummary outcome=\"Failed\">\n    <Counters total=\"{total}\" passed=\"{passed}\" failed=\"{failed}\" />\n  </ResultSummary>\n</TestRun>\n"
+        )
     }
 }
