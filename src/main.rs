@@ -38,6 +38,12 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use walkdir::WalkDir;
 
+mod advice_cli;
+mod parity_filters;
+mod provider_usage;
+
+use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
+
 #[derive(Parser)]
 #[command(name = "lm-resizer")]
 #[command(about = "Rust-native context compression for LLM agents")]
@@ -66,6 +72,15 @@ enum Commands {
         /// CCR SQLite database path.
         #[arg(long)]
         store: Option<PathBuf>,
+        /// Structural advice (RetentionAdvice JSON) about the input. Opt-in:
+        /// only fresh advice (sha256 of these exact bytes) with callable kinds
+        /// elides bodies; anything else falls back to ordinary compression.
+        #[arg(long, conflicts_with = "advice_from_code_explorer")]
+        advice: Option<PathBuf>,
+        /// Ask `code-explorer lm-resizer-advice <input>` for that advice.
+        /// Binary: $LM_RESIZER_CODE_EXPLORER_BIN, else `code-explorer`.
+        #[arg(long, requires = "input")]
+        advice_from_code_explorer: bool,
     },
     /// Compress many files in parallel.
     Batch {
@@ -441,8 +456,9 @@ enum Commands {
         /// Optional OpenAI-compatible upstream base URL.
         #[arg(long, env = "LM_RESIZER_UPSTREAM")]
         upstream: Option<String>,
-        /// Optional bearer token for the upstream provider.
-        #[arg(long, env = "LM_RESIZER_API_KEY")]
+        /// Optional bearer token for the upstream provider. Its value is never
+        /// shown by `--help`, even when taken from the environment.
+        #[arg(long, env = "LM_RESIZER_API_KEY", hide_env_values = true)]
         api_key: Option<String>,
         /// Upstream provider header mode: openai, anthropic, bedrock, or vertex.
         #[arg(long, env = "LM_RESIZER_PROVIDER", default_value = "openai")]
@@ -467,8 +483,9 @@ enum Commands {
         /// Upstream provider base URL used by the proxy.
         #[arg(long, env = "LM_RESIZER_UPSTREAM")]
         upstream: Option<String>,
-        /// Optional bearer token for the upstream provider.
-        #[arg(long, env = "LM_RESIZER_API_KEY")]
+        /// Optional bearer token for the upstream provider. Its value is never
+        /// shown by `--help`, even when taken from the environment.
+        #[arg(long, env = "LM_RESIZER_API_KEY", hide_env_values = true)]
         api_key: Option<String>,
         /// Upstream provider header mode: openai, anthropic, bedrock, or vertex.
         #[arg(long, env = "LM_RESIZER_PROVIDER", default_value = "openai")]
@@ -869,6 +886,13 @@ struct TomlFilterDef {
     strip_lines_matching: Vec<String>,
     #[serde(default)]
     keep_lines_matching: Vec<String>,
+    /// Keep the lines that follow a matching line, even when they match no
+    /// `keep_lines_matching` pattern. A test failure is a header followed by
+    /// the lines that explain it (`Expected:`, `Actual:`, a stack frame with a
+    /// file and line); a line-by-line keyword filter keeps the header and
+    /// throws the explanation away.
+    #[serde(default)]
+    keep_block_after_matching: Vec<TomlBlockRule>,
     #[serde(default)]
     replace: Vec<TomlReplaceRule>,
     truncate_lines_at: Option<usize>,
@@ -876,6 +900,24 @@ struct TomlFilterDef {
     tail_lines: Option<usize>,
     max_lines: Option<usize>,
     on_empty: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TomlBlockRule {
+    /// A line that opens a block; it is kept itself.
+    start: String,
+    /// A line that closes the block; it is not part of the block and goes
+    /// through the ordinary rules (it may open the next block).
+    #[serde(default)]
+    until: Option<String>,
+    /// Hard limit on the lines kept after `start`.
+    #[serde(default = "default_block_lines")]
+    max_lines: usize,
+}
+
+fn default_block_lines() -> usize {
+    40
 }
 
 #[derive(Debug, Deserialize)]
@@ -901,6 +943,7 @@ struct CompiledTomlFilter {
     strip_ansi: bool,
     strip_lines_matching: Option<RegexSet>,
     keep_lines_matching: Option<RegexSet>,
+    keep_blocks: Vec<(Regex, Option<Regex>, usize)>,
     replace: Vec<(Regex, String)>,
     truncate_lines_at: Option<usize>,
     head_lines: Option<usize>,
@@ -1001,19 +1044,37 @@ async fn main() -> Result<()> {
             token_budget,
             json,
             store,
+            advice,
+            advice_from_code_explorer,
         } => {
             let input_text = read_input(input.as_deref()).await?;
             let store = open_store(store)?;
-            let pipeline = build_pipeline();
-            let report = compress_text_with_pipeline(
+            let (report, advice_report) = compress_with_optional_advice(
                 &input_text,
+                input.as_deref(),
                 &query,
                 store.as_ref(),
-                &pipeline,
                 token_budget,
+                advice.as_deref(),
+                advice_from_code_explorer,
             )?;
+            if let Some(a) = advice_report.as_ref().filter(|a| a.status != "applied") {
+                // stderr: stdout stays the compressed text, byte for byte.
+                eprintln!(
+                    "lm-resizer: conseil structurel non appliqué ({}{}), compression ordinaire",
+                    a.status,
+                    a.detail
+                        .as_deref()
+                        .map(|d| format!(" : {d}"))
+                        .unwrap_or_default()
+                );
+            }
             if json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                let mut value = serde_json::to_value(&report)?;
+                if let Some(a) = advice_report {
+                    value["advice"] = serde_json::to_value(a)?;
+                }
+                println!("{}", serde_json::to_string_pretty(&value)?);
             } else {
                 print!("{}", report.output);
             }
@@ -1116,11 +1177,13 @@ async fn main() -> Result<()> {
             let store = open_store(store)?;
             let exec_history = summarize_exec_history().unwrap_or_default();
             let retrieval_feedback = summarize_retrieval_feedback().unwrap_or_default();
+            let proxy_history = summarize_proxy_history().unwrap_or_default();
             let report = json!({
                 "entries": store.len(),
                 "empty": store.is_empty(),
                 "exec_history": exec_history,
                 "retrieval_feedback": retrieval_feedback,
+                "proxy_history": proxy_history,
             });
             if markdown {
                 print!("{}", format_stats_markdown(&report));
@@ -1613,21 +1676,143 @@ fn compress_text_with_pipeline(
     pipeline: &CompressionPipeline,
     token_budget: Option<usize>,
 ) -> Result<CompressReport> {
+    compress_text_with_pipeline_gate(content, query, store, pipeline, token_budget, true)
+}
+
+/// `reinject = false` is for `exec`, which holds a stronger gate of its own:
+/// when the generic step loses a failure line that the command filter kept, it
+/// returns the whole filtered text — including the lines that explain the
+/// failure (`Expected:`, `Received:`) and that re-injection would not bring
+/// back. Measured on a real Playwright run: with re-injection underneath, the
+/// `exec` gate no longer fired and 4 of 11 facts were lost.
+fn compress_text_with_pipeline_gate(
+    content: &str,
+    query: &str,
+    store: &dyn CcrStore,
+    pipeline: &CompressionPipeline,
+    token_budget: Option<usize>,
+    reinject: bool,
+) -> Result<CompressReport> {
     let detection = detect_content_type(content);
     let ctx = CompressionContext {
         query: query.to_string(),
         token_budget,
     };
     let result = pipeline.run(content, detection.content_type, &ctx, store);
+
+    // Porte de conservation des diagnostics, sur le chemin commun (`compress`,
+    // outil MCP, hooks, `exec`). Mesuré sur deux vrais journaux GitHub
+    // Actions : la compression générique gardait 0/2 puis 2/10 lignes
+    // `##[error]`. Plutôt que de renoncer à toute la réduction, les lignes
+    // d'échec omises sont réinjectées, courtes et dans l'ordre, sous un
+    // marqueur ; l'original reste dans le CCR.
+    let mut steps_applied = result.steps_applied;
+    let (output, reinjected) = if reinject {
+        lm_resizer_core::transforms::diagnostic_gate::reinject_lost_failure_lines(
+            content,
+            &result.output,
+        )
+    } else {
+        (result.output, 0)
+    };
+    if reinjected > 0 {
+        steps_applied.push(format!("diagnostic_reinjection:{reinjected}"));
+        if output.len() >= content.len() {
+            return Ok(CompressReport {
+                content_type: detection.content_type.as_str().to_string(),
+                original_bytes: content.len(),
+                compressed_bytes: content.len(),
+                bytes_saved: 0,
+                steps_applied: Vec::new(),
+                cache_keys: Vec::new(),
+                output: content.to_string(),
+            });
+        }
+    }
+
+    let bytes_saved = if reinjected > 0 {
+        content.len().saturating_sub(output.len())
+    } else {
+        result.bytes_saved
+    };
     Ok(CompressReport {
         content_type: detection.content_type.as_str().to_string(),
         original_bytes: content.len(),
-        compressed_bytes: result.output.len(),
-        bytes_saved: result.bytes_saved,
-        steps_applied: result.steps_applied,
+        compressed_bytes: output.len(),
+        bytes_saved,
+        steps_applied,
         cache_keys: result.cache_keys,
-        output: result.output,
+        output,
     })
+}
+
+/// `compress`, with structural advice when the caller asked for it.
+///
+/// Advice that applies replaces the pipeline for this input: it is the mode
+/// the caller chose explicitly. Advice that does not apply is reported and the
+/// pipeline runs exactly as without it.
+fn compress_with_optional_advice(
+    input_text: &str,
+    input_path: Option<&Path>,
+    query: &str,
+    store: &dyn CcrStore,
+    token_budget: Option<usize>,
+    advice_path: Option<&Path>,
+    advice_from_code_explorer: bool,
+) -> Result<(CompressReport, Option<advice_cli::AdviceReport>)> {
+    let loaded = match (advice_path, advice_from_code_explorer, input_path) {
+        (Some(path), _, _) => Some(advice_cli::load_advice_file(path).map(|a| (a, None))),
+        (None, true, Some(input)) => {
+            Some(advice_cli::advice_from_code_explorer(input).map(|(a, ms)| (a, Some(ms))))
+        }
+        _ => None,
+    };
+    let pipeline_report = |advice_report: Option<advice_cli::AdviceReport>| {
+        let pipeline = build_pipeline();
+        compress_text_with_pipeline(input_text, query, store, &pipeline, token_budget)
+            .map(|r| (r, advice_report))
+    };
+    let Some(loaded) = loaded else {
+        return pipeline_report(None);
+    };
+    let (advice, producer_ms) = match loaded {
+        Ok(ok) => ok,
+        Err(failure) => return pipeline_report(Some(failure)),
+    };
+    let source = match advice_path {
+        Some(p) => format!("file:{}", p.display()),
+        None => format!("code-explorer:{}", advice_cli::code_explorer_bin()),
+    };
+    let elision = lm_resizer_core::transforms::advice_structural::elide_bodies_with_advice(
+        input_text,
+        &advice,
+        query,
+        Some(store),
+    );
+    let advice_report = advice_cli::AdviceReport {
+        status: elision.status.as_str().to_string(),
+        source,
+        advisor: advice.advisor.clone(),
+        detail: elision.language.clone().map(|l| format!("language={l}")),
+        elided_bodies: elision.elided_bodies,
+        elided_lines: elision.elided_lines,
+        guard_rejects: elision.guard_rejects,
+        focused: elision.focused.clone(),
+        producer_ms,
+    };
+    if elision.status != lm_resizer_core::transforms::advice_structural::AdviceStatus::Applied {
+        return pipeline_report(Some(advice_report));
+    }
+    let report = CompressReport {
+        content_type: "source_code".to_string(),
+        original_bytes: input_text.len(),
+        compressed_bytes: elision.output.len(),
+        bytes_saved: input_text.len() - elision.output.len(),
+        steps_applied: vec!["advice_structural".to_string()],
+        cache_keys: elision.ccr_key.into_iter().collect(),
+        output: elision.output,
+    };
+    Ok((report, Some(advice_report)))
 }
 
 fn run_exec_command(
@@ -1659,7 +1844,27 @@ fn run_exec_command(
         filter_command_output(command, &raw)
     };
 
-    let compressed = compress_text(&filtered, query, store)?;
+    let mut compressed =
+        compress_text_with_pipeline_gate(&filtered, query, store, &build_pipeline(), None, false)?;
+    // Porte de conservation des diagnostics. Le filtre de commande a choisi
+    // les lignes qui comptent ; l'étape générique qui suit ne connaît pas la
+    // commande et range ses lignes par fréquence. Mesuré sur un vrai journal
+    // GitHub Actions : 61 lignes filtrées ramenées à 10, les dix premières
+    // gardées (bruit de stderr des tests) et les `##[error]` omises — omission
+    // annoncée et récupérable, mais le diagnostic n'était plus sous les yeux.
+    // Une ligne d'échec que le filtre gardait et que la compression perd :
+    // on rend la sortie filtrée, qui est déjà réduite.
+    if let Some(lost) = first_lost_failure_line(&filtered, &compressed.output) {
+        eprintln!(
+            "lm-resizer: compression générique annulée, elle omettait « {} »",
+            truncate_chars(lost.trim(), 80)
+        );
+        compressed.output = filtered.clone();
+        compressed
+            .steps_applied
+            .push("diagnostic_gate:kept_filtered".to_string());
+        compressed.cache_keys.clear();
+    }
     let tee_hint = tee_raw_output_if_useful(command, &raw, &filtered, exit_code)?;
     let mut final_output = compressed.output;
     if let Some(hint) = &tee_hint {
@@ -1970,6 +2175,25 @@ fn shell_join(args: &[String]) -> String {
 }
 
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
+    route_command_filter(command, raw)
+}
+
+fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
+    // RTK a déjà filtré et reformaté cette sortie pour sa commande. La
+    // refiltrer avec les règles de la commande d'origine lit un format qui
+    // n'est plus le sien : mesuré sur `rtk dotnet test --logger detailed`,
+    // 11 des 15 faits (Expected/Actual, fichier:ligne) disparaissaient.
+    // RTK garde le filtrage ; lm-resizer n'ajoute que sa compression
+    // générique, sous la porte de conservation des diagnostics.
+    if command
+        .first()
+        .is_some_and(|p| matches!(command_basename(p).as_str(), "rtk" | "rtk.exe"))
+    {
+        return ("rtk_owned".to_string(), raw.to_string());
+    }
+    if let Some((name, summary)) = parity_filters::summarize_for_command(command, raw) {
+        return (format!("structured:{name}"), summary);
+    }
     let command_text = normalized_command_text(command);
     if let Some((filter, filtered)) = apply_toml_filters(&command_text, raw) {
         return (filter, filtered);
@@ -2328,6 +2552,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
 fn compile_toml_filter(def: TomlFilterDef) -> Result<CompiledTomlFilter> {
     let strip_lines_matching = compile_regex_set(def.strip_lines_matching)?;
     let keep_lines_matching = compile_regex_set(def.keep_lines_matching)?;
+    let mut keep_blocks = Vec::new();
+    for rule in def.keep_block_after_matching {
+        let until = match rule.until {
+            Some(u) => Some(Regex::new(&u)?),
+            None => None,
+        };
+        keep_blocks.push((Regex::new(&rule.start)?, until, rule.max_lines));
+    }
     let mut replace = Vec::new();
     for rule in def.replace {
         replace.push((Regex::new(&rule.pattern)?, rule.replacement));
@@ -2338,6 +2570,7 @@ fn compile_toml_filter(def: TomlFilterDef) -> Result<CompiledTomlFilter> {
         strip_ansi: def.strip_ansi,
         strip_lines_matching,
         keep_lines_matching,
+        keep_blocks,
         replace,
         truncate_lines_at: def.truncate_lines_at,
         head_lines: def.head_lines,
@@ -2695,18 +2928,41 @@ fn apply_toml_filter(filter: &CompiledTomlFilter, raw: &str) -> String {
     }
 
     let mut lines = Vec::new();
+    let mut block_left = 0usize;
+    let mut block_until: Option<&Regex> = None;
     for line in text.lines() {
-        if filter
-            .strip_lines_matching
-            .as_ref()
-            .is_some_and(|set| set.is_match(line))
+        if block_left > 0 && block_until.is_some_and(|u| u.is_match(line)) {
+            block_left = 0;
+        }
+        let in_block = block_left > 0;
+        if in_block {
+            block_left -= 1;
+        }
+        let opens_block = match filter
+            .keep_blocks
+            .iter()
+            .find(|(start, _, _)| start.is_match(line))
+        {
+            Some((_, until, max)) => {
+                block_left = *max;
+                block_until = until.as_ref();
+                true
+            }
+            None => false,
+        };
+        if !opens_block
+            && filter
+                .strip_lines_matching
+                .as_ref()
+                .is_some_and(|set| set.is_match(line))
         {
             continue;
         }
-        if filter
-            .keep_lines_matching
-            .as_ref()
-            .is_some_and(|set| !set.is_match(line))
+        if !(in_block || opens_block)
+            && filter
+                .keep_lines_matching
+                .as_ref()
+                .is_some_and(|set| !set.is_match(line))
         {
             continue;
         }
@@ -2717,21 +2973,87 @@ fn apply_toml_filter(filter: &CompiledTomlFilter, raw: &str) -> String {
     }
 
     if let Some(head) = filter.head_lines {
-        lines.truncate(head);
+        lines = keep_signal_within(lines, head, TruncateFrom::Tail, &filter.name);
     }
     if let Some(tail) = filter.tail_lines {
-        if lines.len() > tail {
-            lines = lines[lines.len() - tail..].to_vec();
-        }
+        lines = keep_signal_within(lines, tail, TruncateFrom::Head, &filter.name);
     }
     if let Some(max) = filter.max_lines {
-        lines.truncate(max);
+        lines = keep_signal_within(lines, max, TruncateFrom::Middle, &filter.name);
     }
 
     if lines.is_empty() {
         return filter.on_empty.clone().unwrap_or_default();
     }
     lines.join("\n") + "\n"
+}
+
+/// A failure line of `before` that `after` no longer shows, if any.
+fn first_lost_failure_line<'a>(before: &'a str, after: &str) -> Option<&'a str> {
+    before
+        .lines()
+        .filter(|l| !l.trim().is_empty() && FAILURE_SIGNAL.is_match(l))
+        .find(|l| !after.contains(l.trim()))
+}
+
+/// Which end of the output a line budget cuts first.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TruncateFrom {
+    Head,
+    Tail,
+    Middle,
+}
+
+/// Bring `lines` within `budget`, cutting from `from`, but keep every failure
+/// line, and say how many lines went and where to find them. The full output
+/// stays in the tee file and the CCR store; the marker points there.
+fn keep_signal_within(
+    lines: Vec<String>,
+    budget: usize,
+    from: TruncateFrom,
+    filter_name: &str,
+) -> Vec<String> {
+    if lines.len() <= budget {
+        return lines;
+    }
+    let n = lines.len();
+    let mut keep = vec![false; n];
+    match from {
+        TruncateFrom::Tail => keep[..budget].iter_mut().for_each(|k| *k = true),
+        TruncateFrom::Head => keep[n - budget..].iter_mut().for_each(|k| *k = true),
+        TruncateFrom::Middle => {
+            let head = budget / 2;
+            let tail = budget - head;
+            keep[..head].iter_mut().for_each(|k| *k = true);
+            keep[n - tail..].iter_mut().for_each(|k| *k = true);
+        }
+    }
+    for (i, line) in lines.iter().enumerate() {
+        if FAILURE_SIGNAL.is_match(line) {
+            keep[i] = true;
+        }
+    }
+    let mut out = Vec::with_capacity(budget + 8);
+    let mut skipped = 0usize;
+    for (i, line) in lines.into_iter().enumerate() {
+        if keep[i] {
+            if skipped > 0 {
+                out.push(format!(
+                    "[lm-resizer: {skipped} lignes omises par le filtre {filter_name} ; sortie complète dans le fichier tee]"
+                ));
+                skipped = 0;
+            }
+            out.push(line);
+        } else {
+            skipped += 1;
+        }
+    }
+    if skipped > 0 {
+        out.push(format!(
+            "[lm-resizer: {skipped} lignes omises par le filtre {filter_name} ; sortie complète dans le fichier tee]"
+        ));
+    }
+    out
 }
 
 fn truncate_chars(line: &str, max: usize) -> String {
@@ -5189,6 +5511,102 @@ fn split_command_for_filter(command: &str) -> Vec<String> {
         .collect()
 }
 
+fn record_proxy_history(
+    provider: &str,
+    path: &str,
+    stats: &ProxyCompressionStats,
+    upstream_status: Option<u16>,
+) -> Result<()> {
+    if std::env::var("LM_RESIZER_TRACKING").ok().as_deref() == Some("0") {
+        return Ok(());
+    }
+    let dir = default_state_dir()?;
+    std::fs::create_dir_all(&dir)?;
+    let history_path = dir.join("proxy-history.jsonl");
+    // `bytes_saved` is measured (bytes in, bytes out). `provider_usage` is what
+    // the provider reported. They are never added together.
+    let record = json!({
+        "timestamp_unix": unix_timestamp(),
+        "provider": provider,
+        "path": path,
+        "input_bytes_saved": stats.bytes_saved,
+        "upstream_status": upstream_status,
+        "provider_usage": stats.provider_usage,
+    });
+    let line = serde_json::to_string(&record)?;
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(history_path)?;
+    writeln!(file, "{line}")?;
+    Ok(())
+}
+
+fn summarize_proxy_history() -> Result<Value> {
+    let path = default_state_dir()?.join("proxy-history.jsonl");
+    if !path.exists() {
+        return Ok(json!({
+            "requests": 0,
+            "provider_reported": {
+                "requests_with_usage": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "streams_incomplete": 0,
+                "conventions": [],
+            },
+        }));
+    }
+    let content = std::fs::read_to_string(path)?;
+    let mut requests = 0usize;
+    let mut reported = json!({
+        "requests_with_usage": 0u64, "input_tokens": 0u64, "output_tokens": 0u64,
+        "cache_read_input_tokens": 0u64, "cache_creation_input_tokens": 0u64,
+        "streams_incomplete": 0u64, "conventions": [],
+    });
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        requests += 1;
+        if let Some(usage) = record.get("provider_usage").filter(|u| u.is_object()) {
+            let add = |r: &mut Value, key: &str| {
+                let n = usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+                r[key] = json!(r[key].as_u64().unwrap_or(0) + n);
+            };
+            reported["requests_with_usage"] =
+                json!(reported["requests_with_usage"].as_u64().unwrap_or(0) + 1);
+            for key in [
+                "input_tokens",
+                "output_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+            ] {
+                add(&mut reported, key);
+            }
+            if usage.get("stream_completed").and_then(Value::as_bool) == Some(false) {
+                reported["streams_incomplete"] =
+                    json!(reported["streams_incomplete"].as_u64().unwrap_or(0) + 1);
+            }
+            if let Some(conv) = usage.get("convention").and_then(Value::as_str) {
+                let list = reported["conventions"].as_array_mut().expect("array");
+                if !list.iter().any(|c| c == conv) {
+                    list.push(json!(conv));
+                }
+            }
+        }
+    }
+    Ok(json!({
+        "requests": requests,
+        // Provider counters, summed as reported. Conventions differ: Anthropic
+        // input excludes cache, OpenAI input includes cached tokens — do not
+        // add them across conventions without reading `conventions`.
+        "provider_reported": reported,
+    }))
+}
+
 fn unix_timestamp() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -5196,7 +5614,7 @@ fn unix_timestamp() -> u64 {
         .unwrap_or_default()
 }
 
-const BUILTIN_EXEC_FILTERS_TOML: &str = r#"
+const BUILTIN_EXEC_FILTERS_TOML: &str = r###"
 [[filters]]
 name = "terraform-plan"
 match_command = "^(terraform|tofu)\\s+plan\\b"
@@ -5296,6 +5714,42 @@ keep_lines_matching = [
 max_lines = 160
 on_empty = "make: completed"
 
+# Job logs put the failure at the end. Keep failure lines and what follows
+# them; the budget is paid with setup noise, never with `##[error]`.
+[[filters]]
+name = "gh-run-log"
+match_command = "^gh\\s+run\\s+view\\b.*--log"
+strip_ansi = true
+keep_lines_matching = [
+  "##\\[error\\]",
+  "##\\[warning\\]",
+  "exit code",
+  "\\bFAIL\\b",
+  "✘|✗|×",
+  "Error",
+  "error",
+  "failed",
+  "Failed",
+  "Tests? ",
+  "Assertion",
+  "Expected",
+  "Actual",
+  "Received",
+  ":line [0-9]+",
+]
+# The explanation of a failure usually sits *before* the final `##[error]`
+# annotation, inside the step's group: `Failed X` / `Error Message:` then the
+# message, Expected/Actual, a frame with file:line. A block opened on those
+# headers is not cut by `##[group]`, which only frames the step.
+keep_block_after_matching = [
+  { start = "\\bFAIL\\s", until = "\\bFAIL\\s|⎯⎯⎯", max_lines = 40 },
+  { start = "\\bFailed\\s+[A-Za-z_][A-Za-z0-9_.]*(\\s\\[|\\()", until = "\\bFailed\\s+[A-Za-z_][A-Za-z0-9_.]*(\\s\\[|\\()|\\b(Passed|Failed)!", max_lines = 60 },
+  { start = "Error Message:", until = "\\bFailed\\s+[A-Za-z_][A-Za-z0-9_.]*(\\s\\[|\\()|\\b(Passed|Failed)!", max_lines = 60 },
+  { start = "##\\[error\\]", until = "##\\[(group|endgroup)\\]", max_lines = 6 },
+]
+max_lines = 160
+on_empty = "gh run log: no failure lines"
+
 [[filters]]
 name = "gh"
 match_command = "^gh\\s+(pr|issue|run|workflow)\\b"
@@ -5323,20 +5777,54 @@ on_empty = "go test: passed"
 name = "dotnet"
 match_command = "^dotnet\\s+(test|build)\\b"
 strip_ansi = true
+# Frames of the runtime and the test framework say nothing about the failure.
+# Only frames *without* a source location are stripped: a frame with a file and
+# a line (`in /src/X.cs:line 12`) is kept whatever its namespace — tests of
+# `Microsoft.Extensions.*` live under `Microsoft.` too.
+strip_lines_matching = [
+  "^\\s*at (System|Microsoft|Xunit|NUnit|InvokeStub_|Castle)[.A-Za-z_][^:]*$",
+]
+# A failed test is a header followed by its explanation: message, expected and
+# actual values, stack trace. None of those lines carries a keyword.
+keep_block_after_matching = [
+  { start = "^\\s*Failed\\s+\\S", until = "^\\s*(Passed|Failed|Skipped)\\s+\\S|^\\[xUnit\\.net|^\\s*(Failed|Passed)!", max_lines = 60 },
+]
+# Diagnostics, not words: `-v n` prints hundreds of property lines such as
+# `TreatWarningsAsErrors = false` that a bare "error" pattern keeps.
 keep_lines_matching = [
   "FAILED",
   "Failed",
-  "Error",
-  "error",
-  "Warning",
-  "warning",
+  "Error Message",
+  "\\b(error|warning) [A-Z]{2,}[0-9]+",
+  "\\b(error|warning)\\s*:",
+  "^\\s*[0-9]+ (Warning|Error)\\(s\\)",
+  "Unhandled exception",
+  "aborted|crashed",
   "Passed!",
+  "Failed!",
   "Total tests:",
   "Build FAILED",
   "Build succeeded",
 ]
 max_lines = 180
 on_empty = "dotnet: completed"
+
+# `dotnet format --verify-no-changes` prints one diagnostic per line, then
+# analyzer noise ("Running 154 analyzers") that is not a formatting fact.
+[[filters]]
+name = "dotnet-format"
+match_command = "^dotnet\\s+format\\b|^dotnet-format\\b"
+strip_ansi = true
+keep_lines_matching = [
+  "\\berror\\b",
+  "\\bwarning\\b",
+  "WHITESPACE",
+  "Formatted ",
+  "Format complete",
+  "verify",
+]
+max_lines = 80
+on_empty = "dotnet format: no changes"
 
 [[filters]]
 name = "jvm-build"
@@ -5408,11 +5896,26 @@ keep_lines_matching = [
   "error",
   "Warning",
   "warning",
-  "✓",
+  "✘",
+  "×",
+  "Expected",
+  "Received",
+  "Timeout",
+  "timed out",
   "passed",
+  "flaky",
+  "skipped",
+  "interrupted",
+  "did not run",
   "Tests",
   "Duration",
   "Compiled",
+]
+# Playwright/Vitest failure sections: `  1) file:line › title` or `FAIL file > test`,
+# then the message, Expected/Received, call log and code frame.
+keep_block_after_matching = [
+  { start = "^\\s+\\d+\\) \\S", until = "^\\s+\\d+\\) \\S|^\\s+\\d+ (failed|passed|flaky|skipped)", max_lines = 60 },
+  { start = "^\\s*FAIL\\s", until = "^\\s*(FAIL|✓|Test Files)\\s|^⎯", max_lines = 40 },
 ]
 max_lines = 180
 on_empty = "js quality: completed"
@@ -5472,7 +5975,7 @@ keep_lines_matching = [
 ]
 max_lines = 180
 on_empty = "aws: completed"
-"#;
+"###;
 
 fn compress_batch(options: BatchOptions) -> Result<BatchReport> {
     let files = collect_batch_files(&options.paths, options.recursive, &options.extensions)?;
@@ -6528,7 +7031,25 @@ async fn proxy_or_preview(
                 "x-lm-resizer-compression",
                 serde_json::to_string(&stats).unwrap_or_else(|_| "{}".to_string()),
             );
-            let stream = response.bytes_stream();
+            // Bytes go to the client untouched; usage events are read on the
+            // way and recorded when the stream ends — or when the client drops
+            // it, marked incomplete.
+            let provider_owned = provider_label(state.provider).to_string();
+            let path_owned = path.to_string();
+            let mut stats_for_record = stats.clone();
+            let status_code = status.as_u16();
+            let stream = provider_usage::UsageTap::new(
+                Box::pin(response.bytes_stream()),
+                Box::new(move |usage, _completed| {
+                    stats_for_record.provider_usage = usage;
+                    let _ = record_proxy_history(
+                        &provider_owned,
+                        &path_owned,
+                        &stats_for_record,
+                        Some(status_code),
+                    );
+                }),
+            );
             return builder
                 .body(Body::from_stream(stream))
                 .map_err(|err| HttpError(anyhow::anyhow!(err)));
@@ -6538,6 +7059,15 @@ async fn proxy_or_preview(
         let response_bytes = response.bytes().await?;
         let decoded_response = decode_http_body(&response_headers, &response_bytes)?;
         let mut value = serde_json::from_slice::<Value>(&decoded_response)?;
+        // The provider's own `usage` stays where it is, untouched; a copy goes
+        // into our side record, clearly separated from any estimate.
+        stats.provider_usage = provider_usage::from_response(&value);
+        let _ = record_proxy_history(
+            provider_label(state.provider),
+            path,
+            &stats,
+            Some(status.as_u16()),
+        );
         if let Some(obj) = value.as_object_mut() {
             obj.insert(
                 "lm_resizer".to_string(),
@@ -6545,9 +7075,13 @@ async fn proxy_or_preview(
             );
         }
         if !status.is_success() {
-            return Err(HttpError(anyhow::anyhow!(
-                "upstream returned HTTP {status}: {value}"
-            )));
+            // Relay the provider's status and error body. Folding every
+            // upstream failure into a 400 hid what an agent must react to: a
+            // 401 (bad key), 429 (rate limit) or 529 (overloaded) are not the
+            // same failure, and none of them is a bad request from the client.
+            let code = axum::http::StatusCode::from_u16(status.as_u16())
+                .unwrap_or(axum::http::StatusCode::BAD_GATEWAY);
+            return Ok((code, Json(value)).into_response());
         }
         return Ok(Json(value).into_response());
     }
@@ -7515,7 +8049,7 @@ fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Default, Debug, Clone, Serialize)]
 struct ProxyCompressionStats {
     fields_seen: usize,
     fields_compressed: usize,
@@ -7524,6 +8058,11 @@ struct ProxyCompressionStats {
     bytes_saved: usize,
     cache_keys: Vec<String>,
     provider_cache_policy: String,
+    /// What the provider itself reported in `usage`, verbatim and normalised.
+    /// Absent when there was no upstream, or the provider sent no usage.
+    /// Never derived from an estimate, never folded into one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_usage: Option<provider_usage::ProviderUsage>,
 }
 
 fn provider_cache_policy(provider: ProviderKind) -> &'static str {
@@ -7922,6 +8461,413 @@ command = "node"
         );
     }
 
+    fn cmd(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    // Sortie réelle `dotnet test` (SDK 10.0.300, xUnit 2.9.3), abrégée.
+    const DOTNET_TEST_ECHEC: &str = "[xUnit.net 00:00:00.21]     Calc.Tests.CalculTests.Somme_grands [FAIL]\n  Failed Calc.Tests.CalculTests.Somme_grands [< 1 ms]\n  Error Message:\n   Assert.Equal() Failure: Values differ\nExpected: 300\nActual:   301\n  Stack Trace:\n     at Calc.Tests.CalculTests.Somme_grands() in /src/CalculTests.cs:line 22\n   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)\n   at InvokeStub_CalculTests.Somme(Object, Span`1)\n  Passed Calc.Tests.CalculTests.Autre [1 ms]\nFailed!  - Failed:     1, Passed:    43, Skipped:     1, Total:    45\n";
+
+    #[test]
+    fn dotnet_test_garde_l_explication_de_l_echec_et_ecarte_les_cadres_du_runtime() {
+        let (filter, out) = route_command_filter(&cmd(&["dotnet", "test"]), DOTNET_TEST_ECHEC);
+        assert_eq!(filter, "toml:dotnet");
+        for attendu in [
+            "Expected: 300",
+            "Actual:   301",
+            "Assert.Equal() Failure",
+            "CalculTests.cs:line 22",
+            "Failed!  - Failed:     1",
+        ] {
+            assert!(out.contains(attendu), "{attendu} absent de:\n{out}");
+        }
+        assert!(!out.contains("System.Reflection"), "{out}");
+        assert!(!out.contains("InvokeStub_"), "{out}");
+    }
+
+    #[test]
+    fn dotnet_build_verbeux_ne_garde_pas_les_proprietes_qui_contiennent_error() {
+        let raw = "  TreatWarningsAsErrors = false\n  MSBuildWarningsAsErrors = \n/src/A.cs(12,56): error CS0103: The name 'x' does not exist\nBuild FAILED.\n    0 Warning(s)\n    1 Error(s)\n";
+        let (_, out) = route_command_filter(&cmd(&["dotnet", "build", "-v", "n"]), raw);
+        assert!(out.contains("error CS0103"));
+        assert!(out.contains("1 Error(s)"));
+        assert!(!out.contains("TreatWarningsAsErrors"), "{out}");
+    }
+
+    #[test]
+    fn playwright_garde_les_echecs_et_pas_les_reussites() {
+        let raw = "  ✓   1 tests/a.spec.js:4:3 › visible (10ms)\n  ✘   2 tests/a.spec.js:6:1 › total juste (5.0s)\n\n  1) tests/a.spec.js:6:1 › total juste ───\n\n    Error: expect(locator).toHaveText(expected) failed\n\n    Locator:  locator('#total')\n    Expected: \"42,90\"\n    Received: \"41,90\"\n       8 |   await expect(x).toHaveText('42,90');\n        at /p/tests/a.spec.js:8:40\n\n  1 failed\n  1 passed (9.1s)\n";
+        let (_, out) = route_command_filter(&cmd(&["playwright", "test"]), raw);
+        for attendu in [
+            "✘   2 tests/a.spec.js:6:1",
+            "Expected: \"42,90\"",
+            "Received: \"41,90\"",
+            "locator('#total')",
+            "a.spec.js:8:40",
+            "1 failed",
+            "1 passed",
+        ] {
+            assert!(out.contains(attendu), "{attendu} absent de:\n{out}");
+        }
+        assert!(!out.contains("✓"), "{out}");
+    }
+
+    /// Extrait du TRX réel du 23/09 (SDK 10.0.300, xUnit 2.9.3), pas une
+    /// reconstitution : nom, message, Expected/Actual, pile `fichier:ligne`.
+    const TRX_REEL: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Results>
+    <UnitTestResult testName="Calc.Tests.CalculTests.Passe_01" outcome="Passed" />
+    <UnitTestResult testName="Calc.Tests.CalculTests.Liste_contient_element" outcome="Failed">
+      <Output><ErrorInfo>
+        <Message>Assert.Contains() Failure: Item not found in collection
+Collection: ["alpha", "beta"]
+Not found:  "gamma"</Message>
+        <StackTrace>   at Calc.Tests.CalculTests.Liste_contient_element() in /tmp/work/src/Calc.Tests/CalculTests.cs:line 32
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+      </ErrorInfo></Output>
+    </UnitTestResult>
+    <UnitTestResult testName="Calc.Tests.CalculTests.Somme_theorie(a: 200, b: 1, attendu: 201)" outcome="Failed">
+      <Output><ErrorInfo>
+        <Message>Assert.Equal() Failure: Values differ
+Expected: 201
+Actual:   202</Message>
+        <StackTrace>   at Calc.Tests.CalculTests.Somme_theorie(Int32 a, Int32 b, Int32 attendu) in /tmp/work/src/Calc.Tests/CalculTests.cs:line 26</StackTrace>
+      </ErrorInfo></Output>
+    </UnitTestResult>
+    <UnitTestResult testName="Calc.Tests.CalculTests.Division_par_zero_leve" outcome="Failed">
+      <Output><ErrorInfo>
+        <Message>System.DivideByZeroException : Attempted to divide by zero.</Message>
+        <StackTrace>   at Calc.Tests.Calcul.Diviser(Int32 a, Int32 b) in /tmp/work/src/Calc.Tests/CalculTests.cs:line 8
+   at Calc.Tests.CalculTests.Division_par_zero_leve() in /tmp/work/src/Calc.Tests/CalculTests.cs:line 20</StackTrace>
+      </ErrorInfo></Output>
+    </UnitTestResult>
+  </Results>
+  <ResultSummary outcome="Failed">
+    <Counters total="18" passed="13" failed="4" />
+  </ResultSummary>
+</TestRun>"#;
+
+    #[test]
+    fn trx_reel_garde_le_nom_le_message_et_la_pile() {
+        let (filter, out) = route_command_filter(&cmd(&["dotnet", "test"]), TRX_REEL);
+        assert_eq!(filter, "structured:trx");
+        for fact in [
+            "total=\"18\"",
+            "passed=\"13\"",
+            "failed=\"4\"",
+            "Calc.Tests.CalculTests.Liste_contient_element",
+            "Collection: [\"alpha\", \"beta\"]",
+            "Not found:  \"gamma\"",
+            "CalculTests.cs:line 32",
+            "Calc.Tests.CalculTests.Somme_theorie(a: 200, b: 1, attendu: 201)",
+            "Expected: 201",
+            "Actual:   202",
+            "CalculTests.cs:line 26",
+            "System.DivideByZeroException : Attempted to divide by zero.",
+            "CalculTests.cs:line 8",
+            "CalculTests.cs:line 20",
+        ] {
+            assert!(out.contains(fact), "{fact} absent de:\n{out}");
+        }
+        assert!(!out.contains("Passe_01"), "{out}");
+        assert!(!out.contains("MethodBaseInvoker"), "{out}");
+    }
+
+    #[test]
+    fn binlog_relie_par_le_chemin_bl_garde_code_et_colonne() {
+        let dir = std::env::temp_dir().join(format!("lm-binlog-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("build.binlog");
+        let bytes = binlog_minimal_cs0103();
+        std::fs::write(&path, &bytes).expect("écrire le binlog");
+        let (filter, out) = route_command_filter(
+            &cmd(&["dotnet", "build", &format!("-bl:{}", path.display())]),
+            "Build FAILED.\n",
+        );
+        assert_eq!(filter, "structured:binlog");
+        for fact in [
+            "CS0103",
+            "The name 'inconnu' does not exist in the current context",
+            "(2,19)",
+            "CS0219",
+            "(1,5)",
+        ] {
+            assert!(out.contains(fact), "{fact} absent de:\n{out}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn binlog_minimal_cs0103() -> Vec<u8> {
+        fn i32(buf: &mut Vec<u8>, value: i32) {
+            buf.extend(value.to_le_bytes());
+        }
+        fn i7(buf: &mut Vec<u8>, mut value: u32) {
+            loop {
+                let mut byte = (value & 0x7f) as u8;
+                value >>= 7;
+                if value != 0 {
+                    byte |= 0x80;
+                }
+                buf.push(byte);
+                if value == 0 {
+                    break;
+                }
+            }
+        }
+        fn string_rec(buf: &mut Vec<u8>, text: &str) {
+            i7(buf, 24);
+            i7(buf, text.len() as u32);
+            buf.extend(text.as_bytes());
+        }
+        fn diag(
+            buf: &mut Vec<u8>,
+            kind: u32,
+            message: u32,
+            code: u32,
+            file: u32,
+            line: u32,
+            col: u32,
+        ) {
+            let mut body = Vec::new();
+            i7(&mut body, 4);
+            i7(&mut body, message);
+            i7(&mut body, 2);
+            i7(&mut body, 1);
+            i7(&mut body, code);
+            i7(&mut body, file);
+            i7(&mut body, 13);
+            i7(&mut body, line);
+            i7(&mut body, col);
+            i7(buf, kind);
+            i7(buf, body.len() as u32);
+            buf.extend(body);
+        }
+        let mut buf = Vec::new();
+        i32(&mut buf, 25);
+        i32(&mut buf, 18);
+        string_rec(
+            &mut buf,
+            "The name 'inconnu' does not exist in the current context",
+        );
+        string_rec(&mut buf, "CS0103");
+        string_rec(&mut buf, "/tmp/work/src/BuildFail/Program.cs");
+        string_rec(&mut buf, "/tmp/work/src/BuildFail/BuildFail.csproj");
+        string_rec(
+            &mut buf,
+            "The variable 'jamaisUtilisee' is assigned but its value is never used",
+        );
+        string_rec(&mut buf, "CS0219");
+        diag(&mut buf, 9, 10, 11, 12, 2, 19);
+        diag(&mut buf, 10, 14, 15, 12, 1, 5);
+        i7(&mut buf, 0);
+        buf
+    }
+
+    #[test]
+    fn dotnet_format_json_garde_le_fichier_et_le_diagnostic() {
+        let raw = r#"[{"FilePath":"/tmp/work/src/FormatMe/Program.cs","FileChanges":[{"LineNumber":1,"CharNumber":15,"DiagnosticId":"WHITESPACE","FormatDescription":"Fix whitespace formatting. Insert '\\n'."},{"LineNumber":5,"CharNumber":28,"DiagnosticId":"WHITESPACE","FormatDescription":"Fix whitespace formatting. Delete 1 characters."}]}]"#;
+        let (filter, out) =
+            route_command_filter(&cmd(&["dotnet", "format", "--verify-no-changes"]), raw);
+        assert_eq!(filter, "structured:dotnet-format");
+        assert!(out.contains("/tmp/work/src/FormatMe/Program.cs(1,15): error WHITESPACE"));
+        assert!(out.contains("Delete 1 characters."));
+        assert!(out.contains("(5,28)"));
+    }
+
+    #[test]
+    fn dotnet_format_console_ecarte_le_bruit_des_analyseurs() {
+        let raw = "\
+Formatting code files in workspace '/tmp/work/src/FormatMe/FormatMe.csproj'.\n\
+Project FormatMe is using configuration from '/opt/dotnet/sdk/10.0.300/Sdks/Microsoft.NET.Sdk/analyzers/build/config/analysislevel_10_default.globalconfig'.\n\
+/tmp/work/src/FormatMe/Program.cs(1,15): error WHITESPACE: Fix whitespace formatting. Insert '\\n'. [/tmp/work/src/FormatMe/FormatMe.csproj]\n\
+/tmp/work/src/FormatMe/Program.cs(3,24): error WHITESPACE: Fix whitespace formatting. Delete 1 characters. [/tmp/work/src/FormatMe/FormatMe.csproj]\n\
+Running 154 analyzers on FormatMe.\n\
+Format complete in 2674ms.\n";
+        let (filter, out) =
+            route_command_filter(&cmd(&["dotnet", "format", "--verify-no-changes"]), raw);
+        assert_eq!(filter, "toml:dotnet-format");
+        assert!(out.contains("Program.cs(1,15): error WHITESPACE"));
+        assert!(out.contains("Delete 1 characters."));
+        assert!(!out.contains("Running 154 analyzers"), "{out}");
+        assert!(!out.contains("analysislevel"), "{out}");
+    }
+
+    #[test]
+    fn playwright_json_garde_expected_received_et_le_titre() {
+        let raw = r#"{"config":{"version":"1.60.0"},"stats":{"expected":12,"unexpected":2,"skipped":0,"flaky":0,"duration":8602.1},"suites":[{"title":"panier.spec.js","file":"panier.spec.js","specs":[
+            {"title":"article 3 visible","ok":true,"tests":[{"results":[{"status":"passed","errors":[]}]}]},
+            {"title":"le total est juste","ok":false,"file":"panier.spec.js","tests":[{"results":[{"status":"failed","error":{"message":"Error: expect(locator).toHaveText(expected) failed\nLocator: locator('#total')\nExpected: \"42,90 €\"\nReceived: \"41,90 €\"\n","stack":"at /tmp/pw/tests/panier.spec.js:11:40","location":{"file":"/tmp/pw/tests/panier.spec.js","line":11,"column":40}}}]}]},
+            {"title":"le bouton confirmer existe","ok":false,"file":"panier.spec.js","tests":[{"results":[{"status":"failed","error":{"message":"TimeoutError: locator.click: Timeout 1000ms exceeded.\n","location":{"file":"/tmp/pw/tests/panier.spec.js","line":15,"column":36}}}]}]}
+        ],"suites":[]}],"errors":[]}"#;
+        let (filter, out) =
+            route_command_filter(&cmd(&["playwright", "test", "--reporter=json"]), raw);
+        assert_eq!(filter, "structured:playwright-json");
+        for fact in [
+            "\"expected\": 12",
+            "\"unexpected\": 2",
+            "le total est juste",
+            "Expected: \"42,90 €\"",
+            "Received: \"41,90 €\"",
+            "locator('#total')",
+            "panier.spec.js:11:40",
+            "le bouton confirmer existe",
+            "TimeoutError: locator.click: Timeout 1000ms exceeded.",
+            "panier.spec.js:15:36",
+        ] {
+            assert!(out.contains(fact), "{fact} absent de:\n{out}");
+        }
+        assert!(!out.contains("article 3 visible"), "{out}");
+        assert!(
+            out.len() < raw.len() / 2,
+            "pas de réduction: {} -> {}",
+            raw.len(),
+            out.len()
+        );
+    }
+
+    #[test]
+    fn un_budget_de_lignes_ne_se_paie_jamais_avec_les_erreurs_de_fin_de_journal() {
+        let mut lines: Vec<String> = (0..300).map(|i| format!("setup step {i}")).collect();
+        lines.push("##[error]Process completed with exit code 1.".to_string());
+        let out = keep_signal_within(lines, 20, TruncateFrom::Tail, "t");
+        assert!(out.iter().any(|l| l.contains("##[error]Process completed")));
+        assert!(
+            out.iter()
+                .any(|l| l.contains("lignes omises par le filtre t")),
+            "troncature non annoncée"
+        );
+        assert!(out.len() <= 23);
+    }
+
+    #[test]
+    fn gh_run_log_garde_l_erreur_finale() {
+        let mut raw: String = (0..400)
+            .map(|i| {
+                format!(
+                    "build\tstep\t2026-09-22T10:00:{:02}Z npm ci line {i}\n",
+                    i % 60
+                )
+            })
+            .collect();
+        raw.push_str("build\tstep\t2026-09-22T10:07:00Z ##[error]AssertionError: expected [ +0, 1 ] to include null\n");
+        let (filter, out) =
+            route_command_filter(&cmd(&["gh", "run", "view", "1", "--log-failed"]), &raw);
+        assert_eq!(filter, "toml:gh-run-log");
+        assert!(out.contains("##[error]AssertionError"), "{out}");
+    }
+
+    #[test]
+    fn gh_run_log_garde_l_explication_qui_precede_le_error_final() {
+        let mut raw: String = (0..240)
+            .map(|i| {
+                format!(
+                    "build\tSetup\t2026-09-22T18:00:{:02}.0Z setup slot {i}\n",
+                    i % 60
+                )
+            })
+            .collect();
+        for l in [
+            "##[group]Run dotnet test --no-restore",
+            "  Failed PanierTests.AppliqueCoupon [12 ms]",
+            "  Error Message:",
+            "   Assert.Equal() Failure: Values differ",
+            "Expected: 19,90 €",
+            "Actual:   20,00 €",
+            "   at Revue.Tests.PanierTests.AppliqueCoupon() in /src/PanierTests.cs:line 44",
+            "##[endgroup]",
+        ] {
+            raw.push_str(&format!("build\tTests\t2026-09-22T18:04:01.0Z {l}\n"));
+        }
+        raw.push_str("build\tComplete\t2026-09-22T18:06:00.0Z ##[error]Process completed with exit code 1.\n");
+        let (_, out) = route_command_filter(&cmd(&["gh", "run", "view", "99", "--log"]), &raw);
+        for attendu in [
+            "Assert.Equal() Failure",
+            "Expected: 19,90 €",
+            "Actual:   20,00 €",
+            "PanierTests.cs:line 44",
+            "##[error]Process completed",
+        ] {
+            assert!(out.contains(attendu), "{attendu} absent de:\n{out}");
+        }
+        assert!(!out.contains("setup slot 100"), "bruit gardé:\n{out}");
+    }
+
+    #[test]
+    fn dotnet_garde_un_cadre_localise_meme_sous_microsoft() {
+        let raw = "  Failed Microsoft.Extensions.Logging.Tests.LoggerTests.WritesScope [3 ms]\n  Error Message:\n   Assert.Equal() Failure\nExpected: scope-ouvert\n  Stack Trace:\n     at Microsoft.Extensions.Logging.Tests.LoggerTests.WritesScope() in /src/LoggerTests.cs:line 40\n   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments)\nFailed!  - Failed:     1, Passed:    0\n";
+        let (_, out) = route_command_filter(&cmd(&["dotnet", "test"]), raw);
+        assert!(out.contains("LoggerTests.cs:line 40"), "{out}");
+        assert!(!out.contains("RuntimeMethodHandle"), "{out}");
+    }
+
+    #[test]
+    fn la_cle_api_prise_dans_l_environnement_n_apparait_pas_dans_l_aide() {
+        use clap::CommandFactory;
+        let cli = Cli::command();
+        for sub in ["serve", "wrap"] {
+            let arg = cli
+                .find_subcommand(sub)
+                .unwrap()
+                .get_arguments()
+                .find(|a| a.get_id() == "api_key")
+                .unwrap();
+            assert!(
+                arg.is_hide_env_values_set(),
+                "{sub} --help afficherait la clé"
+            );
+        }
+    }
+
+    #[test]
+    fn compress_ne_perd_pas_les_erreurs_de_fin_de_journal() {
+        let mut raw = String::new();
+        for i in 0..400 {
+            raw.push_str(&format!(
+                "2026-09-22T10:00:00Z INFO step {} cache warm slot ok\n",
+                i % 7
+            ));
+        }
+        raw.push_str(
+            "2026-09-22T10:07:00Z ##[error]AssertionError: expected [ +0, 1 ] to include null\n",
+        );
+        for i in 0..50 {
+            raw.push_str(&format!(
+                "2026-09-22T10:08:00Z INFO cleanup {} done\n",
+                i % 5
+            ));
+        }
+        raw.push_str("##[error]Process completed with exit code 1.\n");
+        let store = InMemoryCcrStore::new();
+        let report = compress_text(&raw, "", &store).unwrap();
+        assert!(
+            report
+                .output
+                .contains("##[error]AssertionError: expected [ +0, 1 ] to include null"),
+            "{}",
+            report.output
+        );
+        assert!(report
+            .output
+            .contains("##[error]Process completed with exit code 1."));
+        assert!(report.output.len() <= raw.len());
+    }
+
+    #[test]
+    fn une_sortie_deja_filtree_par_rtk_n_est_pas_refiltree() {
+        let raw = "Failed Tests:\n  Calc.Tests.X\n    Expected: 201\n    Actual:   202\n";
+        let (filter, out) = route_command_filter(&cmd(&["rtk", "dotnet", "test"]), raw);
+        assert_eq!(filter, "rtk_owned");
+        assert_eq!(out, raw);
+    }
+
+    #[test]
+    fn la_porte_des_diagnostics_voit_une_ligne_d_echec_perdue() {
+        let filtre = "npm ci ok\n##[error]Process completed with exit code 1.\n";
+        assert!(first_lost_failure_line(filtre, "npm ci ok\n[1 line omitted]").is_some());
+        assert!(first_lost_failure_line(filtre, filtre).is_none());
+    }
+
     #[test]
     fn exec_toml_filter_keeps_matching_lines() {
         let def = TomlFilterDef {
@@ -7930,6 +8876,7 @@ command = "node"
             strip_ansi: false,
             strip_lines_matching: Vec::new(),
             keep_lines_matching: vec!["error|warning".to_string()],
+            keep_block_after_matching: Vec::new(),
             replace: Vec::new(),
             truncate_lines_at: Some(20),
             head_lines: None,
