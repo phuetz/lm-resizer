@@ -1,0 +1,19 @@
+Run options: --seed 64567
+
+# Running:
+
+FF
+
+Finished in 0.005124s, 390.3469 runs/s, 390.3469 assertions/s.
+
+  1) Failure:
+TestMath#test_subtraction [minitest_test.rb:9]:
+Expected: 2
+  Actual: 1
+
+  2) Failure:
+TestMath#test_addition [minitest_test.rb:5]:
+Expected: 3
+  Actual: 2
+
+2 runs, 2 assertions, 2 failures, 0 errors, 0 skips

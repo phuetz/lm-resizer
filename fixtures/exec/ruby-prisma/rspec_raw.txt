@@ -1,0 +1,29 @@
+FF
+
+Failures:
+
+  1) Math adds numbers
+     Failure/Error: expect(1 + 1).to eq(3)
+
+       expected: 3
+            got: 2
+
+       (compared using ==)
+     # ./rspec_test.rb:5:in `block (2 levels) in <top (required)>'
+
+  2) Math subtracts numbers
+     Failure/Error: expect(2 - 1).to eq(2)
+
+       expected: 2
+            got: 1
+
+       (compared using ==)
+     # ./rspec_test.rb:9:in `block (2 levels) in <top (required)>'
+
+Finished in 0.01241 seconds (files took 0.12175 seconds to load)
+2 examples, 2 failures
+
+Failed examples:
+
+rspec ./rspec_test.rb:4 # Math adds numbers
+rspec ./rspec_test.rb:8 # Math subtracts numbers

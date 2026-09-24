@@ -1,0 +1,17 @@
+Environment variables loaded from .env
+Prisma schema loaded from prisma/schema.prisma
+
+Error: Prisma schema validation - (validate wasm)
+Error code: P1012
+[1;91merror[0m: [1mError validating field `posts` in model `User`: The relation field `posts` on model `User` is missing an opposite relation field on the model `Post`. Either run `prisma format` or add it manually.[0m
+  [1;94m-->[0m  [4mprisma/schema.prisma:15[0m
+[1;94m   | [0m
+[1;94m14 | [0m  // deliberate error: missing relation fields
+[1;94m15 | [0m  [1;91mposts Post[][0m
+[1;94m16 | [0m}
+[1;94m   | [0m
+
+Validation Error Count: 1
+[Context: validate]
+
+Prisma CLI Version : 5.15.0
