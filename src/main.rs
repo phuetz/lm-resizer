@@ -5975,6 +5975,75 @@ keep_lines_matching = [
 ]
 max_lines = 180
 on_empty = "aws: completed"
+
+# ruby-prisma-debut
+# RSpec : l'échec est un en-tête numéroté, puis `expected:` / `got:` et le
+# cadre `# ./fichier.rb:ligne`. `got:` n'est pas un mot du filtre ligne à
+# ligne. `FF` et le chronomètre de chargement ne sont pas des faits.
+[[filters]]
+name = "rspec"
+match_command = "^(rspec|bundle\\s+exec\\s+rspec|ruby\\s+-S\\s+rspec)(\\s|$)"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$"]
+keep_block_after_matching = [
+  { start = "^\\s+\\d+\\) ", until = "^\\s+\\d+\\) |^Finished in |^Failed examples:|^\\d+ examples?", max_lines = 40 },
+]
+keep_lines_matching = [
+  "^Failures:",
+  "^\\d+ examples?,",
+  "^Failed examples:",
+  "^rspec\\s+\\S+:\\d+",
+  "^Randomized with seed ",
+]
+max_lines = 160
+on_empty = "rspec: no examples"
+
+# Minitest : `N) Failure:` ou `N) Error:` puis `Classe#methode [fichier:ligne]`,
+# `Expected:` et `Actual:`. `--seed` fixe l'ordre des échecs. `# Running:`,
+# `FF` et le débit en runs/s ne sont pas des faits.
+[[filters]]
+name = "minitest"
+match_command = "^ruby\\b.*(?:minitest|_test\\.rb)(?:\\s|$)|^rake\\s+(?:test|minitest)\\b|^rails\\s+test\\b|^bundle\\s+exec\\s+(?:rake\\s+(?:test|minitest)\\b|rails\\s+test\\b|ruby\\b.*(?:minitest|_test\\.rb))"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$"]
+keep_block_after_matching = [
+  { start = "^\\s+\\d+\\) (?:Failure|Error|Skipped):", until = "^\\s+\\d+\\) (?:Failure|Error|Skipped):|^\\d+ runs,", max_lines = 50 },
+]
+keep_lines_matching = [
+  "^Run options:",
+  "^\\d+ runs,",
+]
+max_lines = 160
+on_empty = "minitest: no runs"
+
+# Prisma (migrate, generate, validate). L'en-tête `Error:` / `error:` ou un
+# code P1xxx / P3xxx ouvre le bloc : le message et le cadre
+# `schema.prisma:ligne` ne portent pas un mot-clé sur chaque ligne. Le
+# préambule et « Prisma CLI Version » ne sont pas des faits.
+[[filters]]
+name = "prisma"
+match_command = "^(?:prisma|npx(?:\\s+(?:--yes|-y))?\\s+prisma|bunx\\s+prisma|npm\\s+exec\\s+prisma|pnpm\\s+(?:exec\\s+)?prisma|yarn\\s+(?:exec\\s+)?prisma)(?:\\s|$)"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$"]
+keep_block_after_matching = [
+  { start = "^(?:Error|error)\\b|\\bP[13][0-9]{3}\\b", until = "^Prisma CLI Version\\b|^Environment variables loaded\\b", max_lines = 80 },
+]
+keep_lines_matching = [
+  "\\bP[13][0-9]{3}\\b",
+  "^Validation Error Count:",
+  "^\\[Context:",
+  "^Database error",
+  "^Migration name:",
+  "^\\s*-->",
+  "^\\s*\\d+\\s+\\|",
+  "^\\s*\\|",
+  "Generated Prisma Client",
+  "in sync with your schema",
+  "have been applied",
+]
+max_lines = 180
+on_empty = "prisma: completed"
+# ruby-prisma-fin
 "###;
 
 fn compress_batch(options: BatchOptions) -> Result<BatchReport> {
@@ -10240,6 +10309,297 @@ key = value
         assert_eq!(core_version, root_version);
         assert_eq!(wasm_version, root_version);
         assert_eq!(npm_version, root_version);
+    }
+
+    const RSPEC_RAW: &str = include_str!("../fixtures/exec/ruby-prisma/rspec_raw.txt");
+    const RSPEC_RB: &str = include_str!("../fixtures/exec/ruby-prisma/rspec_test.rb");
+    const MINITEST_RAW: &str = include_str!("../fixtures/exec/ruby-prisma/minitest_raw.txt");
+    const MINITEST_RB: &str = include_str!("../fixtures/exec/ruby-prisma/minitest_test.rb");
+    const PRISMA_RAW: &str = include_str!("../fixtures/exec/ruby-prisma/prisma_raw.txt");
+
+    struct VueExec {
+        filtre: String,
+        texte_filtre: String,
+        sortie: String,
+        etapes: String,
+    }
+
+    fn vue_exec(command: &[&str], raw: &str) -> VueExec {
+        let cmd: Vec<String> = command.iter().map(|arg| (*arg).to_string()).collect();
+        let (filtre, texte_filtre) = filter_command_output(&cmd, raw);
+        let store = InMemoryCcrStore::default();
+        let compresse = compress_text_with_pipeline_gate(
+            &texte_filtre,
+            "",
+            &store,
+            &build_pipeline(),
+            None,
+            false,
+        )
+        .expect("compression de la sortie filtrée");
+        let sortie = if first_lost_failure_line(&texte_filtre, &compresse.output).is_some() {
+            texte_filtre.clone()
+        } else {
+            compresse.output
+        };
+        VueExec {
+            filtre,
+            texte_filtre,
+            sortie,
+            etapes: compresse.steps_applied.join(","),
+        }
+    }
+
+    fn bilan(filtre: &str, attendu: &str, sortie: &str, faits: &[&str], bruits: &[&str]) -> String {
+        let mut problemes = Vec::new();
+        if filtre != attendu {
+            problemes.push(format!("filtre={filtre}, attendu {attendu}"));
+        }
+        for fait in faits {
+            if !sortie.contains(fait) {
+                problemes.push(format!("fait perdu: {fait}"));
+            }
+        }
+        for bruit in bruits {
+            if sortie.contains(bruit) {
+                problemes.push(format!("bruit gardé: {bruit}"));
+            }
+        }
+        if problemes.is_empty() {
+            String::new()
+        } else {
+            format!("{} \n---\n{sortie}", problemes.join(" | "))
+        }
+    }
+
+    #[test]
+    fn ruby_prisma_rspec_reel_garde_les_faits_et_ecarte_le_bruit() {
+        let ligne = RSPEC_RB.lines().nth(4).expect("ligne 5");
+        assert!(
+            ligne.contains("eq(3)"),
+            "le fichier de test ne place pas eq(3) à la ligne 5 : {ligne}"
+        );
+        let vue = vue_exec(&["rspec", "rspec_test.rb"], RSPEC_RAW);
+        let faits = [
+            "1) Math adds numbers",
+            "Failure/Error: expect(1 + 1).to eq(3)",
+            "expected: 3",
+            "got: 2",
+            "./rspec_test.rb:5",
+            "2) Math subtracts numbers",
+            "Failure/Error: expect(2 - 1).to eq(2)",
+            "expected: 2",
+            "got: 1",
+            "./rspec_test.rb:9",
+            "2 examples, 2 failures",
+            "rspec ./rspec_test.rb:4 # Math adds numbers",
+            "rspec ./rspec_test.rb:8 # Math subtracts numbers",
+        ];
+        let bruits = ["files took 0.12175 seconds to load"];
+        let probleme = bilan(&vue.filtre, "toml:rspec", &vue.sortie, &faits, &bruits);
+        assert!(probleme.is_empty(), "ASSERT {probleme}");
+        assert!(
+            !vue.sortie.lines().any(|ligne| ligne.trim() == "FF"),
+            "bruit gardé: FF\n{}",
+            vue.sortie
+        );
+        assert!(
+            vue.texte_filtre.len() < RSPEC_RAW.len(),
+            "ASSERT octets rspec brut={} filtre={}",
+            RSPEC_RAW.len(),
+            vue.texte_filtre.len()
+        );
+        println!(
+            "ASSERT octets rspec brut={} filtre={} apres_porte={} etapes={}",
+            RSPEC_RAW.len(),
+            vue.texte_filtre.len(),
+            vue.sortie.len(),
+            vue.etapes
+        );
+    }
+
+    #[test]
+    fn ruby_prisma_minitest_reel_garde_les_faits_et_ecarte_le_bruit() {
+        let addition = MINITEST_RB.lines().nth(4).expect("ligne 5");
+        let soustraction = MINITEST_RB.lines().nth(8).expect("ligne 9");
+        assert!(addition.contains("assert_equal 3, 1 + 1"), "{addition}");
+        assert!(
+            soustraction.contains("assert_equal 2, 2 - 1"),
+            "{soustraction}"
+        );
+        let vue = vue_exec(&["ruby", "minitest_test.rb"], MINITEST_RAW);
+        let faits = [
+            "Run options: --seed 64567",
+            "1) Failure:",
+            "TestMath#test_subtraction [minitest_test.rb:9]:",
+            "Expected: 2",
+            "Actual: 1",
+            "2) Failure:",
+            "TestMath#test_addition [minitest_test.rb:5]:",
+            "Expected: 3",
+            "Actual: 2",
+            "2 runs, 2 assertions, 2 failures, 0 errors, 0 skips",
+        ];
+        let bruits = ["# Running:", "Finished in 0.005124s", "390.3469 runs/s"];
+        let probleme = bilan(&vue.filtre, "toml:minitest", &vue.sortie, &faits, &bruits);
+        assert!(probleme.is_empty(), "ASSERT {probleme}");
+        assert!(
+            !vue.sortie.lines().any(|ligne| ligne.trim() == "FF"),
+            "bruit gardé: FF\n{}",
+            vue.sortie
+        );
+        assert!(
+            vue.texte_filtre.len() < MINITEST_RAW.len(),
+            "ASSERT octets minitest brut={} filtre={}",
+            MINITEST_RAW.len(),
+            vue.texte_filtre.len()
+        );
+        println!(
+            "ASSERT octets minitest brut={} filtre={} apres_porte={} etapes={}",
+            MINITEST_RAW.len(),
+            vue.texte_filtre.len(),
+            vue.sortie.len(),
+            vue.etapes
+        );
+    }
+
+    #[test]
+    fn ruby_prisma_prisma_validate_reel_garde_p1012_et_le_message() {
+        let vue = vue_exec(&["prisma", "validate"], PRISMA_RAW);
+        let faits = [
+            "Error: Prisma schema validation - (validate wasm)",
+            "Error code: P1012",
+            "Error validating field `posts` in model `User`",
+            "missing an opposite relation field on the model `Post`",
+            "prisma/schema.prisma:15",
+            "posts Post[]",
+            "deliberate error: missing relation fields",
+            "Validation Error Count: 1",
+            "[Context: validate]",
+        ];
+        let bruits = [
+            "Environment variables loaded from .env",
+            "Prisma schema loaded from prisma/schema.prisma",
+            "Prisma CLI Version : 5.15.0",
+        ];
+        let probleme = bilan(&vue.filtre, "toml:prisma", &vue.sortie, &faits, &bruits);
+        assert!(probleme.is_empty(), "ASSERT {probleme}");
+        assert!(
+            !vue.sortie.contains('\u{1b}'),
+            "bruit gardé: séquence ANSI\n{}",
+            vue.sortie
+        );
+        assert!(
+            vue.texte_filtre.len() < PRISMA_RAW.len(),
+            "ASSERT octets prisma brut={} filtre={}",
+            PRISMA_RAW.len(),
+            vue.texte_filtre.len()
+        );
+        println!(
+            "ASSERT octets prisma brut={} filtre={} apres_porte={} etapes={}",
+            PRISMA_RAW.len(),
+            vue.texte_filtre.len(),
+            vue.sortie.len(),
+            vue.etapes
+        );
+    }
+
+    /// Forme d'un échec `migrate`, absente du corpus capturé (seulement
+    /// `prisma validate` / P1012). Ce n'est pas une sortie réelle.
+    #[test]
+    fn ruby_prisma_p3009_synthetique_garde_lexplication() {
+        let raw = "\
+Environment variables loaded from .env
+Error: P3009
+
+migrate found failed migrations in the target database, new migrations will not be applied.
+The `20240101120000_init` migration started at 2024-01-01 failed
+
+Prisma CLI Version : 5.15.0
+";
+        let vue = vue_exec(&["prisma", "migrate", "dev"], raw);
+        let faits = [
+            "Error: P3009",
+            "migrate found failed migrations in the target database, new migrations will not be applied.",
+            "The `20240101120000_init` migration started at 2024-01-01 failed",
+        ];
+        let bruits = [
+            "Environment variables loaded from .env",
+            "Prisma CLI Version : 5.15.0",
+        ];
+        let probleme = bilan(&vue.filtre, "toml:prisma", &vue.sortie, &faits, &bruits);
+        assert!(probleme.is_empty(), "ASSERT {probleme}");
+    }
+
+    #[test]
+    fn ruby_prisma_ne_filtre_pas_une_commande_etrangere() {
+        let (filtre, sortie) =
+            filter_command_output(&["cat".into(), "prisma/schema.prisma".into()], PRISMA_RAW);
+        assert_ne!(filtre, "toml:prisma", "{filtre}");
+        assert!(
+            sortie.contains("Environment variables loaded from .env"),
+            "le brut d'une commande étrangère ne doit pas être filtré comme prisma : {sortie}"
+        );
+        let (filtre, sortie) =
+            filter_command_output(&["ruby".into(), "script.rb".into()], RSPEC_RAW);
+        assert_ne!(filtre, "toml:rspec", "{filtre}");
+        assert!(
+            sortie.contains("files took 0.12175 seconds to load"),
+            "bruit encore là sans le filtre rspec, filtre={filtre}"
+        );
+    }
+
+    #[test]
+    fn ruby_prisma_routage_des_lanceurs() {
+        let cas = [
+            (vec!["rspec", "rspec_test.rb"], "toml:rspec"),
+            (vec!["bundle", "exec", "rspec", "spec"], "toml:rspec"),
+            (vec!["ruby", "-S", "rspec"], "toml:rspec"),
+            (vec!["ruby", "minitest_test.rb"], "toml:minitest"),
+            (
+                vec!["bundle", "exec", "ruby", "minitest_test.rb"],
+                "toml:minitest",
+            ),
+            (vec!["rake", "test"], "toml:minitest"),
+            (vec!["rails", "test"], "toml:minitest"),
+            (vec!["prisma", "validate"], "toml:prisma"),
+            (vec!["prisma", "migrate", "dev"], "toml:prisma"),
+            (vec!["prisma", "generate"], "toml:prisma"),
+            (vec!["npx", "prisma", "validate"], "toml:prisma"),
+            (
+                vec!["npx", "--yes", "prisma", "migrate", "dev"],
+                "toml:prisma",
+            ),
+            (vec!["yarn", "prisma", "generate"], "toml:prisma"),
+            (vec!["pnpm", "exec", "prisma", "validate"], "toml:prisma"),
+        ];
+        for (args, attendu) in cas {
+            let cmd: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+            let (filtre, _) = filter_command_output(&cmd, "");
+            assert_eq!(filtre, attendu, "commande {args:?}");
+        }
+    }
+
+    #[test]
+    fn ruby_prisma_sans_filtre_generique_le_bruit_reste() {
+        let rspec = filter_generic(RSPEC_RAW, 240);
+        assert!(
+            rspec.contains("files took 0.12175 seconds to load"),
+            "ASSERT bruit gardé absent du générique rspec"
+        );
+        assert!(rspec.contains("got: 2"));
+        let minitest = filter_generic(MINITEST_RAW, 240);
+        assert!(
+            minitest.contains("Finished in 0.005124s"),
+            "ASSERT bruit gardé absent du générique minitest"
+        );
+        assert!(minitest.contains("TestMath#test_subtraction"));
+        let prisma = filter_generic(PRISMA_RAW, 240);
+        assert!(
+            prisma.contains("Environment variables loaded from .env"),
+            "ASSERT bruit gardé absent du générique prisma"
+        );
+        assert!(prisma.contains("Error code: P1012"));
     }
 
     fn cargo_package_version(path: &Path) -> String {
