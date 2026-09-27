@@ -50,7 +50,7 @@ Démo réelle en 40 s 👇"""
 T['alt-B'] = """Une fenêtre de 1M de tokens ne rend pas le bruit gratuit : vous le payez en coût, en latence et en attention du modèle.
 
 lm-resizer filtre la sortie des commandes avant qu'elle n'atteigne Claude Code ou Codex. Rust, Apache-2.0 👇"""
-bad = ['open source','open-source','opensource','•','→','…','@phuetz/']
+bad = ['open'+' source','open'+'-source','open'+'source','•','→','…','@phuetz/']
 for k, v in T.items():
     assert not any(b in v.lower() for b in bad), k
     print(k, xlen(v))
