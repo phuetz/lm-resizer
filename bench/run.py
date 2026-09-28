@@ -190,6 +190,18 @@ def render_report(rows, cases, args):
         "| Catégorie | Cas | LM Resizer : médiane / oracle | RTK : médiane / oracle | Headroom : médiane / oracle |",
         "|---|---:|---:|---:|---:|",
     ]
+    try:
+        stats_env = os.environ.copy()
+        stats_env["HOME"] = str(QA / "home-lm-resizer")
+        stats = subprocess.check_output([str(args.lm_bin), "stats", "--markdown", "--store", str(QA / "lm-ccr.sqlite")], text=True, timeout=10, env=stats_env)
+        commands = re.search(r"Exec commands: (\d+)", stats)
+        bytes_saved = re.search(r"Bytes saved: (\d+)", stats)
+        estimated = re.search(r"Estimated tokens saved: (\d+)", stats)
+        if commands and bytes_saved and estimated:
+            head.insert(head.index("## Résultats par catégorie") - 1,
+                        f"- Statistiques LM Resizer cumulées du stockage local : {commands.group(1)} commandes enveloppées, {bytes_saved.group(1)} octets et {estimated.group(1)} jetons estimés économisés ; elles couvrent tous les rejeux locaux et ne sont pas utilisées dans les tableaux.")
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        pass
     categories = sorted({c["category"] for c in cases})
     for category in categories + ["GLOBAL"]:
         subset = [r for r in rows if category == "GLOBAL" or r["category"] == category]
