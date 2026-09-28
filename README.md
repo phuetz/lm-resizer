@@ -5,15 +5,21 @@ and more useful context.
 
 ![lm-resizer in action](docs/lm-resizer-hero.png)
 
-> One `cargo test` run through `lm-resizer`: **398 commands, 1.23 MB → 372 KB,
-> 222,247 tokens saved** — signal kept, noise dropped, nothing lost (full output
-> stays recoverable).
+> LM Resizer reduces command output while keeping failures and summaries visible.
+> The full output remains locally recoverable. See the [reproducible side-by-side
+> benchmark](bench/README.md) for measured token counts and retention checks.
 
 ![lm-resizer: from noisy tool output (tests, logs, diffs, JSON, provider traffic) through detection, filtering, compression and CCR offload, to a lean context for the agent; CLI, exec wrapper, MCP, HTTP and proxy modes](docs/infographic-lm-resizer.webp)
 
 Website: <https://phuetz.github.io/lm-resizer/>
 
 French README: [README.fr.md](README.fr.md)
+
+The benchmark covers the commands and fixtures listed in
+[`bench/cases.json`](bench/cases.json). It does not establish parity with RTK's
+`sqlfluff`, `pulumi`, `sbt`, `mvnd`, `phpt`, `deno`, or OpenShift commands; these
+are outside the measured command coverage. Output token savings are not a
+measurement of provider billing or agent task success.
 
 `lm-resizer` is designed for a practical agent problem: Claude Code, Codex, and
 MCP agents spend a surprising amount of their context window on raw tool output.
