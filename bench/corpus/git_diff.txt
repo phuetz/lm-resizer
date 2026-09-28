@@ -1,0 +1,80 @@
+diff --git a/src/billing.py b/src/billing.py
+index 1111111..2222222 100644
+--- a/src/billing.py
++++ b/src/billing.py
+@@ -17,7 +17,7 @@ def total(items):
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+ context
+-    return subtotal + tax
++    return round(subtotal + tax, 2)
+diff --git a/tests/test_billing.py b/tests/test_billing.py
+@@ -40,3 +40,4 @@
++def test_rounding(): assert total([1.005]) == 1.01

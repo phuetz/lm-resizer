@@ -1,0 +1,29 @@
+[
+  {
+    "tool": "LM Resizer",
+    "agent_exit": 0,
+    "tests_pass": false,
+    "test_output": "==========================\n_______________________________ test_reject_zero _______________________________\n\n    def test_reject_zero():\n        actual = status_for_quantity(0)\n>       assert actual == 422, f\"expected status=422, got status={actual}\"\nE       AssertionError: expected status=422, got status=200\nE       assert 200 == 422\n\n../../../../bench/agent_fixture/tests/test_orders.py:14: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_orders.py::test_reject_zero - AssertionError: expected stat...\n1 failed, 2 passed in 0.02s\n",
+    "log": "agent/lm-resizer.log",
+    "source_changed": false,
+    "environment_blocked": true
+  },
+  {
+    "tool": "RTK",
+    "agent_exit": 0,
+    "tests_pass": false,
+    "test_output": "==========================\n_______________________________ test_reject_zero _______________________________\n\n    def test_reject_zero():\n        actual = status_for_quantity(0)\n>       assert actual == 422, f\"expected status=422, got status={actual}\"\nE       AssertionError: expected status=422, got status=200\nE       assert 200 == 422\n\n../../../../bench/agent_fixture/tests/test_orders.py:14: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_orders.py::test_reject_zero - AssertionError: expected stat...\n1 failed, 2 passed in 0.01s\n",
+    "log": "agent/rtk.log",
+    "source_changed": false,
+    "environment_blocked": true
+  },
+  {
+    "tool": "Headroom",
+    "agent_exit": 0,
+    "tests_pass": false,
+    "test_output": "==========================\n_______________________________ test_reject_zero _______________________________\n\n    def test_reject_zero():\n        actual = status_for_quantity(0)\n>       assert actual == 422, f\"expected status=422, got status={actual}\"\nE       AssertionError: expected status=422, got status=200\nE       assert 200 == 422\n\n../../../../bench/agent_fixture/tests/test_orders.py:14: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_orders.py::test_reject_zero - AssertionError: expected stat...\n1 failed, 2 passed in 0.02s\n",
+    "log": "agent/headroom.log",
+    "source_changed": false,
+    "environment_blocked": true
+  }
+]
