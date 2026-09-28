@@ -2,7 +2,7 @@
 
 Faits vérifiés le 10/09/2026 : dossiers `.claude/skills/<outil>` et `.codex/skills/<outil>` dans les deux dépôts ; la compétence lm-resizer
 n'exécute que `lm-resizer exec --raw-on-failure -- <commande>` ; Code Explorer : `status` → `analyze` → `context` / `impact` / `query`.
-Chiffres autorisés : ceux des README (398 commandes, 1,23 Mo → 372 Ko, 222 247 tokens ; ~730 000 → ~18 000 tokens, ~25 ms). Rien d'autre.
+Chiffres autorisés : uniquement les mesures du banc versionné (`bench/resultats.json`, `bench/RAPPORT.md`), en citant le cas, les trois outils et la conservation de l'oracle. Ne pas attribuer une économie sur 22 fixtures à une seule commande réelle.
 
 ## Version profil
 

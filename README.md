@@ -47,8 +47,7 @@ drop anything.
 **Provider-agnostic, validated live.** lm-resizer sits in front of any
 OpenAI/Anthropic-compatible API. Verified end-to-end (2026-06-23) in front of
 **Mistral, Ollama (local, `$0`), DeepSeek, OpenRouter and xAI/Grok** — real keys:
-a request is compressed by the proxy and the upstream model answers through it
-(for Mistral, a noisy tool payload shrank ~5.8KB→2.8KB then the model replied).
+a request is compressed by the proxy and the upstream model answers through it.
 Any other OpenAI/Anthropic-compatible provider works via the same path.
 
 ## Why this exists
