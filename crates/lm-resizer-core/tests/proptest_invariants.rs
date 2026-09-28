@@ -1,3 +1,7 @@
+//! Sampled checks for the direct compressor APIs. Structured source and tool
+//! transcript cases below cover paths that random short strings do not reach.
+//! Passing these tests does not prove the properties for every input format.
+
 use proptest::prelude::*;
 use regex::Regex;
 
@@ -6,6 +10,9 @@ use lm_resizer_core::transforms::diff_compressor::DiffCompressor;
 use lm_resizer_core::transforms::log_compressor::{LogCompressor, LogCompressorConfig};
 use lm_resizer_core::transforms::pipeline::{CompressionContext, OffloadTransform};
 use lm_resizer_core::transforms::prose_compressor::ProseCompressor;
+use lm_resizer_core::transforms::retention_advice::{
+    sha256_hex_public, RetentionAdvice, RetentionRange,
+};
 use lm_resizer_core::transforms::search_compressor::{SearchCompressor, SearchCompressorConfig};
 use lm_resizer_core::transforms::source_compressor::SourceCompressor;
 use std::fs;
@@ -136,6 +143,102 @@ fn test_fixtures() {
         let input = fs::read_to_string(root.join(name)).unwrap();
         check_invariants(&input, &apply_source(&input), "Source");
     }
+    let source = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/critical_comments.rs.txt"),
+    )
+    .unwrap();
+    check_invariants(&source, &apply_source(&source), "Source fixture");
+}
+
+#[test]
+fn test_source_structural_and_advice_preserve_critical_comments() {
+    let body: String = (0..20)
+        .map(|i| format!("    let value_{i} = {i};\n"))
+        .collect();
+    let input = format!("// error: disk full\n// see src/main.rs\npub fn run() {{\n{body}}}\n");
+    let structural = SourceCompressor::embedded_only().compress(&input);
+    assert_eq!(structural.engine_used, "embedded-regex-braces");
+    for marker in ["// error: disk full", "// see src/main.rs"] {
+        assert!(structural.compressed.contains(marker), "lost {marker}");
+    }
+
+    let advice = RetentionAdvice {
+        source_sha256: Some(sha256_hex_public(input.as_bytes())),
+        ranges: vec![RetentionRange {
+            start_line: 3,
+            end_line: 3,
+            weight: 1.0,
+            label: None,
+            kind: None,
+        }],
+        ..RetentionAdvice::default()
+    };
+    let advised = SourceCompressor::embedded_only().compress_with_advice(&input, &advice, None);
+    assert_eq!(advised.engine_used, "advice-guided");
+    for marker in ["// error: disk full", "// see src/main.rs"] {
+        assert!(advised.compressed.contains(marker), "lost {marker}");
+    }
+}
+
+#[test]
+fn test_advice_preserves_unprotected_critical_comments() {
+    let input = "// error: bad\n// see src/main.rs\nlet value = 1;\n";
+    let advice = RetentionAdvice {
+        source_sha256: Some(sha256_hex_public(input.as_bytes())),
+        ranges: vec![RetentionRange {
+            start_line: 3,
+            end_line: 3,
+            weight: 1.0,
+            label: None,
+            kind: None,
+        }],
+        ..RetentionAdvice::default()
+    };
+    let output = SourceCompressor::embedded_only().compress_with_advice(input, &advice, None);
+    assert_eq!(output.engine_used, "advice-guided");
+    assert!(output.compressed.contains("// error: bad"));
+    assert!(output.compressed.contains("// see src/main.rs"));
+    check_invariants(input, &output.compressed, "Advice");
+}
+
+#[test]
+fn test_typescript_structural_preserves_critical_comments() {
+    let body: String = (0..20)
+        .map(|i| format!("  const value_{i} = {i};\n"))
+        .collect();
+    let input = format!("// assert result\n// see src/main.ts\nexport function run(): number {{\n{body}  return 1;\n}}\n");
+    let output = SourceCompressor::embedded_only().compress(&input);
+    assert_eq!(output.engine_used, "embedded-regex-braces");
+    assert!(output.compressed.contains("// assert result"));
+    assert!(output.compressed.contains("// see src/main.ts"));
+    check_invariants(&input, &output.compressed, "TypeScript");
+}
+
+#[test]
+fn test_structural_body_with_critical_comment_falls_back() {
+    let body: String = (0..20)
+        .map(|i| format!("    let value_{i} = {i};\n"))
+        .collect();
+    let input =
+        format!("pub fn run() {{\n{body}    // error: disk full\n    // see src/main.rs\n}}\n");
+    let output = SourceCompressor::embedded_only().compress(&input);
+    assert!(output.compressed.contains("// error: disk full"));
+    assert!(output.compressed.contains("// see src/main.rs"));
+    check_invariants(&input, &output.compressed, "Rust body");
+}
+
+#[test]
+fn test_search_does_not_drop_rspec_failure() {
+    let input = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/exec/ruby-prisma/rspec_raw.txt"),
+    )
+    .unwrap();
+    let output = apply_search(&input);
+    assert!(output.contains("Failure/Error"));
+    assert!(output.contains("2 examples, 2 failures"));
+    check_invariants(&input, &output, "Search RSpec");
 }
 
 #[test]

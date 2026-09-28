@@ -269,6 +269,30 @@ impl SearchCompressor {
     ) -> (SearchCompressionResult, SearchCompressorStats) {
         let mut stats = SearchCompressorStats::default();
         let parsed = self.parse_search_results(content, &mut stats);
+        // A mixed tool transcript can contain grep-like locations as well as
+        // failure lines. Parsing just the locations must not erase the verdict.
+        if stats.lines_unparsed > 0
+            && content.lines().any(|line| {
+                !line.trim().is_empty()
+                    && parse_match_line(line.trim()).is_none()
+                    && super::diagnostic_gate::FAILURE_SIGNAL.is_match(line)
+            })
+        {
+            let match_count = parsed.values().map(|file| file.matches.len()).sum();
+            return (
+                SearchCompressionResult {
+                    compressed: content.to_string(),
+                    original: content.to_string(),
+                    original_match_count: match_count,
+                    compressed_match_count: match_count,
+                    files_affected: parsed.len(),
+                    compression_ratio: 1.0,
+                    cache_key: None,
+                    summaries: BTreeMap::new(),
+                },
+                stats,
+            );
+        }
 
         if parsed.is_empty() {
             return (
