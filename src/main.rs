@@ -9073,8 +9073,14 @@ unknown_action = true
 
     #[test]
     fn init_filters_writes_verifiable_template() {
-        let root =
-            std::env::temp_dir().join(format!("lm-resizer-filter-init-{}", std::process::id()));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "lm-resizer-filter-init-{}-{nonce}",
+            std::process::id()
+        ));
         let path = root.join("filters.toml");
 
         let report = init_filter_file(&path, FilterProfile::Generic, false).unwrap();
