@@ -256,7 +256,25 @@ fn json_missing(case: &Case, output: &str) -> Vec<String> {
     if let Ok(value) = serde_json::from_str::<Value>(output) {
         found[0] = value["schema"] == "orders-v3";
         found[1] = value["count"] == 180;
-        if let Some(rows) = value["rows"].as_array() {
+        if let Some(raw_rows) = value["rows"].as_array() {
+            let columns = value["columns"].as_array();
+            let rows: Vec<Value> = raw_rows
+                .iter()
+                .map(|row| {
+                    if let (Some(cells), Some(columns)) = (row.as_array(), columns) {
+                        let object = columns
+                            .iter()
+                            .zip(cells)
+                            .filter_map(|(key, cell)| {
+                                key.as_str().map(|key| (key.to_string(), cell.clone()))
+                            })
+                            .collect();
+                        Value::Object(object)
+                    } else {
+                        row.clone()
+                    }
+                })
+                .collect();
             let get = |id: i64| rows.iter().find(|row| row["id"].as_i64() == Some(id));
             let anomaly = get(143);
             found[2] = rows.len() == 180 && anomaly.is_some();
@@ -528,7 +546,20 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
         .output()?;
     let commit = String::from_utf8_lossy(&commit.stdout).trim().to_string();
     let binary_hash = format!("{:x}", Sha256::digest(fs::read(lm_bin)?));
-    let mut report = format!("# Banc comparatif LM Resizer / RTK / Headroom\n\nAucune supériorité globale démontrée. Une économie ne compte que si l'oracle est intégralement conservé.\n\n## Versions et méthode\n\n- Checkout `{commit}` ; SHA-256 du binaire LM Resizer `{binary_hash}`.\n- RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.\n- Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.\n- RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.\n- Les chemins HOME/checkout et horodatages tee sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.\n- Latence : processus complet, démarrage Python de Headroom compris.\n");
+    let covers_all = cases.iter().all(|case| {
+        let lm = row_for(rows, &case.id, "LM Resizer");
+        lm.oracle_retention == 1.0
+            && lm.error.is_none()
+            && TOOLS[1..]
+                .iter()
+                .all(|tool| lm.qualified_saving >= row_for(rows, &case.id, tool).qualified_saving)
+    });
+    let verdict = if covers_all {
+        "Sur ces 22 fixtures, LM Resizer est devant ou à égalité sur chaque économie qualifiée, avec tous ses oracles complets. La généralisation hors de ce corpus n'est pas démontrée."
+    } else {
+        "Aucune supériorité cas par cas démontrée."
+    };
+    let mut report = format!("# Banc comparatif LM Resizer / RTK / Headroom\n\n{verdict} Une économie ne compte que si l'oracle est intégralement conservé.\n\n## Versions et méthode\n\n- Checkout `{commit}` ; SHA-256 du binaire LM Resizer `{binary_hash}`.\n- RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.\n- Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.\n- RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.\n- Les chemins HOME/checkout sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.\n- Latence : processus complet, démarrage Python de Headroom compris.\n");
     if let Ok(proof) =
         serde_json::from_str::<Value>(&fs::read_to_string(bench_dir().join("preuve_home.json"))?)
     {
@@ -593,7 +624,7 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
         }
         report.push('\n');
     }
-    report.push_str("\n## Faits perdus et corrections LM Resizer\n\n");
+    report.push_str("\n## Faits manquants par outil\n\n");
     for row in rows
         .iter()
         .filter(|row| !row.missing.is_empty() || row.error.is_some())
@@ -606,7 +637,10 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
             row.missing.join(", ")
         ));
     }
-    report.push_str("\nPour dépasser RTK et Headroom, LM Resizer doit corriger ses pertes d'oracle et dépasser les économies qualifiées suivantes :\n\n");
+    report.push_str("\n## Cas encore derrière un concurrent\n\n");
+    if covers_all {
+        report.push_str("Aucun sur les 22 fixtures de ce banc.\n");
+    }
     for case in cases {
         let lm = row_for(rows, &case.id, "LM Resizer");
         let other = [
@@ -736,6 +770,16 @@ mod tests {
         let missing = json_missing(&case, &original.to_string());
         assert!(missing.contains(&"\"amount\": 4299".to_string()));
         assert!(missing.contains(&"\"id\": 89".to_string()));
+        let columns = json!(["amount", "id", "meta", "state"]);
+        let mut table = json!({"schema":"orders-v3", "count":180, "columns":columns,
+            "rows": original["rows"].as_array().unwrap().iter().map(|row|
+                json!([row["amount"],row["id"],row["meta"],row["state"]])
+            ).collect::<Vec<_>>()});
+        table["rows"][143][0] = json!(4299);
+        table["rows"][89][0] = json!(267);
+        assert!(json_missing(&case, &table.to_string()).is_empty());
+        table["rows"][143][0] = json!(4300);
+        assert!(json_missing(&case, &table.to_string()).contains(&"\"amount\": 4299".to_string()));
     }
 
     #[test]
