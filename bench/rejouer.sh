@@ -13,7 +13,11 @@ if [[ ! -x "$qa_dir/rtk/rtk" ]]; then
   tar -xzf "$qa_dir/rtk.tar.gz" -C "$qa_dir/rtk"
 fi
 if [[ ! -x "$qa_dir/venv/bin/python" ]]; then
-  python3 -m venv "$qa_dir/venv"
+  if command -v uv >/dev/null 2>&1; then
+    uv venv --python python3 "$qa_dir/venv"
+  else
+    python3 -m venv "$qa_dir/venv"
+  fi
 fi
 if ! "$qa_dir/venv/bin/python" -c 'import importlib.metadata as m; assert m.version("headroom-ai") == "0.39.1"; assert m.version("onnxruntime") == "1.24.4"' >/dev/null 2>&1; then
   if command -v uv >/dev/null 2>&1; then
