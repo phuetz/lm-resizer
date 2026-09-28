@@ -14,6 +14,11 @@ use std::sync::LazyLock;
 use crate::ccr::{compute_key, CcrStore};
 use crate::transforms::retention_advice::{RetentionAdvice, RetentionRange};
 
+static CRITICAL_PATH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)[a-z0-9_-]+/[a-z0-9_-]+\.[a-z0-9]+")
+        .expect("valid critical path regex")
+});
+
 /// Supported target languages for structural compression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceLanguage {
@@ -399,8 +404,15 @@ impl SourceCompressor {
             let trimmed = line.trim_start();
 
             if is_full_line_comment(trimmed) {
-                removed_comment_lines += 1;
-                continue;
+                let lower = line.to_lowercase();
+                let is_critical = lower.contains("error")
+                    || lower.contains("assert")
+                    || CRITICAL_PATH.is_match(line)
+                    || super::diagnostic_gate::FAILURE_SIGNAL.is_match(line);
+                if !is_critical {
+                    removed_comment_lines += 1;
+                    continue;
+                }
             }
 
             if trimmed.is_empty() {
