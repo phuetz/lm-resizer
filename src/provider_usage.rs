@@ -268,7 +268,8 @@ mod tests {
 
     #[tokio::test]
     async fn un_flux_abandonne_est_marque_incomplet() {
-        let seen: Arc<Mutex<Option<(Option<ProviderUsage>, bool)>>> = Arc::default();
+        type SeenUsage = Arc<Mutex<Option<(Option<ProviderUsage>, bool)>>>;
+        let seen: SeenUsage = Arc::default();
         let s2 = seen.clone();
         let chunks: Vec<Result<Bytes, std::io::Error>> = vec![
             Ok(Bytes::from_static(b"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5}}}\n")),

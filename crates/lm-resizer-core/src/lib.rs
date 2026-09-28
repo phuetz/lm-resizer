@@ -25,7 +25,8 @@ use ccr::{CcrStore, InMemoryCcrStore};
 use serde::Serialize;
 use transforms::{
     detect_content_type, CompressionContext, CompressionPipeline, DiffNoise, DiffOffload,
-    JsonMinifier, JsonOffload, LogOffload, LogTemplate, PipelineConfig, SourceCompressor,
+    JsonMinifier, JsonOffload, LogOffload, LogTemplate, PipelineConfig, ProseCompressor,
+    SourceCompressor,
 };
 
 pub use transforms::{SourceCompressionResult, SourceLanguage};
@@ -132,6 +133,7 @@ pub fn default_pipeline() -> CompressionPipeline {
         .with_reformat(JsonMinifier)
         .with_reformat(LogTemplate::new(cfg.reformat.log_template))
         .with_reformat(SourceCompressor::default())
+        .with_offload(ProseCompressor)
         .with_offload(JsonOffload::new(cfg.offload.json))
         .with_offload(LogOffload::new(cfg.bloat.log))
         .with_offload(DiffOffload::new(cfg.bloat.diff))

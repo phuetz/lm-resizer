@@ -244,7 +244,7 @@ pub fn elide_bodies_with_advice(
     let mut banner_done = false;
     while line_no <= lines.len() {
         let raw = lines[line_no - 1];
-        if !banner_done && !(line_no == 1 && keeps_first_line(raw)) {
+        if !(banner_done || line_no == 1 && keeps_first_line(raw)) {
             out.push_str(&format!(
                 "// [lm-resizer: structure guidée par {} (sha256 vérifié) ; {} corps omis, {} lignes ; original complet : lm-resizer retrieve {}]{}",
                 advice.advisor.as_deref().unwrap_or("un conseiller externe"),
@@ -344,6 +344,35 @@ fn body_open_line(events: &[BraceEvent], start: usize, end: usize) -> Option<usi
     let (open_line, close_line) = last_match?;
     // Opened and closed on the last line (`}); ... {}`): not a body.
     (close_line == end && open_line < end).then_some(open_line)
+}
+
+/// Repair a Code Explorer C/C++ graph span that names a function but records
+/// only its signature line. This uses the same conservative brace lexer as the
+/// elision guard; it never changes the source or guesses across declarations.
+pub fn end_line_for_inline_body(input: &str, start_line: usize) -> Option<usize> {
+    let lines: Vec<&str> = input.split_inclusive('\n').collect();
+    let signature = lines.get(start_line.checked_sub(1)?)?.trim();
+    if !(signature.contains(") {") || signature.contains("){")) {
+        return None;
+    }
+    let events = lex_braces(&lines, Family::CLike);
+    let mut depth = 0usize;
+    let mut opened = false;
+    for (line, open) in events.into_iter().filter(|(line, _)| *line >= start_line) {
+        if !opened && line != start_line {
+            return None;
+        }
+        if open {
+            opened = true;
+            depth += 1;
+        } else if opened {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return (line > start_line).then_some(line);
+            }
+        }
+    }
+    None
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

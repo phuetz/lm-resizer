@@ -826,7 +826,7 @@ pub fn compress_anthropic_live_zone_with_ccr(
 ///    original_tokens` keep the original and tag `RejectedNotSmaller`
 ///    (note: tokens, not bytes, drive the gate).
 /// 4. Otherwise record the replacement and tag `Compressed`.
-#[allow(clippy::too_many_arguments)]
+///
 /// Extract a relevance query from a chat message's user-authored text, so the
 /// scoring-aware compressors (SmartCrusher, search) bias toward what the user
 /// actually asked instead of compressing blind. Handles string content and
@@ -878,6 +878,7 @@ fn truncate_on_char_boundary(s: &str, max: usize) -> String {
     s[..end].to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compress_one_block(
     content_text: &str,
     content_type: ContentType,

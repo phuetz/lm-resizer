@@ -1,0 +1,5 @@
+src/lib.rs:42:9: fn calculate_total() {
+
+src/main.rs:80:3: fn calculate_total() {
+
+2 matches found

@@ -41,6 +41,8 @@ use walkdir::WalkDir;
 mod advice_cli;
 mod parity_filters;
 mod provider_usage;
+mod rtk_filters;
+mod shared_context;
 
 use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
 
@@ -77,7 +79,8 @@ enum Commands {
         /// elides bodies; anything else falls back to ordinary compression.
         #[arg(long, conflicts_with = "advice_from_code_explorer")]
         advice: Option<PathBuf>,
-        /// Ask `code-explorer lm-resizer-advice <input>` for that advice.
+        /// Require an attempt with indexed Code Explorer symbols (`cypher`).
+        /// Indexed source files are also tried automatically when available.
         /// Binary: $LM_RESIZER_CODE_EXPLORER_BIN, else `code-explorer`.
         #[arg(long, requires = "input")]
         advice_from_code_explorer: bool,
@@ -130,6 +133,30 @@ enum Commands {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
+    /// Filter output already captured by a host or benchmark; never execute the command.
+    ToolOutput {
+        /// Command that produced the supplied text.
+        #[arg(long)]
+        command: String,
+        /// File containing the captured text; stdin when omitted.
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+        /// Exit code from the original command.
+        #[arg(long, default_value_t = 0)]
+        exit_code: i32,
+        /// Return a failed command's output verbatim.
+        #[arg(long)]
+        raw_on_failure: bool,
+        /// Query used by the compression pipeline.
+        #[arg(short, long, default_value = "")]
+        query: String,
+        /// Emit metadata and the output as JSON.
+        #[arg(long)]
+        json: bool,
+        /// CCR SQLite database path.
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
     /// Show how a shell command would be routed through `lm-resizer exec`.
     Rewrite {
         /// Emit machine-readable JSON.
@@ -154,6 +181,31 @@ enum Commands {
         #[arg(long)]
         store: Option<PathBuf>,
     },
+    /// Save a named, compressed handoff for other agents sharing this store.
+    Share {
+        key: String,
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+        #[arg(short, long, default_value = "")]
+        query: String,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read a named handoff, compressed by default or verbatim with --full.
+    SharedGet {
+        key: String,
+        #[arg(long)]
+        full: bool,
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
+    /// List names of handoffs in the shared store.
+    SharedList {
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
     /// Show CCR store statistics.
     Stats {
         /// CCR SQLite database path.
@@ -167,6 +219,18 @@ enum Commands {
     Image {
         /// Image file to inspect.
         input: PathBuf,
+        /// Write a smaller PNG or JPEG if encoding saves bytes. Never overwrites.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Optional maximum width or height for explicit downscaling.
+        #[arg(long)]
+        max_dimension: Option<u32>,
+        /// JPEG quality when writing JPEG (1-100; default 90).
+        #[arg(long)]
+        quality: Option<u8>,
+        /// Add a deterministic visual summary (brightness and color only).
+        #[arg(long)]
+        describe: bool,
         /// Emit machine-readable JSON.
         #[arg(long)]
         json: bool,
@@ -768,6 +832,12 @@ struct ImageReport {
     width: Option<u32>,
     height: Option<u32>,
     recommendation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_bytes: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1058,7 +1128,9 @@ async fn main() -> Result<()> {
                 advice.as_deref(),
                 advice_from_code_explorer,
             )?;
-            if let Some(a) = advice_report.as_ref().filter(|a| a.status != "applied") {
+            if let Some(a) = advice_report.as_ref().filter(|a| {
+                a.status != "applied" && (advice_from_code_explorer || advice.is_some())
+            }) {
                 // stderr: stdout stays the compressed text, byte for byte.
                 eprintln!(
                     "lm-resizer: conseil structurel non appliqué ({}{}), compression ordinaire",
@@ -1147,6 +1219,32 @@ async fn main() -> Result<()> {
                 std::process::exit(exit_code);
             }
         }
+        Commands::ToolOutput {
+            command,
+            input,
+            exit_code,
+            raw_on_failure,
+            query,
+            json,
+            store,
+        } => {
+            let raw = read_input(input.as_deref()).await?;
+            let parts = split_shell_words(&command).context("invalid --command quoting")?;
+            let store = open_store(store)?;
+            let report = process_captured_output(
+                &parts,
+                &raw,
+                exit_code,
+                raw_on_failure,
+                &query,
+                store.as_ref(),
+            )?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.output);
+            }
+        }
         Commands::Rewrite { json, command } => {
             let report = rewrite_command_report(&command);
             if json {
@@ -1173,6 +1271,43 @@ async fn main() -> Result<()> {
             let _ = record_retrieval_feedback(&hash, payload.len(), "cli");
             print!("{payload}");
         }
+        Commands::Share {
+            key,
+            input,
+            query,
+            store,
+            json,
+        } => {
+            let raw = read_input(input.as_deref()).await?;
+            let path = store.unwrap_or(default_store_path()?);
+            let ccr = open_store(Some(path.clone()))?;
+            let compressed = compress_text_with_pipeline_gate(
+                &raw,
+                &query,
+                ccr.as_ref(),
+                &build_pipeline(),
+                None,
+                true,
+            )?;
+            let saved = shared_context::put(&path, &key, &raw, &compressed.output)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&saved)?);
+            } else {
+                println!("{}", saved.key);
+            }
+        }
+        Commands::SharedGet { key, full, store } => {
+            let path = store.unwrap_or(default_store_path()?);
+            let content = shared_context::get(&path, &key, full)?
+                .with_context(|| format!("shared context not found: {key}"))?;
+            print!("{content}");
+        }
+        Commands::SharedList { store } => {
+            let path = store.unwrap_or(default_store_path()?);
+            for key in shared_context::list(&path)? {
+                println!("{key}");
+            }
+        }
         Commands::Stats { store, markdown } => {
             let store = open_store(store)?;
             let exec_history = summarize_exec_history().unwrap_or_default();
@@ -1191,8 +1326,23 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
-        Commands::Image { input, json } => {
-            let report = inspect_image(&input)?;
+        Commands::Image {
+            input,
+            output,
+            max_dimension,
+            quality,
+            describe,
+            json,
+        } => {
+            let mut report = inspect_image(&input)?;
+            if describe {
+                report.description = Some(describe_image(&input)?);
+            }
+            if let Some(path) = output.as_deref() {
+                let bytes = encode_smaller_image(&input, path, max_dimension, quality)?;
+                report.output_bytes = bytes;
+                report.output = bytes.map(|_| path.display().to_string());
+            }
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -1204,6 +1354,12 @@ async fn main() -> Result<()> {
                     "{}: {} bytes, {}, {}",
                     report.format, report.bytes, dims, report.recommendation
                 );
+                if let Some(description) = &report.description {
+                    println!("{description}");
+                }
+                if let (Some(output), Some(bytes)) = (&report.output, report.output_bytes) {
+                    println!("saved {output}: {bytes} bytes");
+                }
             }
         }
         Commands::Voice { input, json, clean } => {
@@ -1760,7 +1916,12 @@ fn compress_with_optional_advice(
     advice_path: Option<&Path>,
     advice_from_code_explorer: bool,
 ) -> Result<(CompressReport, Option<advice_cli::AdviceReport>)> {
-    let loaded = match (advice_path, advice_from_code_explorer, input_path) {
+    let auto_code_explorer = input_path.is_some_and(advice_cli::supports_structural_path);
+    let loaded = match (
+        advice_path,
+        advice_from_code_explorer || auto_code_explorer,
+        input_path,
+    ) {
         (Some(path), _, _) => Some(advice_cli::load_advice_file(path).map(|a| (a, None))),
         (None, true, Some(input)) => {
             Some(advice_cli::advice_from_code_explorer(input).map(|(a, ms)| (a, Some(ms))))
@@ -1854,7 +2015,7 @@ fn run_exec_command(
     // annoncée et récupérable, mais le diagnostic n'était plus sous les yeux.
     // Une ligne d'échec que le filtre gardait et que la compression perd :
     // on rend la sortie filtrée, qui est déjà réduite.
-    if let Some(lost) = first_lost_failure_line(&filtered, &compressed.output) {
+    if let Some(lost) = first_lost_indispensable_line(&filtered, &compressed.output, &filter) {
         eprintln!(
             "lm-resizer: compression générique annulée, elle omettait « {} »",
             truncate_chars(lost.trim(), 80)
@@ -1890,6 +2051,63 @@ fn run_exec_command(
     };
     record_exec_history(&report, started.elapsed())?;
     Ok(report)
+}
+
+fn process_captured_output(
+    command: &[String],
+    raw: &str,
+    exit_code: i32,
+    raw_on_failure: bool,
+    query: &str,
+    store: &dyn CcrStore,
+) -> Result<ExecReport> {
+    let keep_raw = raw_on_failure && exit_code != 0;
+    let (filter, filtered) = if keep_raw {
+        ("raw_on_failure".to_string(), raw.to_string())
+    } else {
+        filter_command_output(command, raw)
+    };
+    let (mut output, mut steps, mut keys) = if keep_raw {
+        (raw.to_string(), Vec::new(), Vec::new())
+    } else {
+        let result = compress_text_with_pipeline_gate(
+            &filtered,
+            query,
+            store,
+            &build_pipeline(),
+            None,
+            false,
+        )?;
+        (result.output, result.steps_applied, result.cache_keys)
+    };
+    if first_lost_indispensable_line(&filtered, &output, &filter).is_some() {
+        output = filtered.clone();
+        steps.push("diagnostic_gate:kept_filtered".to_string());
+        keys.clear();
+    }
+    if output.len() >= raw.len() && output != raw {
+        output = raw.to_string();
+        steps.clear();
+        keys.clear();
+    }
+    if output != raw {
+        let key = lm_resizer_core::ccr::compute_key(raw.as_bytes());
+        store.put(&key, raw);
+        keys.push(key);
+    }
+    Ok(ExecReport {
+        command: command.join(" "),
+        exit_code,
+        filter,
+        original_bytes: raw.len(),
+        filtered_bytes: filtered.len(),
+        compressed_bytes: output.len(),
+        bytes_saved: raw.len().saturating_sub(output.len()),
+        compression_steps: steps,
+        cache_keys: keys,
+        tee_hint: None,
+        output,
+    })
 }
 
 fn run_command_streaming(program: &Path, args: &[String], display: &str) -> Result<(i32, String)> {
@@ -2175,7 +2393,17 @@ fn shell_join(args: &[String]) -> String {
 }
 
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
-    route_command_filter(command, raw)
+    let (name, output) = route_command_filter(command, raw);
+    // Filters are also a possible source of lost diagnostics. The later
+    // pipeline gate only compares its input with its output, so it cannot
+    // recover a failure that disappeared here.
+    if first_lost_failure_line(raw, &output).is_some() {
+        return (format!("{name}:diagnostic-guard"), raw.to_string());
+    }
+    if output.len() >= raw.len() && output != raw {
+        return (name, raw.to_string());
+    }
+    (name, output)
 }
 
 fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
@@ -2194,9 +2422,16 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     if let Some((name, summary)) = parity_filters::summarize_for_command(command, raw) {
         return (format!("structured:{name}"), summary);
     }
+    if rtk_filters::is_prisma_migrate(command) {
+        let (name, filtered) = rtk_filters::filter(command, raw).expect("prisma migrate route");
+        return (name.to_string(), filtered);
+    }
     let command_text = normalized_command_text(command);
     if let Some((filter, filtered)) = apply_toml_filters(&command_text, raw) {
         return (filter, filtered);
+    }
+    if let Some((name, filtered)) = rtk_filters::filter(command, raw) {
+        return (name.to_string(), filtered);
     }
 
     let Some(program) = command.first().map(|s| command_basename(s)) else {
@@ -2221,7 +2456,8 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
         ("git", "status") => ("git_status".to_string(), filter_git_status(raw)),
         ("git", "diff") => ("diff_summary".to_string(), filter_diff_summary(raw)),
         ("git", "log") => ("git_log".to_string(), filter_git_log(raw)),
-        ("git", "show") => ("diff_summary".to_string(), filter_diff_summary(raw)),
+        ("git", "show") => ("git_show".to_string(), filter_git_show(raw)),
+        ("diff", _) => ("diff_summary".to_string(), filter_diff_summary(raw)),
         ("cargo", "test") => ("cargo_test".to_string(), filter_cargo_test(raw)),
         ("cargo", "check" | "build" | "clippy") => {
             ("cargo_diagnostics".to_string(), filter_diagnostics(raw))
@@ -2999,8 +3235,38 @@ fn apply_toml_filter(filter: &CompiledTomlFilter, raw: &str) -> String {
 fn first_lost_failure_line<'a>(before: &'a str, after: &str) -> Option<&'a str> {
     before
         .lines()
-        .filter(|l| !l.trim().is_empty() && FAILURE_SIGNAL.is_match(l))
+        .filter(|l| {
+            let trimmed = l.trim();
+            if trimmed.is_empty() || !FAILURE_SIGNAL.is_match(l) {
+                return false;
+            }
+            // curl's transfer header contains "% Received"; it is not a
+            // diagnostic even though the generic regex sees Received.
+            if trimmed.starts_with("% Total    % Received") {
+                return false;
+            }
+            // A highlighted source line is context for the real error
+            // directly above it; comments in that frame can say "error".
+            !(l.contains(" | ") && l.contains("//"))
+        })
         .find(|l| !after.contains(l.trim()))
+}
+
+fn first_lost_indispensable_line<'a>(
+    before: &'a str,
+    after: &str,
+    filter: &str,
+) -> Option<&'a str> {
+    first_lost_failure_line(before, after).or_else(|| {
+        if filter != "diff_summary" && filter != "git_show" {
+            return None;
+        }
+        before.lines().find(|line| {
+            ((line.starts_with('+') && !line.starts_with("+++"))
+                || (line.starts_with('-') && !line.starts_with("---")))
+                && !after.lines().any(|remaining| remaining == *line)
+        })
+    })
 }
 
 /// Which end of the output a line budget cuts first.
@@ -3105,9 +3371,16 @@ fn filter_git_status(raw: &str) -> String {
 }
 
 fn filter_diff_summary(raw: &str) -> String {
+    let has_unified_headers = raw
+        .lines()
+        .any(|line| line.starts_with("diff --git") || line.starts_with("@@"))
+        || (raw.lines().any(|line| line.starts_with("--- "))
+            && raw.lines().any(|line| line.starts_with("+++ ")));
+    if !has_unified_headers {
+        return raw.to_string();
+    }
     let mut kept = Vec::new();
     let mut skipped = 0usize;
-    let mut hunk_lines = 0usize;
 
     for line in raw.lines() {
         if line.starts_with("diff --git")
@@ -3116,9 +3389,6 @@ fn filter_diff_summary(raw: &str) -> String {
             || line.starts_with("@@")
         {
             kept.push(line.to_string());
-            if line.starts_with("@@") {
-                hunk_lines = 0;
-            }
             continue;
         }
 
@@ -3126,12 +3396,7 @@ fn filter_diff_summary(raw: &str) -> String {
             && !line.starts_with("+++")
             && !line.starts_with("---")
         {
-            if hunk_lines < 8 {
-                kept.push(line.to_string());
-                hunk_lines += 1;
-            } else {
-                skipped += 1;
-            }
+            kept.push(line.to_string());
             continue;
         }
 
@@ -3139,6 +3404,18 @@ fn filter_diff_summary(raw: &str) -> String {
     }
 
     append_omitted(kept, skipped)
+}
+
+fn filter_git_show(raw: &str) -> String {
+    let Some(split) = raw.find("diff --git ") else {
+        return raw.to_string();
+    };
+    let prelude = &raw[..split];
+    let diff = &raw[split..];
+    let filtered = filter_diff_summary(diff);
+    let mut output = prelude.to_string();
+    output.push_str(&filtered);
+    output
 }
 
 fn filter_diagnostics(raw: &str) -> String {
@@ -3631,9 +3908,7 @@ fn filter_vitest(raw: &str) -> String {
             kept.push(line.to_string());
             keep_following -= 1;
         } else {
-            if keep_following > 0 {
-                keep_following -= 1;
-            }
+            keep_following = keep_following.saturating_sub(1);
             skipped += 1;
         }
     }
@@ -4458,7 +4733,105 @@ fn inspect_image(path: &Path) -> Result<ImageReport> {
         width,
         height,
         recommendation,
+        description: None,
+        output: None,
+        output_bytes: None,
     })
+}
+
+fn describe_image(path: &Path) -> Result<String> {
+    use image::GenericImageView;
+    let img = image::open(path).with_context(|| format!("could not decode {}", path.display()))?;
+    let (width, height) = img.dimensions();
+    if width == 0 || height == 0 {
+        anyhow::bail!("empty image");
+    }
+    let stride = (((width as u64 * height as u64) / 4096) as f64)
+        .sqrt()
+        .floor()
+        .max(1.0) as usize;
+    let mut total = [0u64; 3];
+    let mut transparent = 0u64;
+    let mut count = 0u64;
+    for y in (0..height).step_by(stride) {
+        for x in (0..width).step_by(stride) {
+            let rgba = img.get_pixel(x, y).0;
+            for i in 0..3 {
+                total[i] += u64::from(rgba[i]);
+            }
+            transparent += u64::from(rgba[3] < 255);
+            count += 1;
+        }
+    }
+    let rgb = total.map(|v| (v / count) as u8);
+    let lightness = (u16::from(rgb[0]) + u16::from(rgb[1]) + u16::from(rgb[2])) / 3;
+    let tone = if lightness < 85 {
+        "dark"
+    } else if lightness > 170 {
+        "light"
+    } else {
+        "mid-tone"
+    };
+    let channel_range = *rgb.iter().max().unwrap() - *rgb.iter().min().unwrap();
+    let palette = if channel_range < 20 {
+        "near-grayscale"
+    } else {
+        "colored"
+    };
+    Ok(format!(
+        "{width}x{height} {tone}, {palette}, transparency: {} (sampled color metadata; no OCR or scene recognition)",
+        if transparent > 0 { "yes" } else { "no" }
+    ))
+}
+
+fn encode_smaller_image(
+    input: &Path,
+    output: &Path,
+    max_dimension: Option<u32>,
+    quality: Option<u8>,
+) -> Result<Option<u64>> {
+    use image::{GenericImageView, ImageFormat, ImageOutputFormat};
+    if output.exists() {
+        anyhow::bail!("output already exists: {}", output.display());
+    }
+    let format = ImageFormat::from_path(input)?;
+    if ImageFormat::from_path(output)? != format {
+        anyhow::bail!("input and output formats must match");
+    }
+    let mut img = image::open(input)?;
+    if let Some(limit) = max_dimension {
+        if limit < 64 {
+            anyhow::bail!("max-dimension must be at least 64");
+        }
+        let (width, height) = img.dimensions();
+        if width > limit || height > limit {
+            img = img.resize(limit, limit, image::imageops::FilterType::Triangle);
+        }
+    }
+    let encoded_format = match format {
+        ImageFormat::Png => ImageOutputFormat::Png,
+        ImageFormat::Jpeg => {
+            let q = quality.unwrap_or(90);
+            if !(1..=100).contains(&q) {
+                anyhow::bail!("JPEG quality must be between 1 and 100");
+            }
+            ImageOutputFormat::Jpeg(q)
+        }
+        _ => anyhow::bail!("only PNG and JPEG encoding is supported"),
+    };
+    let original_bytes = std::fs::metadata(input)?.len();
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut encoded, encoded_format)?;
+    let encoded = encoded.into_inner();
+    if encoded.len() as u64 >= original_bytes {
+        return Ok(None);
+    }
+    let mut target = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)?;
+    target.write_all(&encoded)?;
+    Ok(Some(encoded.len() as u64))
 }
 
 fn image_dimensions(bytes: &[u8]) -> (String, Option<u32>, Option<u32>) {
@@ -6034,6 +6407,7 @@ keep_block_after_matching = [
 # Diagnostics, not words: `-v n` prints hundreds of property lines such as
 # `TreatWarningsAsErrors = false` that a bare "error" pattern keeps.
 keep_lines_matching = [
+  "\\[FAIL\\]",
   "FAILED",
   "Failed",
   "Error Message",
@@ -6906,6 +7280,7 @@ fn codex_home_dir() -> Result<PathBuf> {
     Ok(home_dir()?.join(".codex"))
 }
 
+#[allow(clippy::too_many_arguments)] // Mirrors the CLI arguments at this boundary.
 async fn wrap_agent(
     agent: String,
     args: Vec<String>,
@@ -7639,7 +8014,7 @@ fn axum_ws_to_tungstenite(message: WsMessage) -> Option<TungsteniteMessage> {
 fn tungstenite_to_axum_ws(message: TungsteniteMessage) -> Option<WsMessage> {
     match message {
         TungsteniteMessage::Text(text) => Some(WsMessage::Text(text)),
-        TungsteniteMessage::Binary(bytes) => Some(WsMessage::Binary(bytes.into())),
+        TungsteniteMessage::Binary(bytes) => Some(WsMessage::Binary(bytes)),
         TungsteniteMessage::Ping(bytes) => Some(WsMessage::Ping(bytes)),
         TungsteniteMessage::Pong(bytes) => Some(WsMessage::Pong(bytes)),
         TungsteniteMessage::Close(frame) => Some(WsMessage::Close(frame.map(|frame| {
@@ -8772,6 +9147,62 @@ command = "node"
         );
     }
 
+    #[test]
+    fn captured_output_preserves_failure_and_recovers_raw_success() {
+        let store = InMemoryCcrStore::default();
+        let raw = "PASS [ 0.01s] app::ok\nFAIL [ 0.02s] app::bad\npanicked at src/lib.rs:42:9\nSummary: 1 failed\n";
+        let command = vec!["cargo".into(), "nextest".into(), "run".into()];
+        let success = process_captured_output(&command, raw, 0, false, "", &store).unwrap();
+        assert_eq!(success.filter, "cargo-nextest");
+        assert!(success.output.contains("app::bad"));
+        assert!(success.output.contains("src/lib.rs:42:9"));
+        assert!(success.output.len() <= raw.len());
+        if success.output != raw {
+            let key = success.cache_keys.last().expect("raw recovery key");
+            assert_eq!(store.get(key).as_deref(), Some(raw));
+        }
+        let failure = process_captured_output(&command, raw, 1, true, "", &store).unwrap();
+        assert_eq!(failure.filter, "raw_on_failure");
+        assert_eq!(failure.output, raw);
+    }
+
+    #[test]
+    fn image_reencoding_preserves_dimensions_and_high_contrast_marks() {
+        use image::GenericImageView;
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "lm-resizer-image-test-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.jpg");
+        let output = dir.join("smaller.jpg");
+        let mut pixels = image::RgbImage::new(512, 512);
+        for y in 0..512 {
+            for x in 0..512 {
+                let value = if x % 40 < 5 { 0 } else { 255 };
+                pixels.put_pixel(x, y, image::Rgb([value, value, value]));
+            }
+        }
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(pixels)
+            .write_to(&mut encoded, image::ImageOutputFormat::Jpeg(100))
+            .unwrap();
+        std::fs::write(&source, encoded.into_inner()).unwrap();
+        let smaller = encode_smaller_image(&source, &output, None, Some(80)).unwrap();
+        assert!(smaller.is_some());
+        let decoded = image::open(&output).unwrap();
+        assert_eq!(decoded.dimensions(), (512, 512));
+        assert!(decoded.get_pixel(2, 200).0[0] < 70);
+        assert!(decoded.get_pixel(20, 200).0[0] > 200);
+        assert!(describe_image(&output).unwrap().contains("near-grayscale"));
+        assert!(encode_smaller_image(&source, &output, None, Some(80)).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     fn cmd(words: &[&str]) -> Vec<String> {
         words.iter().map(|w| w.to_string()).collect()
     }
@@ -9726,9 +10157,7 @@ expected = "error: bad\n"
     fn docker_build_reussi_est_reduit_sans_perdre_ce_qui_sert() {
         let brut = docker_build_reussi();
         let (filtre, sortie) = filter_command_output(
-            &["docker", "build", "-t", "app:latest", "."]
-                .map(String::from)
-                .to_vec(),
+            &["docker", "build", "-t", "app:latest", "."].map(String::from),
             &brut,
         );
         assert_eq!(filtre, "docker_build");
@@ -9767,7 +10196,7 @@ expected = "error: bad\n"
     fn docker_build_echoue_conserve_le_diagnostic_entier() {
         let brut = docker_build_echoue();
         let (filtre, sortie) =
-            filter_command_output(&["docker", "build", "."].map(String::from).to_vec(), &brut);
+            filter_command_output(&["docker", "build", "."].map(String::from), &brut);
         assert_eq!(filtre, "docker_build");
         // Les trois formes du diagnostic doivent être là, en entier : la cause,
         // l'étape fautive, et la ligne du Dockerfile.
@@ -9813,9 +10242,7 @@ Step 2/2 : RUN false\n\
  ---> Running in 0abc123def45\n\
 The command '/bin/sh -c false' returned a non-zero code: 1\n";
         let (filtre, sortie) = filter_command_output(
-            &["docker", "build", "--no-cache", "."]
-                .map(String::from)
-                .to_vec(),
+            &["docker", "build", "--no-cache", "."].map(String::from),
             brut,
         );
         assert_eq!(filtre, "docker_build");
@@ -9844,8 +10271,7 @@ Step 2/2 : RUN cc main.c\n\
 /usr/bin/ld: /tmp/ccx.o: undefined reference to `main'\n\
 collect2: error: ld returned 1 exit status\n\
 The command '/bin/sh -c cc main.c' returned a non-zero code: 1\n";
-        let (_, sortie) =
-            filter_command_output(&["docker", "build", "."].map(String::from).to_vec(), brut);
+        let (_, sortie) = filter_command_output(&["docker", "build", "."].map(String::from), brut);
         assert!(
             sortie.contains("undefined reference to `main'"),
             "diagnostic du linker perdu : {sortie:?}"
@@ -9870,9 +10296,7 @@ The command '/bin/sh -c cc main.c' returned a non-zero code: 1\n";
              Successfully tagged registry.example/app:1.2.3\n",
         );
         let (filtre, sortie) = filter_command_output(
-            &["docker", "build", "-t", "registry.example/app:1.2.3", "."]
-                .map(String::from)
-                .to_vec(),
+            &["docker", "build", "-t", "registry.example/app:1.2.3", "."].map(String::from),
             &brut,
         );
         assert_eq!(filtre, "docker_build");
@@ -9897,9 +10321,7 @@ The command '/bin/sh -c cc main.c' returned a non-zero code: 1\n";
     fn docker_build_quiet_garde_le_sha_stdout() {
         let brut = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n";
         let (_, sortie) = filter_command_output(
-            &["docker", "build", "-q", "-t", "app", "."]
-                .map(String::from)
-                .to_vec(),
+            &["docker", "build", "-q", "-t", "app", "."].map(String::from),
             brut,
         );
         assert!(
@@ -9920,12 +10342,8 @@ sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\
 #1 [internal] load build definition from Dockerfile\n\
 #1 transferring dockerfile: 12B done\n\
 #1 DONE 0.0s\n";
-        let (_, sortie) = filter_command_output(
-            &["docker", "build", "--quiet", "."]
-                .map(String::from)
-                .to_vec(),
-            brut,
-        );
+        let (_, sortie) =
+            filter_command_output(&["docker", "build", "--quiet", "."].map(String::from), brut);
         assert!(
             sortie.contains(
                 "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -9942,9 +10360,7 @@ sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\
 #11 pushing manifest for docker.io/library/app:1@sha256:9f1c2b3a4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8 0.2s done\n\
 #11 DONE 0.7s\n";
         let (filtre, sortie) = filter_command_output(
-            &["docker", "buildx", "build", "--push", "-t", "app:1", "."]
-                .map(String::from)
-                .to_vec(),
+            &["docker", "buildx", "build", "--push", "-t", "app:1", "."].map(String::from),
             brut,
         );
         assert_eq!(filtre, "docker_build");
@@ -9960,8 +10376,7 @@ sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\
         let brut = "\
 #3 [1/2] RUN sleep 100\n\
 #3 CANCELED\n";
-        let (_, sortie) =
-            filter_command_output(&["docker", "build", "."].map(String::from).to_vec(), brut);
+        let (_, sortie) = filter_command_output(&["docker", "build", "."].map(String::from), brut);
         assert!(
             !sortie.contains("docker build: completed"),
             "annulation presentee comme un succes : {sortie:?}"
@@ -9975,8 +10390,7 @@ sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\
 #4 [1/1] RUN true\n\
 #4 DEPRECATION NOTICE: the legacy builder frontend is going away\n\
 #4 DONE 0.1s\n";
-        let (_, sortie) =
-            filter_command_output(&["docker", "build", "."].map(String::from).to_vec(), brut);
+        let (_, sortie) = filter_command_output(&["docker", "build", "."].map(String::from), brut);
         assert!(
             sortie.contains("DEPRECATION NOTICE"),
             "avertissement de depreciation perdu : {sortie:?}"
@@ -9991,9 +10405,7 @@ COMMIT localhost/app:latest\n\
 --> 9f1c2b3a4d5e\n\
 Successfully tagged localhost/app:latest\n";
         let (filtre, sortie) = filter_command_output(
-            &["podman", "build", "-t", "localhost/app:latest", "."]
-                .map(String::from)
-                .to_vec(),
+            &["podman", "build", "-t", "localhost/app:latest", "."].map(String::from),
             brut,
         );
         assert_eq!(filtre, "docker_build");
@@ -10071,9 +10483,7 @@ Successfully tagged localhost/app:latest\n";
             ));
         }
         let (filtre, sortie) = filter_command_output(
-            &["docker", "--context", "build", "ps"]
-                .map(String::from)
-                .to_vec(),
+            &["docker", "--context", "build", "ps"].map(String::from),
             &brut,
         );
         assert_ne!(
@@ -10087,6 +10497,7 @@ Successfully tagged localhost/app:latest\n";
         assert!(sortie.contains("service-39"));
     }
 
+    #[test]
     fn filter_command_output_routes_vitest_via_npx() {
         let command: Vec<String> = ["npx", "vitest", "run"]
             .iter()
@@ -10097,6 +10508,58 @@ Successfully tagged localhost/app:latest\n";
         assert_eq!(name, "js_test_runner");
         assert!(filtered.contains("Tests  3 passed (3)"));
         assert!(!filtered.contains("Duration"));
+    }
+
+    #[test]
+    fn command_filter_restores_failure_lost_by_generic_line_budget() {
+        let mut raw = (0..250)
+            .map(|n| format!("progress line {n}\n"))
+            .collect::<String>();
+        raw.push_str("error: src/main.rs:42: missing value\n");
+        let command = vec!["unknown-command".to_string()];
+        let (name, output) = filter_command_output(&command, &raw);
+        assert_eq!(name, "generic:diagnostic-guard");
+        assert_eq!(output, raw);
+    }
+
+    #[test]
+    fn curl_transfer_header_does_not_trigger_diagnostic_guard() {
+        let raw = include_str!("../fixtures/parity/captured/curl.txt");
+        let command = vec!["curl".to_string(), "-i".to_string()];
+        let (name, output) = filter_command_output(&command, raw);
+        assert_eq!(name, "curl");
+        assert!(output.len() < raw.len());
+        assert!(output.contains("HTTP/1.1 503 Service Unavailable"));
+        assert!(output.contains("database unavailable"));
+    }
+
+    #[test]
+    fn diff_filter_keeps_every_changed_line_beyond_old_eight_line_limit() {
+        let mut raw = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,1 +1,12 @@\n context\n".to_string();
+        for number in 0..12 {
+            raw.push_str(&format!("+changed line {number}\n"));
+        }
+        let (name, output) = filter_command_output(&["diff".into(), "-u".into()], &raw);
+        assert_eq!(name, "diff_summary");
+        for number in 0..12 {
+            assert!(output.contains(&format!("+changed line {number}")));
+        }
+    }
+
+    #[test]
+    fn git_show_keeps_commit_author_and_subject() {
+        let raw = "commit abc123\nAuthor: Example <example@example.org>\nDate:   Mon Sep 28 2026\n\n    Repair error handling\n\ndiff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n";
+        let (name, output) = filter_command_output(&["git".into(), "show".into()], raw);
+        assert_eq!(name, "git_show");
+        for fact in [
+            "commit abc123",
+            "Author: Example",
+            "Repair error handling",
+            "-old",
+            "+new",
+        ] {
+            assert!(output.contains(fact), "lost {fact}");
+        }
     }
 
     #[test]
@@ -11232,7 +11695,7 @@ Prisma CLI Version : 5.15.0
             "Environment variables loaded from .env",
             "Prisma CLI Version : 5.15.0",
         ];
-        let probleme = bilan(&vue.filtre, "toml:prisma", &vue.sortie, &faits, &bruits);
+        let probleme = bilan(&vue.filtre, "prisma-migrate", &vue.sortie, &faits, &bruits);
         assert!(probleme.is_empty(), "ASSERT {probleme}");
     }
 
@@ -11268,12 +11731,12 @@ Prisma CLI Version : 5.15.0
             (vec!["rake", "test"], "toml:minitest"),
             (vec!["rails", "test"], "toml:minitest"),
             (vec!["prisma", "validate"], "toml:prisma"),
-            (vec!["prisma", "migrate", "dev"], "toml:prisma"),
+            (vec!["prisma", "migrate", "dev"], "prisma-migrate"),
             (vec!["prisma", "generate"], "toml:prisma"),
             (vec!["npx", "prisma", "validate"], "toml:prisma"),
             (
                 vec!["npx", "--yes", "prisma", "migrate", "dev"],
-                "toml:prisma",
+                "prisma-migrate",
             ),
             (vec!["yarn", "prisma", "generate"], "toml:prisma"),
             (vec!["pnpm", "exec", "prisma", "validate"], "toml:prisma"),

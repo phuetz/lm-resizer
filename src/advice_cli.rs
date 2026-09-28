@@ -53,6 +53,7 @@ impl AdviceReport {
 }
 
 /// Advice from a file written earlier by any producer.
+#[allow(clippy::result_large_err)] // Reports are returned rarely and serialized by callers.
 pub fn load_advice_file(path: &Path) -> Result<RetentionAdvice, AdviceReport> {
     let source = format!("file:{}", path.display());
     let raw = std::fs::read_to_string(path)
@@ -82,12 +83,15 @@ fn producer_timeout() -> Duration {
         .unwrap_or(Duration::from_secs(20))
 }
 
-/// Ask `code-explorer lm-resizer-advice <file>` about the file being compressed.
+/// Read Code Explorer's indexed tree-sitter symbols through its stable `cypher`
+/// CLI. No Code Explorer code is linked into the Apache-2.0 binary: its source
+/// is BUSL-1.1. An absent or stale index leaves the ordinary compressor active.
 ///
 /// The path handed over is canonical, so the producer reads the same file
 /// whatever its working directory. It still reads it on its own: if the file
 /// changes between its read and ours, the hashes differ and the advice is
 /// refused as stale — the race is detected, not avoided.
+#[allow(clippy::result_large_err)] // Keep the same report type for producer failures.
 pub fn advice_from_code_explorer(input: &Path) -> Result<(RetentionAdvice, u128), AdviceReport> {
     let bin = code_explorer_bin();
     let source = format!("code-explorer:{bin}");
@@ -98,10 +102,45 @@ pub fn advice_from_code_explorer(input: &Path) -> Result<(RetentionAdvice, u128)
             format!("{}: {e}", input.display()),
         )
     })?;
+    let repo = canonical
+        .ancestors()
+        .find(|p| p.join(".codeexplorer/graph.bin").is_file())
+        .ok_or_else(|| {
+            AdviceReport::failure("producer-missing", &source, "no Code Explorer index")
+        })?;
+    let relative = canonical
+        .strip_prefix(repo)
+        .expect("ancestor")
+        .to_string_lossy()
+        .replace('\\', "/");
+    // Avoid passing path text into a Cypher string literal when it contains a
+    // quote. Failing closed is cheaper than guessing the query escaping rules.
+    if relative.contains('\'') {
+        return Err(AdviceReport::failure(
+            "advice-invalid",
+            &source,
+            "quoted path",
+        ));
+    }
+    let graph = repo.join(".codeexplorer/graph.bin");
+    let input_time = std::fs::metadata(&canonical).and_then(|m| m.modified());
+    let index_time = std::fs::metadata(&graph).and_then(|m| m.modified());
+    if !matches!((input_time, index_time), (Ok(file), Ok(index)) if file <= index) {
+        return Err(AdviceReport::failure(
+            "advice-stale",
+            &source,
+            "Code Explorer index predates file",
+        ));
+    }
+    let query = format!(
+        "MATCH (n) WHERE n.filePath = '{relative}' RETURN n.name, n.startLine, n.endLine, n._label"
+    );
     let started = Instant::now();
     let mut child = Command::new(&bin)
-        .arg("lm-resizer-advice")
-        .arg(&canonical)
+        .arg("cypher")
+        .arg("--repo")
+        .arg(repo)
+        .arg(query)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -170,16 +209,60 @@ pub fn advice_from_code_explorer(input: &Path) -> Result<(RetentionAdvice, u128)
         return Err(report);
     }
     let text = String::from_utf8_lossy(&out);
-    match RetentionAdvice::from_json(text.trim()) {
-        Some(advice) => Ok((advice, elapsed)),
+    let symbols = lm_resizer_core::transforms::source_compressor::parse_cypher_symbols(&text);
+    match symbols {
+        Some(mut symbols) => {
+            let current = std::fs::read(&canonical)
+                .map_err(|e| AdviceReport::failure("advice-unreadable", &source, e.to_string()))?;
+            let current = String::from_utf8(current)
+                .map_err(|e| AdviceReport::failure("advice-invalid", &source, e.to_string()))?;
+            if matches!(language_from_path(&relative), Some("c" | "cpp")) {
+                for symbol in &mut symbols {
+                    if symbol.label == "Function" && symbol.end_line == symbol.start_line {
+                        if let Some(end) =
+                            lm_resizer_core::transforms::advice_structural::end_line_for_inline_body(
+                                &current,
+                                symbol.start_line,
+                            )
+                        {
+                            symbol.end_line = end;
+                        }
+                    }
+                }
+            }
+            let mut advice = lm_resizer_core::transforms::source_compressor::advice_from_symbols(
+                &symbols, &current,
+            );
+            advice.source_path = Some(relative.clone());
+            advice.language = language_from_path(&relative).map(str::to_string);
+            Ok((advice, elapsed))
+        }
         None => {
             let mut report = AdviceReport::failure(
                 "advice-invalid",
                 &source,
-                "producer stdout is not a RetentionAdvice JSON document",
+                "Code Explorer did not return indexed symbols",
             );
             report.producer_ms = Some(elapsed);
             Err(report)
         }
     }
+}
+
+fn language_from_path(path: &str) -> Option<&'static str> {
+    match path.rsplit('.').next()?.to_ascii_lowercase().as_str() {
+        "cs" => Some("csharp"),
+        "go" => Some("go"),
+        "java" => Some("java"),
+        "c" | "h" => Some("c"),
+        "cpp" | "cc" | "cxx" | "hpp" | "hh" => Some("cpp"),
+        "rs" => Some("rust"),
+        "ts" | "tsx" => Some("typescript"),
+        "js" | "jsx" => Some("javascript"),
+        _ => None,
+    }
+}
+
+pub fn supports_structural_path(path: &Path) -> bool {
+    language_from_path(&path.to_string_lossy()).is_some()
 }

@@ -88,6 +88,14 @@ starts running commands. The result is a cleaner loop: structural questions go
 to the code graph, noisy execution output goes through compression, and the full
 raw evidence remains recoverable through CCR when needed.
 
+For indexed source files, `compress --input` reads Code Explorer's symbol graph
+through its `cypher` CLI and conservatively shortens function bodies in C#,
+Go, Java, C and C++. It falls back when the companion tool or index is absent.
+The integration is at runtime because Code Explorer's repository specifies
+BUSL-1.1 while LM Resizer is Apache-2.0. See
+[structural compression](docs/COMPRESSION-SYNTAXIQUE.md) and the
+[offline parity corpus](fixtures/parity/manifest.json).
+
 This repository is a standalone Rust-only context compression engine. It keeps the
 useful primitives local and dependency-light at runtime:
 
@@ -175,12 +183,13 @@ filters, and Dependabot is configured for Cargo, npm, and GitHub Actions.
 
 ```bash
 lm-resizer compress --input tool-output.txt --json
+lm-resizer compress --input src/Service.cs --json  # indexed Code Explorer symbols when available
 type tool-output.txt | lm-resizer compress --json
 lm-resizer batch logs/ --recursive --ext log,json,diff --jobs 8 --json
 lm-resizer exec -- git status
 lm-resizer exec --json -- cargo test
 lm-resizer exec --stream -- cargo test
-command-that-is-already-sandboxed | lm-resizer tool-output --command "cargo test" --token-budget 2000 --json
+command-that-is-already-sandboxed | lm-resizer tool-output --command "cargo test" --json
 lm-resizer rewrite -- git status
 lm-resizer rewrite-shell "cargo test && git status"
 lm-resizer trust-filters --path .lm-resizer/filters.toml
@@ -204,9 +213,15 @@ lm-resizer init-shims --project-dir . --force
 lm-resizer install-hooks --client codex --project-dir . --force
 lm-resizer uninstall-hooks --client codex --project-dir .
 lm-resizer retrieve <ccr-hash>
+lm-resizer share research --input notes.txt --json
+lm-resizer shared-get research
+lm-resizer shared-get research --full
+lm-resizer shared-list
 lm-resizer stats
 lm-resizer stats --markdown
 lm-resizer image screenshot.png --json
+lm-resizer image screenshot.png --describe --json
+lm-resizer image large.png --output large-small.png --max-dimension 1600
 lm-resizer voice --input transcript.txt --clean
 lm-resizer ml-status --json
 lm-resizer tee list --json
@@ -231,16 +246,16 @@ the child exits.
 `tool-output` is the agent-native counterpart to `exec`: it **never executes
 the command**. A host such as Code Buddy can validate, approve and run a command
 inside its own sandbox, then pipe the inert output to `tool-output`. lm-resizer
-uses `--command` only to select the same semantic filter as `exec`, applies the
-optional query-aware `--token-budget`, stores the complete original under a CCR
-recovery hash, and returns the exact original whenever the candidate would not
-meet `--min-savings-bytes` and `--min-savings-ratio`. The recovery write is
-verified before the hash is announced; if the configured CCR backend cannot
-read the original back, lm-resizer returns the exact raw output. Use
-`--request-json` to pass the complete request over stdin so commands and user
-queries do not appear in the process argument list. This avoids wrapper
-binaries inside the sandbox and guarantees that compression never makes a tool
-result larger.
+uses `--command` only to select the same semantic filter as `exec`, then runs
+the standard compression pipeline. When its output is shorter, it stores the
+complete original under a CCR recovery hash. `--raw-on-failure` keeps a failed
+command's output verbatim. The input can come from `--input` or stdin.
+
+`share` writes a named handoff to the CCR SQLite file. Another process using
+the same `--store` can read the compressed handoff with `shared-get` or the
+exact original with `shared-get --full`; `shared-list` discovers names. Names
+cannot be overwritten accidentally. This is a local, explicit handoff and
+does not require a downloaded embedding model.
 
 Both `compress` and `exec` accept `--token-budget`. Use a model-aware budget
 when the caller knows the remaining context capacity; omit it for the
@@ -343,9 +358,12 @@ store and `exec` history counters. It is disabled by default and does not start
 a telemetry collector.
 
 `image`, `voice`, and `ml-status` cover local media/ML decision support without
-adding runtime model dependencies: image inspects size/dimensions, voice removes
-common transcript filler tokens, and ml-status reports whether optional Magika /
-ONNX classification is enabled.
+requiring a downloaded model. Image inspection reports size and dimensions;
+`--describe` adds sampled brightness, palette and transparency metadata, while
+`--output` can write a smaller PNG/JPEG (and optionally downscale it) without
+overwriting an existing file. This metadata is not OCR or scene recognition.
+Voice removes common transcript filler tokens, and `ml-status` reports whether
+optional Magika / ONNX classification is enabled.
 
 ## Install as a Claude Code plugin (one command)
 
