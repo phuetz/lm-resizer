@@ -1,0 +1,5 @@
+Collecting sample-package
+Downloading sample_package-1.2.3-py3-none-any.whl
+Installing collected packages: sample-package
+Successfully installed sample-package-1.2.3
+WARNING: Running pip as the 'root' user can result in broken permissions.

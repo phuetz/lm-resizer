@@ -1,0 +1,7 @@
+=== RUN   TestAdd
+=== RUN   TestSubtract
+--- PASS: TestSubtract (0.00s)
+--- FAIL: TestAdd (0.00s)
+    main_test.go:42: expected 3, got 4
+FAIL
+FAIL    example.org/sample  0.012s

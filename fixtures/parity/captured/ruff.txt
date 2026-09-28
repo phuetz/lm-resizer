@@ -1,0 +1,3 @@
+src/orders.py:42:9: F821 Undefined name `missing_total`
+src/main.py:12:1: E402 Module level import not at top of file
+Found 2 errors.

@@ -1,0 +1,8 @@
+    Checking sample v0.1.0 (/src/sample)
+warning: this function has too many arguments
+  --> src/lib.rs:42:1
+   |
+42 | fn calculate_total(a: i32, b: i32, c: i32, d: i32) -> i32 {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: `#[warn(clippy::too_many_arguments)]` on by default
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s

@@ -1,0 +1,9 @@
+ RUN  v2.0.0 /src/sample
+ ✓ tests/fast.test.ts (4 tests)
+ ❯ tests/orders.test.ts (2 tests | 1 failed)
+   × calculates order total
+     AssertionError: expected 301 to be 300
+      at tests/orders.test.ts:42:9
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 5 passed (6)
+   Duration  1.2s

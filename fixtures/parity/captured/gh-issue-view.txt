@@ -1,0 +1,6 @@
+title: Parser drops source location
+state: OPEN
+author: example-reporter
+url: https://example.org/issues/51
+
+The error is reported at src/parser.rs:42:9.

@@ -1,0 +1,5 @@
+All checks were performed on the latest commit.
+
+test / linux         fail    2m 10s   https://example.org/runs/42
+test / windows       pass    1m 48s   https://example.org/runs/43
+lint                 pass    12s      https://example.org/runs/44

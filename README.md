@@ -184,6 +184,7 @@ filters, and Dependabot is configured for Cargo, npm, and GitHub Actions.
 ```bash
 lm-resizer compress --input tool-output.txt --json
 lm-resizer compress --input src/Service.cs --json  # indexed Code Explorer symbols when available
+lm-resizer smart src/Service.cs --json  # source summary with the same indexed symbols
 type tool-output.txt | lm-resizer compress --json
 lm-resizer batch logs/ --recursive --ext log,json,diff --jobs 8 --json
 lm-resizer exec -- git status

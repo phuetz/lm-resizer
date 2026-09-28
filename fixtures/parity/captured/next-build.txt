@@ -1,0 +1,10 @@
+   ▲ Next.js 15.0.0
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Collecting page data ...
+Route (app)                    Size     First Load JS
+┌ ○ /                          5 kB    100 kB
+├ ○ /dashboard                 8 kB    115 kB
+└ λ /api/orders                1 kB    90 kB
+Error: Failed to collect page data for /api/orders
+    at app/api/orders/route.ts:42:9

@@ -1,0 +1,2 @@
+stash@{0}: WIP on feature/parser: abc123de Add parser tests
+stash@{1}: On main: Preserve migration name

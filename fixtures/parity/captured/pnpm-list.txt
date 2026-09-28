@@ -1,0 +1,4 @@
+sample@1.0.0 /src/sample
+├── typescript@5.4.5
+├── vitest@1.6.0
+└── react@18.3.1

@@ -1,0 +1,11 @@
+##[group]Run tests
+Restoring packages
+Building sample project
+Failed Calc.Tests.CalculTests.Somme_grands [1 ms]
+Error Message:
+Expected: 300
+Actual: 301
+Stack Trace:
+   at Calc.Tests.CalculTests.Somme_grands() in /src/CalculTests.cs:line 22
+##[error]Process completed with exit code 1.
+##[endgroup]

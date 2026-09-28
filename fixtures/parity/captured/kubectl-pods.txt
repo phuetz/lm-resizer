@@ -1,0 +1,4 @@
+NAME           READY   STATUS             RESTARTS   AGE
+sample-api     1/1     Running            0          2d
+sample-db      0/1     CrashLoopBackOff   12         3h
+sample-cache   1/1     Running            0          1d

@@ -1,0 +1,6 @@
+title: Fix parser errors
+state: OPEN
+author: example-contributor
+url: https://example.org/pull/42
+
+This pull request preserves source locations and error messages.

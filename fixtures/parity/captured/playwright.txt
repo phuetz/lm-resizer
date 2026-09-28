@@ -1,0 +1,20 @@
+Running 20 tests using 4 workers
+
+  1) [chromium] › tests/login.spec.ts:18:5 › login › redirects to dashboard
+
+    Error: expect(page).toHaveURL(expected) failed
+
+    Expected string: "https://example.org/dashboard"
+    Received string: "https://example.org/login"
+
+      22 | await page.getByRole('button', { name: 'Sign in' }).click();
+    > 23 | await expect(page).toHaveURL('/dashboard');
+         |                    ^
+      24 | }
+        at tests/login.spec.ts:23:24
+
+    attachment #1: trace (application/zip)
+    test-results/login-redirects-chromium/trace.zip
+
+  1 failed
+  19 passed (7.2s)

@@ -19,6 +19,8 @@ pub fn filter(command: &[String], raw: &str) -> Option<(&'static str, String)> {
         return Some(("prisma-migrate", apply(raw, Rule::PrismaMigrate)));
     }
     let (name, rule) = match (first, second, third) {
+        ("git", "stash", "list") => ("git-stash-list", Rule::Rows),
+        ("cat" | "head" | "tail", _, _) => ("file-read", Rule::Identity),
         ("cargo", "nextest", _) => ("cargo-nextest", Rule::Nextest),
         ("rubocop", _, _) | ("bundle", "exec", "rubocop") => ("rubocop", Rule::Rubocop),
         ("rake", _, _) | ("bundle", "exec", "rake") => ("rake", Rule::Rake),
@@ -47,6 +49,9 @@ pub fn filter(command: &[String], raw: &str) -> Option<(&'static str, String)> {
         ("wc", _, _) => ("wc", Rule::Rows),
         _ => return None,
     };
+    if matches!(rule, Rule::Identity) {
+        return Some((name, raw.to_string()));
+    }
     Some((name, apply(raw, rule)))
 }
 
@@ -63,6 +68,7 @@ enum Rule {
     GoLint,
     Curl,
     PrismaMigrate,
+    Identity,
 }
 
 pub fn is_prisma_migrate(command: &[String]) -> bool {
@@ -98,6 +104,7 @@ fn apply(raw: &str, rule: Rule) -> String {
             }
             Rule::Rake => trim.starts_with("** Invoke ") || trim.starts_with("** Execute "),
             Rule::Rows => false,
+            Rule::Identity => false,
             Rule::Search => trim.is_empty(),
             Rule::Compose => {
                 trim.starts_with("[+] Running ")
@@ -331,5 +338,14 @@ mod tests {
             &["src/main.go:42:4", "errcheck", "2 issues found"],
         );
         assert!(!out.contains("level=info"));
+    }
+
+    #[test]
+    fn file_read_keeps_arbitrary_lines_verbatim() {
+        let raw = "first\n\n\nsecond\n";
+        for program in ["cat", "head", "tail"] {
+            let command = vec![program.to_string(), "file.txt".to_string()];
+            assert_eq!(filter(&command, raw), Some(("file-read", raw.to_string())));
+        }
     }
 }

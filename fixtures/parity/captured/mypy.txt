@@ -1,0 +1,3 @@
+src/orders.py:42: error: Incompatible return value type (got "str", expected "int")  [return-value]
+src/main.py:12: note: Revealed type is "builtins.str"
+Found 1 error in 1 file (checked 8 source files)

@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.2.0
+collected 20 items
+tests/test_orders.py ...................F                                 [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_order_total _______________________________
+tests/test_orders.py:42: in test_order_total
+    assert total == 300
+E   assert 301 == 300
+========================= 1 failed, 19 passed in 0.22s =========================

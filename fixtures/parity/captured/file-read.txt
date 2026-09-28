@@ -1,0 +1,5 @@
+first line
+
+
+second line
+src/main.rs:42: error text in file, not a command diagnostic

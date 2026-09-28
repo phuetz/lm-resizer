@@ -86,6 +86,16 @@ enum Commands {
         #[arg(long, requires = "input")]
         advice_from_code_explorer: bool,
     },
+    /// Summarize a source file with indexed Code Explorer symbols when available.
+    Smart {
+        input: PathBuf,
+        #[arg(short, long, default_value = "")]
+        query: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
     /// Compress many files in parallel.
     Batch {
         /// Files or directories to process.
@@ -1166,6 +1176,33 @@ async fn main() -> Result<()> {
                 print!("{}", report.output);
             }
         }
+        Commands::Smart {
+            input,
+            query,
+            json,
+            store,
+        } => {
+            let source = read_input(Some(input.as_path())).await?;
+            let store = open_store(store)?;
+            let (report, advice) = compress_with_optional_advice(
+                &source,
+                Some(input.as_path()),
+                &query,
+                store.as_ref(),
+                None,
+                None,
+                true,
+            )?;
+            if json {
+                let mut value = serde_json::to_value(&report)?;
+                if let Some(advice) = advice {
+                    value["advice"] = serde_json::to_value(advice)?;
+                }
+                println!("{}", serde_json::to_string_pretty(&value)?);
+            } else {
+                print!("{}", report.output);
+            }
+        }
         Commands::Batch {
             paths,
             recursive,
@@ -2022,8 +2059,24 @@ fn run_exec_command(
         filter_command_output(command, &raw)
     };
 
-    let mut compressed =
-        compress_text_with_pipeline_gate(&filtered, query, store, &build_pipeline(), None, false)?;
+    let mut compressed = if matches!(filter.as_str(), "json-passthrough" | "file-read") {
+        CompressReport {
+            content_type: if filter == "json-passthrough" {
+                "json"
+            } else {
+                "text"
+            }
+            .to_string(),
+            original_bytes: filtered.len(),
+            compressed_bytes: filtered.len(),
+            bytes_saved: 0,
+            steps_applied: Vec::new(),
+            cache_keys: Vec::new(),
+            output: filtered.clone(),
+        }
+    } else {
+        compress_text_with_pipeline_gate(&filtered, query, store, &build_pipeline(), None, false)?
+    };
     // Porte de conservation des diagnostics. Le filtre de commande a choisi
     // les lignes qui comptent ; l'étape générique qui suit ne connaît pas la
     // commande et range ses lignes par fréquence. Mesuré sur un vrai journal
@@ -2084,19 +2137,20 @@ fn process_captured_output(
     } else {
         filter_command_output(command, raw)
     };
-    let (mut output, mut steps, mut keys) = if keep_raw {
-        (raw.to_string(), Vec::new(), Vec::new())
-    } else {
-        let result = compress_text_with_pipeline_gate(
-            &filtered,
-            query,
-            store,
-            &build_pipeline(),
-            None,
-            false,
-        )?;
-        (result.output, result.steps_applied, result.cache_keys)
-    };
+    let (mut output, mut steps, mut keys) =
+        if keep_raw || matches!(filter.as_str(), "json-passthrough" | "file-read") {
+            (raw.to_string(), Vec::new(), Vec::new())
+        } else {
+            let result = compress_text_with_pipeline_gate(
+                &filtered,
+                query,
+                store,
+                &build_pipeline(),
+                None,
+                false,
+            )?;
+            (result.output, result.steps_applied, result.cache_keys)
+        };
     if first_lost_indispensable_line(&filtered, &output, &filter).is_some() {
         output = filtered.clone();
         steps.push("diagnostic_gate:kept_filtered".to_string());
@@ -2436,6 +2490,9 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     {
         return ("rtk_owned".to_string(), raw.to_string());
     }
+    if command_requests_json(command) && serde_json::from_str::<Value>(raw).is_ok() {
+        return ("json-passthrough".to_string(), raw.to_string());
+    }
     if let Some((name, summary)) = parity_filters::summarize_for_command(command, raw) {
         return (format!("structured:{name}"), summary);
     }
@@ -2484,15 +2541,18 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
         ("npm" | "pnpm" | "yarn", "test" | "run") => {
             ("js_test".to_string(), filter_diagnostics(raw))
         }
-        ("rg" | "grep", _) => (
-            "search_results".to_string(),
-            filter_search_results(raw, 80, 6),
-        ),
-        ("find" | "fd" | "ls" | "dir" | "tree", _) => {
-            ("listing".to_string(), filter_listing(raw, 120))
-        }
-        _ => ("generic".to_string(), filter_generic(raw, 240)),
+        ("rg" | "grep", _) => ("search_results".to_string(), filter_search_results(raw)),
+        ("find" | "fd" | "ls" | "dir" | "tree", _) => ("listing".to_string(), filter_listing(raw)),
+        _ => ("generic".to_string(), filter_generic(raw)),
     }
+}
+
+fn command_requests_json(command: &[String]) -> bool {
+    command.iter().enumerate().any(|(index, arg)| {
+        matches!(arg.as_str(), "--json" | "--format=json" | "--output=json")
+            || (matches!(arg.as_str(), "--format" | "--output" | "-o")
+                && command.get(index + 1).is_some_and(|next| next == "json"))
+    })
 }
 
 fn normalized_command_text(command: &[String]) -> String {
@@ -3275,6 +3335,16 @@ fn first_lost_indispensable_line<'a>(
     filter: &str,
 ) -> Option<&'a str> {
     first_lost_failure_line(before, after).or_else(|| {
+        if matches!(filter, "search_results" | "listing") {
+            return before
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .find(|line| {
+                    !after
+                        .lines()
+                        .any(|remaining| remaining.trim() == line.trim())
+                });
+        }
         if filter != "diff_summary" && filter != "git_show" {
             return None;
         }
@@ -3447,6 +3517,9 @@ fn filter_diagnostics(raw: &str) -> String {
             || lower.contains("failures:")
             || lower.contains("panic")
             || lower.contains("warning:")
+            || lower.contains("clippy::")
+            || lower.trim_start().starts_with("help:")
+            || lower.trim_start().starts_with("= note:")
             || lower.contains("test result")
             || lower.contains("could not compile")
             || lower.contains("compilation failed");
@@ -3463,7 +3536,7 @@ fn filter_diagnostics(raw: &str) -> String {
     }
 
     if kept.is_empty() {
-        filter_generic(raw, 120)
+        filter_generic(raw)
     } else {
         append_omitted(kept, skipped)
     }
@@ -3765,23 +3838,10 @@ fn filter_git_log(raw: &str) -> String {
     let mut skipped = 0usize;
     for line in raw.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("commit ") {
-            let hash = trimmed.strip_prefix("commit ").unwrap_or(trimmed);
-            out.push(format!(
-                "commit {}",
-                hash.chars().take(12).collect::<String>()
-            ));
-        } else if trimmed.starts_with("Author:")
-            || trimmed.starts_with("Date:")
-            || trimmed.starts_with("Merge:")
-        {
+        if trimmed.starts_with("Date:") {
             skipped += 1;
         } else if !trimmed.is_empty() {
             out.push(trimmed.to_string());
-        }
-        if out.len() >= 80 {
-            skipped += 1;
-            break;
         }
     }
     append_omitted(out, skipped)
@@ -3953,50 +4013,42 @@ fn filter_vitest(raw: &str) -> String {
     append_omitted(kept, skipped)
 }
 
-fn filter_search_results(raw: &str, max_total: usize, max_per_file: usize) -> String {
+fn filter_search_results(raw: &str) -> String {
     use std::collections::BTreeMap;
 
     let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut passthrough = Vec::new();
+    let location = Regex::new(r"^(.+?):([0-9]+):(.*)$").expect("valid search location");
 
     for line in raw.lines() {
-        if let Some((file, _rest)) = line.split_once(':') {
+        if let Some(caps) = location.captures(line) {
+            let file = caps.get(1).expect("file").as_str();
+            let number = caps.get(2).expect("line").as_str();
+            let rest = caps.get(3).expect("content").as_str();
             by_file
                 .entry(file.to_string())
                 .or_default()
-                .push(line.to_string());
+                .push(format!("{number}:{rest}"));
         } else {
             passthrough.push(line.to_string());
         }
     }
 
     let mut out = Vec::new();
-    let mut skipped = 0usize;
 
     for (file, lines) in by_file {
         out.push(format!("{file}: {} matches", lines.len()));
-        for line in lines.iter().take(max_per_file) {
-            if out.len() >= max_total {
-                skipped += 1;
-                continue;
-            }
+        for line in lines {
             out.push(format!("  {line}"));
         }
-        skipped += lines.len().saturating_sub(max_per_file);
     }
 
-    for line in passthrough {
-        if out.len() < max_total {
-            out.push(line);
-        } else {
-            skipped += 1;
-        }
-    }
+    out.extend(passthrough);
 
-    append_omitted(out, skipped)
+    append_omitted(out, 0)
 }
 
-fn filter_listing(raw: &str, max_lines: usize) -> String {
+fn filter_listing(raw: &str) -> String {
     let mut out = Vec::new();
     let mut skipped = 0usize;
     for line in raw.lines() {
@@ -4005,16 +4057,12 @@ fn filter_listing(raw: &str, max_lines: usize) -> String {
             skipped += 1;
             continue;
         }
-        if out.len() < max_lines {
-            out.push(line.to_string());
-        } else {
-            skipped += 1;
-        }
+        out.push(line.to_string());
     }
     append_omitted(out, skipped)
 }
 
-fn filter_generic(raw: &str, max_lines: usize) -> String {
+fn filter_generic(raw: &str) -> String {
     let mut out = Vec::new();
     let mut skipped = 0usize;
     let mut last = "";
@@ -4026,18 +4074,14 @@ fn filter_generic(raw: &str, max_lines: usize) -> String {
             skipped += 1;
             continue;
         }
-        if repeat_count > 0 && out.len() < max_lines {
+        if repeat_count > 0 {
             out.push(format!("... previous line repeated {repeat_count} times"));
         }
         repeat_count = 0;
         last = line;
-        if out.len() < max_lines {
-            out.push(line.to_string());
-        } else {
-            skipped += 1;
-        }
+        out.push(line.to_string());
     }
-    if repeat_count > 0 && out.len() < max_lines {
+    if repeat_count > 0 {
         out.push(format!("... previous line repeated {repeat_count} times"));
     }
     append_omitted(out, skipped)
@@ -6265,7 +6309,6 @@ on_empty = "terraform plan: no relevant changes"
 name = "docker-ps"
 match_command = "^(docker|podman)\\s+ps\\b"
 strip_ansi = true
-max_lines = 80
 
 [[filters]]
 name = "systemctl-status"
@@ -6387,12 +6430,14 @@ name = "gh"
 match_command = "^gh\\s+(pr|issue|run|workflow)\\b"
 strip_ansi = true
 strip_lines_matching = ["^\\s*$"]
-max_lines = 120
 
 [[filters]]
 name = "go-test"
 match_command = "^go\\s+test\\b"
 strip_ansi = true
+keep_block_after_matching = [
+  { start = "^--- FAIL:", until = "^--- FAIL:|^FAIL|^ok\\s", max_lines = 40 },
+]
 keep_lines_matching = [
   "^--- FAIL:",
   "^FAIL",
@@ -6522,6 +6567,10 @@ name = "js-quality"
 match_command = "^(eslint|vitest|playwright|next)\\b|^(npm|pnpm|yarn)\\s+(run\\s+)?(lint|test|build)\\b"
 strip_ansi = true
 keep_lines_matching = [
+  "^[^ ]+\\.(js|jsx|ts|tsx)$",
+  "^\\s*[^\\s✓].*\\.(js|jsx|ts|tsx):[0-9]+(:[0-9]+)?",
+  "^Route \\(app\\)",
+  "^[┌├└]",
   "FAIL",
   "failed",
   "Failed",
@@ -6549,6 +6598,7 @@ keep_lines_matching = [
 keep_block_after_matching = [
   { start = "^\\s+\\d+\\) \\S", until = "^\\s+\\d+\\) \\S|^\\s+\\d+ (failed|passed|flaky|skipped)", max_lines = 60 },
   { start = "^\\s*FAIL\\s", until = "^\\s*(FAIL|✓|Test Files)\\s|^⎯", max_lines = 40 },
+  { start = "^\\s*❯\\s", until = "^\\s*❯\\s|^\\s*Test Files", max_lines = 40 },
 ]
 max_lines = 180
 on_empty = "js quality: completed"
@@ -9011,7 +9061,7 @@ command = "node"
 
     #[test]
     fn exec_generic_filter_collapses_repeated_lines() {
-        let filtered = filter_generic("same\nsame\nsame\nnext\n", 20);
+        let filtered = filter_generic("same\nsame\nsame\nnext\n");
         assert!(filtered.contains("same"));
         assert!(filtered.contains("... previous line repeated 2 times"));
         assert!(filtered.contains("next"));
@@ -9020,12 +9070,22 @@ command = "node"
     #[test]
     fn exec_search_filter_groups_matches_by_file() {
         let raw = "src/a.rs:1:match one\nsrc/a.rs:2:match two\nsrc/a.rs:3:match three\nsrc/b.rs:4:match four\n";
-        let filtered = filter_search_results(raw, 20, 2);
+        let filtered = filter_search_results(raw);
         assert!(filtered.contains("src/a.rs: 3 matches"));
         assert!(filtered.contains("src/b.rs: 1 matches"));
-        assert!(filtered.contains("src/a.rs:1:match one"));
-        assert!(!filtered.contains("src/a.rs:3:match three"));
-        assert!(filtered.contains("omitted 1 low-signal lines"));
+        assert!(filtered.contains("  1:match one"));
+        assert!(filtered.contains("  3:match three"));
+        assert!(!filtered.contains("omitted"));
+    }
+
+    #[test]
+    fn listing_filter_keeps_paths_after_previous_line_limit() {
+        let raw = (0..150)
+            .map(|n| format!("src/file-{n}.rs\n"))
+            .collect::<String>();
+        let output = filter_listing(&raw);
+        assert!(output.contains("src/file-149.rs"));
+        assert_eq!(output.lines().count(), 150);
     }
 
     #[test]
@@ -10200,7 +10260,7 @@ expected = "error: bad\n"
         // Le banc doit tomber contre l'ancienne logique, sinon il ne prouve
         // rien : avant ce filtre, `docker build` tombait dans le générique, qui
         // garde ses 240 premières lignes — c'est-à-dire tout ce build.
-        let ancien = filter_generic(&brut, 240);
+        let ancien = filter_generic(&brut);
         assert_eq!(
             ancien.len(),
             brut.len(),
@@ -10528,14 +10588,14 @@ Successfully tagged localhost/app:latest\n";
     }
 
     #[test]
-    fn command_filter_restores_failure_lost_by_generic_line_budget() {
+    fn generic_filter_keeps_all_lines_including_late_failure() {
         let mut raw = (0..250)
             .map(|n| format!("progress line {n}\n"))
             .collect::<String>();
         raw.push_str("error: src/main.rs:42: missing value\n");
         let command = vec!["unknown-command".to_string()];
         let (name, output) = filter_command_output(&command, &raw);
-        assert_eq!(name, "generic:diagnostic-guard");
+        assert_eq!(name, "generic");
         assert_eq!(output, raw);
     }
 
@@ -11767,19 +11827,19 @@ Prisma CLI Version : 5.15.0
 
     #[test]
     fn ruby_prisma_sans_filtre_generique_le_bruit_reste() {
-        let rspec = filter_generic(RSPEC_RAW, 240);
+        let rspec = filter_generic(RSPEC_RAW);
         assert!(
             rspec.contains("files took 0.12175 seconds to load"),
             "ASSERT bruit gardé absent du générique rspec"
         );
         assert!(rspec.contains("got: 2"));
-        let minitest = filter_generic(MINITEST_RAW, 240);
+        let minitest = filter_generic(MINITEST_RAW);
         assert!(
             minitest.contains("Finished in 0.005124s"),
             "ASSERT bruit gardé absent du générique minitest"
         );
         assert!(minitest.contains("TestMath#test_subtraction"));
-        let prisma = filter_generic(PRISMA_RAW, 240);
+        let prisma = filter_generic(PRISMA_RAW);
         assert!(
             prisma.contains("Environment variables loaded from .env"),
             "ASSERT bruit gardé absent du générique prisma"

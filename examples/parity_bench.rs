@@ -18,6 +18,8 @@ struct Case {
     command: Option<String>,
     #[serde(default)]
     exit_code: i32,
+    #[serde(default)]
+    raw_equal: bool,
     oracle: Vec<String>,
 }
 
@@ -35,7 +37,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::temp_dir().join(format!("lm-resizer-parity-{}-{nonce}", std::process::id()));
     let source = temp.join("source");
     std::fs::create_dir_all(&source)?;
-    for case in cases.iter().filter(|c| c.kind == "source") {
+    for case in cases
+        .iter()
+        .filter(|c| c.kind == "source" || c.kind == "smart")
+    {
         let source_file = root.join(&case.path);
         std::fs::copy(&source_file, source.join(source_file.file_name().unwrap()))?;
     }
@@ -64,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for case in &cases {
         let fixture = root.join(&case.path);
         let raw = std::fs::read_to_string(&fixture)?;
-        let input = if case.kind == "source" {
+        let input = if case.kind == "source" || case.kind == "smart" {
             source.join(fixture.file_name().unwrap())
         } else {
             fixture
@@ -73,7 +78,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut response = Value::Null;
         for _ in 0..3 {
             let mut cmd = Command::new(&binary);
-            if case.kind != "tool" {
+            if case.kind == "smart" {
+                cmd.arg("smart").arg(&input);
+            } else if case.kind != "tool" {
                 cmd.arg("compress").arg("--input").arg(&input);
             } else {
                 cmd.arg("tool-output")
@@ -101,7 +108,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         timings.sort_by(f64::total_cmp);
         let after = response["output"].as_str().ok_or("missing output")?;
-        let oracle_ok = case.oracle.iter().all(|fact| after.contains(fact));
+        let oracle_ok = case.oracle.iter().all(|fact| after.contains(fact))
+            && (!case.raw_equal || after == raw);
         let keys = response["cache_keys"]
             .as_array()
             .cloned()
@@ -125,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             recovered
         };
-        let mode = if case.kind == "source" {
+        let mode = if case.kind == "source" || case.kind == "smart" {
             response["advice"]["status"].as_str().unwrap_or("fallback")
         } else if case.kind == "text" {
             "prose"
@@ -136,7 +144,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let after_tokens = tokenizer.count_text(after);
         total_before += before_tokens;
         total_after += after_tokens;
-        if !oracle_ok || !ccr_ok || (ce_ready && case.kind == "source" && mode != "applied") {
+        if !oracle_ok
+            || !ccr_ok
+            || (ce_ready && (case.kind == "source" || case.kind == "smart") && mode != "applied")
+        {
             failed = true;
         }
         println!(
