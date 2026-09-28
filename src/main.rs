@@ -39,6 +39,7 @@ use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use walkdir::WalkDir;
 
 mod advice_cli;
+mod mcp_proxy;
 mod parity_filters;
 mod provider_usage;
 mod rtk_filters;
@@ -497,6 +498,20 @@ enum Commands {
         /// CCR SQLite database path.
         #[arg(long)]
         store: Option<PathBuf>,
+    },
+    /// Relay an MCP stdio server and compress successful tool text results.
+    McpProxy {
+        /// CCR SQLite database path shared with `retrieve`.
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Upstream MCP server command and arguments.
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    #[command(hide = true)]
+    MockMcpServer {
+        #[arg(long, default_value = "default")]
+        scenario: String,
     },
     /// Install lm-resizer as an MCP server for common agent clients.
     Install {
@@ -1736,6 +1751,8 @@ async fn main() -> Result<()> {
         }
         Commands::Doctor { json, store } => run_doctor(json, store)?,
         Commands::Mcp { store } => run_mcp(store)?,
+        Commands::McpProxy { store, command } => mcp_proxy::run_mcp_proxy(command, store)?,
+        Commands::MockMcpServer { scenario } => mcp_proxy::run_mock_mcp_server(&scenario)?,
         Commands::Install {
             client,
             scope,

@@ -217,6 +217,7 @@ lm-resizer share research --input notes.txt --json
 lm-resizer shared-get research
 lm-resizer shared-get research --full
 lm-resizer shared-list
+lm-resizer mcp-proxy -- upstream-mcp-server --stdio
 lm-resizer stats
 lm-resizer stats --markdown
 lm-resizer image screenshot.png --json
@@ -256,6 +257,12 @@ the same `--store` can read the compressed handoff with `shared-get` or the
 exact original with `shared-get --full`; `shared-list` discovers names. Names
 cannot be overwritten accidentally. This is a local, explicit handoff and
 does not require a downloaded embedding model.
+
+`mcp-proxy` wraps an MCP server over stdio. It compresses large successful
+`tools/call` text results, stores the exact original in CCR and includes a
+recovery key. Tool errors, images, `tools/list`, notifications and unknown
+responses pass through. The upstream command starts as a child process and
+ends with the proxy; no service is installed or changed.
 
 Both `compress` and `exec` accept `--token-budget`. Use a model-aware budget
 when the caller knows the remaining context capacity; omit it for the

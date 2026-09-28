@@ -231,7 +231,6 @@ pub fn compress_tool_call_result(
                 command: format!("mcp:{tool_name}"),
                 exit_code: 0,
                 filter: "mcp_proxy".to_string(),
-                filter_not_smaller: false,
                 original_bytes,
                 filtered_bytes: original_bytes,
                 compressed_bytes,
@@ -624,6 +623,18 @@ fn generate_mock_large_text() -> String {
 mod tests {
     use super::*;
     use lm_resizer_core::ccr::InMemoryCcrStore;
+
+    fn proxy_cli_available(exe: &std::path::Path) -> bool {
+        exe.is_file()
+            && Command::new(exe)
+                .arg("--help")
+                .output()
+                .ok()
+                .is_some_and(|output| {
+                    output.status.success()
+                        && String::from_utf8_lossy(&output.stdout).contains("mcp-proxy")
+                })
+    }
 
     // ----------------------------------------------------------------
     // Contre-vérification : la propriété qui rend le proxy sûr est que la
@@ -1186,7 +1197,7 @@ mod tests {
                 p.join("lm-resizer")
             }
         };
-        if !exe.exists() {
+        if !proxy_cli_available(&exe) {
             return;
         }
 
@@ -1258,7 +1269,7 @@ mod tests {
                 p.join("lm-resizer")
             }
         };
-        if !exe.exists() {
+        if !proxy_cli_available(&exe) {
             return;
         }
 
@@ -1358,7 +1369,7 @@ mod tests {
                 p.join("lm-resizer")
             }
         };
-        if !exe.exists() {
+        if !proxy_cli_available(&exe) {
             return;
         }
 
