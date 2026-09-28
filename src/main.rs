@@ -50,6 +50,7 @@ use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
 #[derive(Parser)]
 #[command(name = "lm-resizer")]
 #[command(about = "Rust-native context compression for LLM agents")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -6989,6 +6990,7 @@ fn run_doctor(json_output: bool, store: Option<PathBuf>) -> Result<()> {
         store_ok,
         mcp_tools: vec![
             "lm_resizer_compress".to_string(),
+            "lm_resizer_tool_output".to_string(),
             "lm_resizer_retrieve".to_string(),
             "lm_resizer_stats".to_string(),
         ],
@@ -7149,6 +7151,21 @@ fn mcp_tools() -> Value {
             }
         },
         {
+            "name": "lm_resizer_tool_output",
+            "description": "Compress already captured output using the named command's filter; never execute that command.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "content": { "type": "string" },
+                    "command": { "type": "string" },
+                    "exit_code": { "type": "integer", "default": 0 },
+                    "raw_on_failure": { "type": "boolean", "default": true },
+                    "query": { "type": "string" }
+                },
+                "required": ["content", "command"]
+            }
+        },
+        {
             "name": "lm_resizer_retrieve",
             "description": "Retrieve original content by CCR hash.",
             "inputSchema": {
@@ -7177,6 +7194,37 @@ fn handle_mcp_tool_call(id: Value, params: Value, store_path: &Path) -> Value {
             let query = args.get("query").and_then(Value::as_str).unwrap_or("");
             let store = open_store(Some(store_path.to_path_buf()))?;
             let report = compress_text(content, query, store.as_ref())?;
+            Ok(json!(report))
+        }
+        "lm_resizer_tool_output" => {
+            let content = args
+                .get("content")
+                .and_then(Value::as_str)
+                .context("missing content")?;
+            let command = args
+                .get("command")
+                .and_then(Value::as_str)
+                .context("missing command")?;
+            let parts = split_shell_words(command).context("invalid command quoting")?;
+            if parts.is_empty() {
+                anyhow::bail!("empty command");
+            }
+            let exit_code = args.get("exit_code").and_then(Value::as_i64).unwrap_or(0);
+            let exit_code = i32::try_from(exit_code).context("exit_code out of range")?;
+            let raw_on_failure = args
+                .get("raw_on_failure")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let query = args.get("query").and_then(Value::as_str).unwrap_or("");
+            let store = open_store(Some(store_path.to_path_buf()))?;
+            let report = process_captured_output(
+                &parts,
+                content,
+                exit_code,
+                raw_on_failure,
+                query,
+                store.as_ref(),
+            )?;
             Ok(json!(report))
         }
         "lm_resizer_retrieve" => {
@@ -9324,6 +9372,44 @@ command = "node"
         let failure = process_captured_output(&command, raw, 1, true, "", &store).unwrap();
         assert_eq!(failure.filter, "raw_on_failure");
         assert_eq!(failure.output, raw);
+    }
+
+    #[test]
+    fn mcp_tool_output_is_listed_and_filters_without_executing() {
+        let tools = mcp_tools();
+        let names: Vec<&str> = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert!(names.contains(&"lm_resizer_tool_output"));
+
+        let temp = tempfile::tempdir().unwrap();
+        let response = handle_mcp_tool_call(
+            json!(1),
+            json!({"name":"lm_resizer_tool_output","arguments":{
+                "command":"cargo test","content":"test result: ok. 2 passed; 0 failed; 0 ignored; finished in 0.01s\n"
+            }}),
+            &temp.path().join("ccr.sqlite"),
+        );
+        assert!(response.get("error").is_none(), "{response}");
+        let payload: Value =
+            serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(payload["command"], "cargo test");
+        assert!(payload["output"].as_str().unwrap().contains("2 passed"));
+
+        let failed = handle_mcp_tool_call(
+            json!(2),
+            json!({"name":"lm_resizer_tool_output","arguments":{
+                "command":"cargo test","content":"error: compilation failed\n","exit_code":1
+            }}),
+            &temp.path().join("ccr.sqlite"),
+        );
+        let failure: Value =
+            serde_json::from_str(failed["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(failure["output"], "error: compilation failed\n");
     }
 
     #[test]
