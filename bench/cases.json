@@ -1,0 +1,328 @@
+[
+  {
+    "id": "cargo_ok",
+    "category": "tests",
+    "file": "corpus/cargo_ok.txt",
+    "oracle": [
+      "80 passed",
+      "0 failed"
+    ],
+    "rtk_filter": "cargo-test",
+    "command": "cargo test"
+  },
+  {
+    "id": "cargo_fail",
+    "category": "tests",
+    "file": "corpus/cargo_fail.txt",
+    "oracle": [
+      "parse::reject_empty",
+      "src/parser.rs:42:9",
+      "expected=422 observed=200",
+      "1 failed"
+    ],
+    "rtk_filter": "cargo-test",
+    "command": "cargo test"
+  },
+  {
+    "id": "dotnet_ok",
+    "category": "tests",
+    "file": "corpus/dotnet_ok.txt",
+    "oracle": [
+      "Test Run Successful",
+      "Passed: 65"
+    ],
+    "rtk_filter": null,
+    "command": "dotnet test"
+  },
+  {
+    "id": "dotnet_fail",
+    "category": "tests",
+    "file": "corpus/dotnet_fail.txt",
+    "oracle": [
+      "InvoiceTests.RejectsNegativeTotal",
+      "Expected: 0 Actual: -14",
+      "tests/InvoiceTests.cs:line 87",
+      "Failed: 1"
+    ],
+    "rtk_filter": null,
+    "command": "dotnet test"
+  },
+  {
+    "id": "npm_ok",
+    "category": "tests",
+    "file": "corpus/npm_ok.txt",
+    "oracle": [
+      "1 passed (1)",
+      "60 passed (60)"
+    ],
+    "rtk_filter": "vitest",
+    "command": "npm test"
+  },
+  {
+    "id": "npm_fail",
+    "category": "tests",
+    "file": "corpus/npm_fail.txt",
+    "oracle": [
+      "src/cart.test.ts:31:24",
+      "retains tax",
+      "expected 119 to be 120",
+      "1 failed"
+    ],
+    "rtk_filter": "vitest",
+    "command": "npm test"
+  },
+  {
+    "id": "pytest_ok",
+    "category": "tests",
+    "file": "corpus/pytest_ok.txt",
+    "oracle": [
+      "collected 70 items",
+      "tests/test_orders.py",
+      "70 passed"
+    ],
+    "rtk_filter": "pytest",
+    "command": "pytest"
+  },
+  {
+    "id": "pytest_fail",
+    "category": "tests",
+    "file": "corpus/pytest_fail.txt",
+    "oracle": [
+      "test_reject_zero",
+      "tests/test_orders.py:48",
+      "status=422",
+      "status=200",
+      "1 failed"
+    ],
+    "rtk_filter": "pytest",
+    "command": "pytest"
+  },
+  {
+    "id": "git_diff",
+    "category": "git",
+    "file": "corpus/git_diff.txt",
+    "oracle": [
+      "src/billing.py",
+      "@@ -17,7 +17,7 @@",
+      "-    return subtotal + tax",
+      "+    return round(subtotal + tax, 2)",
+      "tests/test_billing.py",
+      "test_rounding",
+      "1.005",
+      "1.01"
+    ],
+    "rtk_filter": "git-diff",
+    "command": "git diff"
+  },
+  {
+    "id": "git_log",
+    "category": "git",
+    "file": "corpus/git_log.txt",
+    "oracle": [
+      "Fix overflow in invoice totals",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Maintenance batch 0",
+      "Maintenance batch 1",
+      "Maintenance batch 2",
+      "Maintenance batch 3",
+      "Maintenance batch 4",
+      "Maintenance batch 5",
+      "Maintenance batch 6",
+      "Maintenance batch 7",
+      "Maintenance batch 8",
+      "Maintenance batch 9",
+      "Maintenance batch 10",
+      "Maintenance batch 11",
+      "Maintenance batch 12",
+      "Maintenance batch 13",
+      "Maintenance batch 14",
+      "Maintenance batch 15",
+      "Maintenance batch 16",
+      "Maintenance batch 17",
+      "Maintenance batch 18",
+      "Maintenance batch 19",
+      "Maintenance batch 20",
+      "Maintenance batch 21",
+      "Maintenance batch 22",
+      "Maintenance batch 23",
+      "Maintenance batch 24",
+      "Maintenance batch 25",
+      "Maintenance batch 26",
+      "Maintenance batch 27",
+      "Maintenance batch 28",
+      "Maintenance batch 29",
+      "Maintenance batch 30",
+      "Maintenance batch 31",
+      "Maintenance batch 32",
+      "Maintenance batch 33",
+      "Maintenance batch 34",
+      "Maintenance batch 35",
+      "Maintenance batch 36",
+      "Maintenance batch 37",
+      "Maintenance batch 38",
+      "Maintenance batch 39",
+      "Maintenance batch 40",
+      "Maintenance batch 41",
+      "Maintenance batch 42",
+      "Maintenance batch 43",
+      "Maintenance batch 44"
+    ],
+    "rtk_filter": "git-log",
+    "command": "git log"
+  },
+  {
+    "id": "docker",
+    "category": "infra",
+    "file": "corpus/docker.txt",
+    "oracle": [
+      "ERROR: failed to solve",
+      "exit code: 1",
+      "Dockerfile:27",
+      "atlas-web:2026.09"
+    ],
+    "rtk_filter": null,
+    "command": "docker build"
+  },
+  {
+    "id": "psql",
+    "category": "database",
+    "file": "corpus/psql.txt",
+    "oracle": [
+      "orders_pkey",
+      "(id)=(4096)",
+      "migrations/042_orders.sql:19",
+      "ROLLBACK"
+    ],
+    "rtk_filter": null,
+    "command": "psql"
+  },
+  {
+    "id": "logs",
+    "category": "logs",
+    "file": "corpus/logs.txt",
+    "oracle": [
+      "request_id=fixture-7",
+      "E_LEDGER_MISMATCH",
+      "retry_exhausted attempts=3"
+    ],
+    "rtk_filter": "log",
+    "command": "journalctl"
+  },
+  {
+    "id": "json_large",
+    "category": "json",
+    "file": "corpus/json_large.json",
+    "oracle": [
+      "\"schema\": \"orders-v3\"",
+      "\"count\": 180",
+      "\"id\": 143",
+      "\"state\": \"rejected\"",
+      "\"amount\": 4299",
+      "\"reason\": \"limit_exceeded\"",
+      "\"id\": 0",
+      "\"id\": 89",
+      "\"id\": 179"
+    ],
+    "rtk_filter": null,
+    "command": "cat"
+  },
+  {
+    "id": "compile_error",
+    "category": "build",
+    "file": "corpus/compile_error.txt",
+    "oracle": [
+      "src/ledger.rs:73:18",
+      "error[E0308]",
+      "expected `i64`, found `String`",
+      "atlas-ledger"
+    ],
+    "rtk_filter": null,
+    "command": "cargo build"
+  },
+  {
+    "id": "code_csharp",
+    "category": "code",
+    "file": "corpus/code_csharp.cs",
+    "oracle": [
+      "InvoiceService",
+      "ApplyTax",
+      "1.20m",
+      "INVOICE_NEGATIVE"
+    ],
+    "rtk_filter": null,
+    "command": "cat"
+  },
+  {
+    "id": "code_rust",
+    "category": "code",
+    "file": "corpus/code_rust.rs",
+    "oracle": [
+      "checked_total",
+      "TotalError::Overflow",
+      "checked_add"
+    ],
+    "rtk_filter": null,
+    "command": "cat"
+  },
+  {
+    "id": "code_python",
+    "category": "code",
+    "file": "corpus/code_python.py.fixture",
+    "oracle": [
+      "checked_total",
+      "result > 10000",
+      "LIMIT_EXCEEDED"
+    ],
+    "rtk_filter": null,
+    "command": "cat"
+  },
+  {
+    "id": "code_typescript",
+    "category": "code",
+    "file": "corpus/code_typescript.ts",
+    "oracle": [
+      "checkedTotal",
+      "values.reduce",
+      "LIMIT_EXCEEDED"
+    ],
+    "rtk_filter": null,
+    "command": "cat"
+  },
+  {
+    "id": "code_go",
+    "category": "code",
+    "file": "corpus/code_go.go",
+    "oracle": [
+      "CheckedTotal",
+      "total > 10000",
+      "ErrLimitExceeded"
+    ],
+    "rtk_filter": null,
+    "command": "cat"
+  },
+  {
+    "id": "code_java",
+    "category": "code",
+    "file": "corpus/code_java.java",
+    "oracle": [
+      "InvoiceService",
+      "checkedTotal",
+      "Math.addExact"
+    ],
+    "rtk_filter": null,
+    "command": "cat"
+  },
+  {
+    "id": "prose",
+    "category": "prose",
+    "file": "corpus/prose.txt",
+    "oracle": [
+      "read only during reconciliation",
+      "E_LEDGER_MISMATCH",
+      "Never retry more than three times",
+      "invoice checksum validation"
+    ],
+    "rtk_filter": null,
+    "command": "cat"
+  }
+]

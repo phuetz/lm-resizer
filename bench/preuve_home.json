@@ -1,0 +1,13 @@
+{
+  "long_home": {
+    "raw_tokens": 85,
+    "normalized_tokens": 54,
+    "normalized_sha256": "be38097132e96403af3a14fb75b1317fb0f640daa8e6e8d5f7057a6d24d30f0f"
+  },
+  "short_home": {
+    "raw_tokens": 81,
+    "normalized_tokens": 54,
+    "normalized_sha256": "be38097132e96403af3a14fb75b1317fb0f640daa8e6e8d5f7057a6d24d30f0f"
+  },
+  "normalized_equal": true
+}

@@ -4,3 +4,6 @@
 /dist/*.zip
 /dist/*.tgz
 /packages/wasm/*.wasm
+/_qa/
+__pycache__/
+.pytest_cache/
