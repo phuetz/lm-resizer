@@ -9,11 +9,11 @@ DATA.mkdir(exist_ok=True)
 CASES = []
 
 
-def put(name, category, content, oracle, rtk=None, command=None):
+def put(name, category, content, oracle, rtk=None, command=None, extension="txt"):
     assert oracle and all(needle in content for needle in oracle), name
-    path = DATA / f"{name}.txt"
+    path = DATA / f"{name}.{extension}"
     path.write_text(content, encoding="utf-8")
-    CASES.append(dict(id=name, category=category, file=f"corpus/{name}.txt",
+    CASES.append(dict(id=name, category=category, file=f"corpus/{name}.{extension}",
                       oracle=oracle, rtk_filter=rtk, command=command))
 
 
@@ -33,13 +33,13 @@ put("dotnet_fail", "tests", "  Determining projects to restore...\n" + noise("Pa
     ["InvoiceTests.RejectsNegativeTotal", "Expected: 0 Actual: -14", "tests/InvoiceTests.cs:line 87", "Failed: 1"], None, "dotnet test")
 put("npm_ok", "tests", "> atlas-web@1.0.0 test\n> vitest run\n" + noise("✓ src/cart.test.ts > case", 60) +
     " Test Files  1 passed (1)\n      Tests  60 passed (60)\n",
-    ["1 passed (1)", "60 passed (60)"], None, "npm test")
+    ["1 passed (1)", "60 passed (60)"], "vitest", "npm test")
 put("npm_fail", "tests", "> atlas-web@1.0.0 test\n> vitest run\n" + noise("✓ src/cart.test.ts > case", 59) +
     " FAIL  src/cart.test.ts > Cart > retains tax\nAssertionError: expected 119 to be 120\n ❯ src/cart.test.ts:31:24\n Test Files  1 failed (1)\n      Tests  1 failed | 59 passed (60)\n",
     ["src/cart.test.ts:31:24", "retains tax", "expected 119 to be 120", "1 failed"], "vitest", "npm test")
 put("pytest_ok", "tests", "============================= test session starts =============================\ncollected 70 items\n" +
     noise("tests/test_orders.py::test_case", 70) + "============================== 70 passed in 0.21s ==============================\n",
-    ["70 passed"], "pytest", "pytest")
+    ["collected 70 items", "tests/test_orders.py", "70 passed"], "pytest", "pytest")
 put("pytest_fail", "tests", "============================= test session starts =============================\ncollected 70 items\n" +
     noise("tests/test_orders.py::test_case", 69) + "tests/test_orders.py::test_reject_zero FAILED\n" +
     "________________________ test_reject_zero ________________________\n" +
@@ -51,10 +51,11 @@ put("pytest_fail", "tests", "============================= test session starts =
 put("git_diff", "git", "diff --git a/src/billing.py b/src/billing.py\nindex 1111111..2222222 100644\n--- a/src/billing.py\n+++ b/src/billing.py\n@@ -17,7 +17,7 @@ def total(items):\n" +
     " context\n" * 70 + "-    return subtotal + tax\n+    return round(subtotal + tax, 2)\n" +
     "diff --git a/tests/test_billing.py b/tests/test_billing.py\n@@ -40,3 +40,4 @@\n+def test_rounding(): assert total([1.005]) == 1.01\n",
-    ["src/billing.py", "round(subtotal + tax, 2)", "tests/test_billing.py", "test_rounding"], "git-diff", "git diff")
+    ["src/billing.py", "@@ -17,7 +17,7 @@", "-    return subtotal + tax", "+    return round(subtotal + tax, 2)", "tests/test_billing.py", "test_rounding", "1.005", "1.01"], "git-diff", "git diff")
 put("git_log", "git", "commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAuthor: Example Contributor <example@example.invalid>\n\n    Fix overflow in invoice totals\n" +
     "".join(f"commit {i:040x}\nAuthor: Example Contributor <example@example.invalid>\nDate: Tue Sep 22 12:00:00 2026 +0000\n\n    Maintenance batch {i}\n\n" for i in range(45)).rstrip() + "\n",
-    ["Fix overflow in invoice totals", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], "git-log", "git log")
+    ["Fix overflow in invoice totals", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] +
+    [f"Maintenance batch {i}" for i in range(45)], "git-log", "git log")
 put("docker", "infra", noise("Step build layer", 75) +
     "ERROR: failed to solve: process \"/bin/sh -c npm run build\" did not complete successfully: exit code: 1\nDockerfile:27\nimage: atlas-web:2026.09\n",
     ["ERROR: failed to solve", "exit code: 1", "Dockerfile:27", "atlas-web:2026.09"], None, "docker build")
@@ -68,7 +69,7 @@ put("logs", "logs", noise("2026-09-22T12:00:00Z INFO worker processed batch", 85
 rows = [{"id": i, "state": "ok", "amount": i * 3, "meta": {"region": "test", "batch": i // 10}} for i in range(180)]
 rows[143] = {"id": 143, "state": "rejected", "amount": 4299, "meta": {"region": "test", "reason": "limit_exceeded"}}
 put("json_large", "json", json.dumps({"schema": "orders-v3", "count": 180, "rows": rows}, indent=2) + "\n",
-    ['"schema": "orders-v3"', '"count": 180', '"id": 143', '"state": "rejected"', '"amount": 4299', '"reason": "limit_exceeded"'], None, "cat")
+    ['"schema": "orders-v3"', '"count": 180', '"id": 143', '"state": "rejected"', '"amount": 4299', '"reason": "limit_exceeded"', '"id": 0', '"id": 89', '"id": 179'], None, "cat", "json")
 put("compile_error", "build", noise("Compiling module", 75) +
     "src/ledger.rs:73:18: error[E0308]: mismatched types\nexpected `i64`, found `String`\n" +
     "src/ledger.rs:91:5: warning: unused variable: `currency`\nerror: could not compile `atlas-ledger` due to 1 previous error\n",
@@ -90,8 +91,9 @@ code = {
     "java": ("public final class InvoiceService {\n public long checkedTotal(long[] values) {\n  long total = 0;\n  for (long value : values) total = Math.addExact(total, value);\n  return total;\n }\n" + "// illustrative helper\n" * 85 + "}\n",
              ["InvoiceService", "checkedTotal", "Math.addExact"]),
 }
+extensions = {"csharp": "cs", "rust": "rs", "python": "py", "typescript": "ts", "go": "go", "java": "java"}
 for language, (body, oracle) in code.items():
-    put("code_" + language, "code", body, oracle, None, "cat")
+    put("code_" + language, "code", body, oracle, None, "cat", extensions[language])
 
 put("prose", "prose", "# Recovery procedure\n" +
     "The ledger is read only during reconciliation. An operator must inspect mismatch code E_LEDGER_MISMATCH before retrying.\n" +

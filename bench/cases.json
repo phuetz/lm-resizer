@@ -55,7 +55,7 @@
       "1 passed (1)",
       "60 passed (60)"
     ],
-    "rtk_filter": null,
+    "rtk_filter": "vitest",
     "command": "npm test"
   },
   {
@@ -76,6 +76,8 @@
     "category": "tests",
     "file": "corpus/pytest_ok.txt",
     "oracle": [
+      "collected 70 items",
+      "tests/test_orders.py",
       "70 passed"
     ],
     "rtk_filter": "pytest",
@@ -101,9 +103,13 @@
     "file": "corpus/git_diff.txt",
     "oracle": [
       "src/billing.py",
-      "round(subtotal + tax, 2)",
+      "@@ -17,7 +17,7 @@",
+      "-    return subtotal + tax",
+      "+    return round(subtotal + tax, 2)",
       "tests/test_billing.py",
-      "test_rounding"
+      "test_rounding",
+      "1.005",
+      "1.01"
     ],
     "rtk_filter": "git-diff",
     "command": "git diff"
@@ -114,7 +120,52 @@
     "file": "corpus/git_log.txt",
     "oracle": [
       "Fix overflow in invoice totals",
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "Maintenance batch 0",
+      "Maintenance batch 1",
+      "Maintenance batch 2",
+      "Maintenance batch 3",
+      "Maintenance batch 4",
+      "Maintenance batch 5",
+      "Maintenance batch 6",
+      "Maintenance batch 7",
+      "Maintenance batch 8",
+      "Maintenance batch 9",
+      "Maintenance batch 10",
+      "Maintenance batch 11",
+      "Maintenance batch 12",
+      "Maintenance batch 13",
+      "Maintenance batch 14",
+      "Maintenance batch 15",
+      "Maintenance batch 16",
+      "Maintenance batch 17",
+      "Maintenance batch 18",
+      "Maintenance batch 19",
+      "Maintenance batch 20",
+      "Maintenance batch 21",
+      "Maintenance batch 22",
+      "Maintenance batch 23",
+      "Maintenance batch 24",
+      "Maintenance batch 25",
+      "Maintenance batch 26",
+      "Maintenance batch 27",
+      "Maintenance batch 28",
+      "Maintenance batch 29",
+      "Maintenance batch 30",
+      "Maintenance batch 31",
+      "Maintenance batch 32",
+      "Maintenance batch 33",
+      "Maintenance batch 34",
+      "Maintenance batch 35",
+      "Maintenance batch 36",
+      "Maintenance batch 37",
+      "Maintenance batch 38",
+      "Maintenance batch 39",
+      "Maintenance batch 40",
+      "Maintenance batch 41",
+      "Maintenance batch 42",
+      "Maintenance batch 43",
+      "Maintenance batch 44"
     ],
     "rtk_filter": "git-log",
     "command": "git log"
@@ -160,14 +211,17 @@
   {
     "id": "json_large",
     "category": "json",
-    "file": "corpus/json_large.txt",
+    "file": "corpus/json_large.json",
     "oracle": [
       "\"schema\": \"orders-v3\"",
       "\"count\": 180",
       "\"id\": 143",
       "\"state\": \"rejected\"",
       "\"amount\": 4299",
-      "\"reason\": \"limit_exceeded\""
+      "\"reason\": \"limit_exceeded\"",
+      "\"id\": 0",
+      "\"id\": 89",
+      "\"id\": 179"
     ],
     "rtk_filter": null,
     "command": "cat"
@@ -188,7 +242,7 @@
   {
     "id": "code_csharp",
     "category": "code",
-    "file": "corpus/code_csharp.txt",
+    "file": "corpus/code_csharp.cs",
     "oracle": [
       "InvoiceService",
       "ApplyTax",
@@ -201,7 +255,7 @@
   {
     "id": "code_rust",
     "category": "code",
-    "file": "corpus/code_rust.txt",
+    "file": "corpus/code_rust.rs",
     "oracle": [
       "checked_total",
       "TotalError::Overflow",
@@ -213,7 +267,7 @@
   {
     "id": "code_python",
     "category": "code",
-    "file": "corpus/code_python.txt",
+    "file": "corpus/code_python.py",
     "oracle": [
       "checked_total",
       "result > 10000",
@@ -225,7 +279,7 @@
   {
     "id": "code_typescript",
     "category": "code",
-    "file": "corpus/code_typescript.txt",
+    "file": "corpus/code_typescript.ts",
     "oracle": [
       "checkedTotal",
       "values.reduce",
@@ -237,7 +291,7 @@
   {
     "id": "code_go",
     "category": "code",
-    "file": "corpus/code_go.txt",
+    "file": "corpus/code_go.go",
     "oracle": [
       "CheckedTotal",
       "total > 10000",
@@ -249,7 +303,7 @@
   {
     "id": "code_java",
     "category": "code",
-    "file": "corpus/code_java.txt",
+    "file": "corpus/code_java.java",
     "oracle": [
       "InvoiceService",
       "checkedTotal",

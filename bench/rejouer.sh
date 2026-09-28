@@ -15,14 +15,15 @@ fi
 if [[ ! -x "$qa_dir/venv/bin/python" ]]; then
   python3 -m venv "$qa_dir/venv"
 fi
-if ! "$qa_dir/venv/bin/python" -c 'import importlib.metadata as m; assert m.version("headroom-ai") == "0.39.1"; assert m.version("tiktoken") == "0.14.0"; assert m.version("pytest") == "9.1.1"' >/dev/null 2>&1; then
+if ! "$qa_dir/venv/bin/python" -c 'import importlib.metadata as m; assert m.version("headroom-ai") == "0.39.1"; assert m.version("tiktoken") == "0.14.0"; assert m.version("pytest") == "9.1.1"; assert m.version("onnxruntime") == "1.24.4"' >/dev/null 2>&1; then
   if command -v uv >/dev/null 2>&1; then
-    UV_CACHE_DIR="$qa_dir/uv-cache" uv pip install --python "$qa_dir/venv/bin/python" 'headroom-ai[code]==0.39.1' 'tiktoken==0.14.0' 'pytest==9.1.1' >"$qa_dir/install.log" 2>&1
+    UV_CACHE_DIR="$qa_dir/uv-cache" uv pip install --python "$qa_dir/venv/bin/python" 'headroom-ai[code]==0.39.1' 'tiktoken==0.14.0' 'pytest==9.1.1' 'onnxruntime==1.24.4' >"$qa_dir/install.log" 2>&1
   else
-    PIP_CACHE_DIR="$qa_dir/pip-cache" "$qa_dir/venv/bin/python" -m pip install 'headroom-ai[code]==0.39.1' 'tiktoken==0.14.0' 'pytest==9.1.1' >"$qa_dir/install.log" 2>&1
+    PIP_CACHE_DIR="$qa_dir/pip-cache" "$qa_dir/venv/bin/python" -m pip install 'headroom-ai[code]==0.39.1' 'tiktoken==0.14.0' 'pytest==9.1.1' 'onnxruntime==1.24.4' >"$qa_dir/install.log" 2>&1
   fi
 fi
 python3 bench/build_corpus.py
+"$qa_dir/venv/bin/python" -m unittest discover -s bench -p 'test_banc.py' >"$qa_dir/tests.log" 2>&1
 if [[ -n "${LM_RESIZER_BIN:-}" ]]; then
   lm_bin="$LM_RESIZER_BIN"
 else
