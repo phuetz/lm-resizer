@@ -6,6 +6,10 @@ Lancer depuis une version quelconque de LM Resizer :
 ./bench/rejouer.sh /chemin/de/sortie/RAPPORT.md
 ```
 
+Pour tester un autre binaire sans modifier ce checkout, définir
+`LM_RESIZER_BIN=/chemin/vers/lm-resizer` avant la commande. Pour tester le code
+d'une autre révision, exécuter ce banc dans le checkout de cette révision.
+
 Le script construit le binaire du checkout courant et installe RTK 0.50.0 et
 Headroom 0.39.1 uniquement dans `_qa/banc/`. Il régénère les 22 fixtures
 synthétiques et les oracles de `cases.json`, puis produit `resultats.json` et

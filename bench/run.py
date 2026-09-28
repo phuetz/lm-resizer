@@ -163,6 +163,11 @@ def check_oracle(case, output):
 
 
 def render_report(rows, cases, args):
+    bench_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=WORKTREE, text=True).strip()
+    default_binary = QA / "lm-target/release/lm-resizer"
+    binary_hash = hashlib.sha256(args.lm_bin.read_bytes()).hexdigest()
+    binary_origin = (f"construit depuis ce checkout (`{bench_commit}`)" if args.lm_bin.resolve() == default_binary.resolve()
+                     else "fourni par `LM_RESIZER_BIN` ; révision source à documenter séparément")
     head = [
         "# Banc comparatif LM Resizer / RTK / Headroom",
         "",
@@ -170,7 +175,7 @@ def render_report(rows, cases, args):
         "",
         "## Versions et protocole",
         "",
-        f"- LM Resizer : commit `{subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=WORKTREE, text=True).strip()}` ; binaire construit depuis ce worktree.",
+        f"- LM Resizer : binaire {binary_origin} ; SHA-256 `{binary_hash}`.",
         "- RTK : `0.50.0`, release officielle, archive Linux musl vérifiée par SHA-256.",
         "- Headroom : paquet PyPI `headroom-ai==0.39.1` avec extra `code`.",
         "- Tokenizer commun : `tiktoken` `o200k_base` ; économies de sortie, pas de facturation fournisseur.",

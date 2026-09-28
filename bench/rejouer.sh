@@ -33,5 +33,5 @@ report_path="${1:-$qa_dir/RAPPORT.md}"
 "$qa_dir/venv/bin/python" bench/run.py --lm-bin "$lm_bin" --report "$report_path" | tee "$qa_dir/run.log"
 if [[ "${BANC_SKIP_AGENT:-0}" != "1" ]] && command -v codex >/dev/null 2>&1 && [[ -r "$HOME/.codex/auth.json" ]]; then
   "$qa_dir/venv/bin/python" bench/agent_eval.py | tee "$qa_dir/agent-run.log"
-  "$qa_dir/venv/bin/python" bench/run.py --report-only --report "$report_path"
+  "$qa_dir/venv/bin/python" bench/run.py --report-only --lm-bin "$lm_bin" --report "$report_path"
 fi
