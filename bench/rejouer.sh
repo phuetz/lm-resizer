@@ -35,5 +35,17 @@ fi
 if [[ ! -x "$qa_dir/cargo-target/release/lm-resizer-banc" ]]; then
   CARGO_HOME="$qa_dir/cargo-home" CARGO_TARGET_DIR="$qa_dir/cargo-target" cargo build --release -p lm-resizer-banc >"$qa_dir/build-banc.log" 2>&1
 fi
-report_path="${1:-$qa_dir/RAPPORT.md}"
-"$qa_dir/cargo-target/release/lm-resizer-banc" --lm-bin "$lm_bin" --report "$report_path" | tee "$qa_dir/run.log"
+if [[ "${1:-}" == "--update-repo" ]]; then
+  if [[ $# -ne 1 ]]; then
+    echo "usage: bench/rejouer.sh [report path | --update-repo]" >&2
+    exit 2
+  fi
+  "$qa_dir/cargo-target/release/lm-resizer-banc" --lm-bin "$lm_bin" --update-repo | tee "$qa_dir/run.log"
+else
+  if [[ $# -gt 1 ]]; then
+    echo "usage: bench/rejouer.sh [report path | --update-repo]" >&2
+    exit 2
+  fi
+  report_path="${1:-$qa_dir/RAPPORT.md}"
+  "$qa_dir/cargo-target/release/lm-resizer-banc" --lm-bin "$lm_bin" --report "$report_path" | tee "$qa_dir/run.log"
+fi

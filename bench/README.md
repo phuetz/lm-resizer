@@ -3,10 +3,11 @@
 Depuis un checkout Linux de LM Resizer :
 
 ```bash
-./bench/rejouer.sh /chemin/de/sortie/RAPPORT.md
+./bench/rejouer.sh
+./bench/test-clean-tree.sh
 ```
 
-Le script installe RTK 0.50.0 (archive vérifiée par SHA-256) et Headroom 0.39.1 avec ONNX Runtime 1.24.4 uniquement sous `target/banc/`, puis compile et lance le harnais Rust. `target/` est ignoré par git et exclu du test `repository_has_no_python_runtime_surface`. Aucun fichier Python n'est versionné ; la fixture de code Python est conservée comme texte et copiée sous `target/banc/fixtures/` avec son extension naturelle au moment du rejeu. L'adaptateur Headroom dans `headroom_once.sh` utilise l'API publique par l'interpréteur isolé, sans script Python dans le dépôt.
+Le script installe RTK 0.50.0 (archive vérifiée par SHA-256) et Headroom 0.39.1 avec ONNX Runtime 1.24.4 uniquement sous `target/banc/`, puis compile et lance le harnais Rust. Rapport, sorties brutes, `resultats.json` et `preuve_home.json` générés restent sous `target/banc/` ; le rejeu ordinaire ne modifie aucun fichier suivi. `test-clean-tree.sh` exécute le banc entier et vérifie cet invariant. Pour publier explicitement une nouvelle mesure dans les fichiers versionnés de `bench/`, utiliser `./bench/rejouer.sh --update-repo`. Un chemin de rapport dans le checkout hors `target/banc/` est refusé sans cette option. `target/` est ignoré par git et exclu du test `repository_has_no_python_runtime_surface`. Aucun fichier Python n'est versionné ; la fixture de code Python est conservée comme texte et copiée sous `target/banc/fixtures/` avec son extension naturelle au moment du rejeu. L'adaptateur Headroom dans `headroom_once.sh` utilise l'API publique par l'interpréteur isolé, sans script Python dans le dépôt.
 
 `LM_RESIZER_BIN=/chemin/vers/lm-resizer` sélectionne un binaire d'une autre révision. Pour mesurer le code d'une autre révision, exécuter le banc depuis son checkout. Le corpus et ses oracles sont versionnés dans `cases.json` et `corpus/`. Les 22 cas couvrent tests, git, Docker, PostgreSQL, journaux, JSON, erreurs de compilation, six langages et prose. Les fixtures sont synthétiques et ne contiennent pas de données personnelles.
 
@@ -15,6 +16,8 @@ Le harnais compare les mêmes octets avec `o200k_base` de `tiktoken-rs`. LM Resi
 Le format JSON compact de LM Resizer utilise `columns` et des `rows` positionnelles : chaque objet d'origine est reconstituable en associant les colonnes aux valeurs. L'original est aussi conservé dans CCR. Les sorties de `exec` portant un marqueur `[raw: <préfixe>]` se récupèrent avec `lm-resizer tee read <préfixe>` dans le même répertoire d'état ; le banc conserve en plus les sorties de chaque outil sous `target/banc/results/`.
 
 Le cas Git exige les 46 sujets et un SHA abrégé qui identifie uniquement le commit visé parmi ceux de la fixture. Le cas JSON vérifie les 180 lignes, l'anomalie et trois lignes témoins, y compris avec la table compacte de SmartCrusher. Les tests Rust du harnais protègent ces invariants. La tâche agent reste non évaluée : l'essai antérieur a échoué sur un verrou de sandbox avant toute modification et ne figure pas au classement.
+
+Les oracles `npm_ok` et `pytest_ok` acceptent des formulations équivalentes des comptes de réussite. Ils exigent aussi la portée exécutée (nombre de fichiers pour npm, chemin de test pour pytest) : `PASS (60) FAIL (0)` et `Pytest: 70 passed` conservent le compte, mais ne disent pas quels fichiers ont été exécutés. Le cas `prose` mesure 35 occurrences d'une ligne identique, pas une prose littéraire variée. La fixture `logs` utilise un horodatage ISO suivi d'un niveau `INFO` ; elle ne représente pas le format court par défaut de `journalctl`.
 
 `resultats-avant.json` conserve le premier rejeu sur `753e42c99c338487e1dea98de402cbfecc473cf2` avant les corrections de compression. `resultats.json` et `RAPPORT.md` décrivent le rejeu final ; le rapport indique l'empreinte exacte du binaire compilé depuis son checkout.
 

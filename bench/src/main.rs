@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::Instant;
 use tiktoken_rs::CoreBPE;
@@ -58,6 +58,20 @@ fn repo_dir() -> PathBuf {
 
 fn qa_dir() -> PathBuf {
     repo_dir().join("target/banc")
+}
+
+fn normalized_path(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                result.pop();
+            }
+            other => result.push(other.as_os_str()),
+        }
+    }
+    result
 }
 
 fn sha256(text: &str) -> String {
@@ -207,6 +221,8 @@ fn missing_oracle(case: &Case, output: &str) -> Vec<String> {
     match case.id.as_str() {
         "git_log" => git_log_missing(case, output),
         "json_large" => json_missing(case, output),
+        "npm_ok" => npm_ok_missing(case, output),
+        "pytest_ok" => pytest_ok_missing(case, output),
         _ => case
             .oracle
             .iter()
@@ -214,6 +230,34 @@ fn missing_oracle(case: &Case, output: &str) -> Vec<String> {
             .cloned()
             .collect(),
     }
+}
+
+fn npm_ok_missing(case: &Case, output: &str) -> Vec<String> {
+    let file_count = Regex::new(r"(?i)(?:test files?\s+1 passed\s*\(1\)|1 test file passed)")
+        .unwrap()
+        .is_match(output);
+    let test_count = Regex::new(r"(?i)(?:60 passed(?:\s*\(60\))?|PASS\s*\(60\))")
+        .unwrap()
+        .is_match(output);
+    case.oracle
+        .iter()
+        .zip([file_count, test_count])
+        .filter_map(|(fact, found)| (!found).then_some(fact.clone()))
+        .collect()
+}
+
+fn pytest_ok_missing(case: &Case, output: &str) -> Vec<String> {
+    let passed = Regex::new(r"(?i)\b70 passed\b").unwrap().is_match(output);
+    let collected = passed
+        || Regex::new(r"(?i)(?:collected 70 items|70 tests collected)")
+            .unwrap()
+            .is_match(output);
+    let file = output.contains("tests/test_orders.py");
+    case.oracle
+        .iter()
+        .zip([collected, file, passed])
+        .filter_map(|(fact, found)| (!found).then_some(fact.clone()))
+        .collect()
 }
 
 fn git_log_missing(case: &Case, output: &str) -> Vec<String> {
@@ -258,10 +302,21 @@ fn json_missing(case: &Case, output: &str) -> Vec<String> {
         found[1] = value["count"] == 180;
         if let Some(raw_rows) = value["rows"].as_array() {
             let columns = value["columns"].as_array();
+            let valid_columns = match columns {
+                Some(items) => {
+                    let names: Vec<&str> = items.iter().filter_map(Value::as_str).collect();
+                    names.len() == items.len()
+                        && names.iter().copied().collect::<BTreeSet<_>>().len() == names.len()
+                }
+                None => true,
+            };
             let rows: Vec<Value> = raw_rows
                 .iter()
                 .map(|row| {
                     if let (Some(cells), Some(columns)) = (row.as_array(), columns) {
+                        if !valid_columns || cells.len() != columns.len() {
+                            return row.clone();
+                        }
                         let object = columns
                             .iter()
                             .zip(cells)
@@ -387,7 +442,7 @@ fn verify_home(lm_bin: &Path, shims: &Path, qa: &Path, bpe: &CoreBPE) -> Result<
     }
     let equal = views[0]["normalized_sha256"] == views[1]["normalized_sha256"];
     write_json(
-        &bench_dir().join("preuve_home.json"),
+        &qa.join("preuve_home.json"),
         &json!({
             "long_home": views[0], "short_home": views[1], "normalized_equal": equal
         }),
@@ -529,7 +584,7 @@ fn run_all(cases: &[Case], lm_bin: &Path, qa: &Path, bpe: &CoreBPE) -> Result<Ve
         }
     }
     write_json(&result_dir.join("results.json"), &rows)?;
-    write_json(&bench_dir().join("resultats.json"), &rows)?;
+    write_json(&qa.join("resultats.json"), &rows)?;
     Ok(rows)
 }
 
@@ -561,7 +616,7 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
     };
     let mut report = format!("# Banc comparatif LM Resizer / RTK / Headroom\n\n{verdict} Une économie ne compte que si l'oracle est intégralement conservé.\n\n## Versions et méthode\n\n- Checkout `{commit}` ; SHA-256 du binaire LM Resizer `{binary_hash}`.\n- RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.\n- Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.\n- RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.\n- Les chemins HOME/checkout sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.\n- Latence : processus complet, démarrage Python de Headroom compris.\n");
     if let Ok(proof) =
-        serde_json::from_str::<Value>(&fs::read_to_string(bench_dir().join("preuve_home.json"))?)
+        serde_json::from_str::<Value>(&fs::read_to_string(qa.join("preuve_home.json"))?)
     {
         report.push_str(&format!("- Preuve HOME : {} contre {} jetons bruts, {} contre {} normalisés, empreintes égales : {}.\n",
             proof["long_home"]["raw_tokens"], proof["short_home"]["raw_tokens"],
@@ -607,7 +662,7 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
             "| {tool} | {median_ms:.0} ms | {max_ms:.0} ms | {failures} |\n"
         ));
     }
-    report.push_str("\n## Gagnants et pertes par cas\n\n| Cas | Gagnant qualifié | LM Resizer | RTK | Headroom |\n|---|---|---:|---:|---:|\n");
+    report.push_str("\n## Gagnants et pertes par cas\n\nChaque cellule indique économie qualifiée / économie brute / conservation de l'oracle ; le gagnant utilise uniquement l'économie qualifiée.\n\n| Cas | Gagnant qualifié | LM Resizer | RTK | Headroom |\n|---|---|---:|---:|---:|\n");
     for case in cases {
         let trio: Vec<&Row> = TOOLS
             .iter()
@@ -616,7 +671,8 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
         report.push_str(&format!("| {} | {} |", case.id, qualified_winner(&trio)));
         for row in trio {
             report.push_str(&format!(
-                " {:.0} % / {:.0} %{} |",
+                " {:.0} % qual. / {:.0} % brut / {:.0} % oracle{} |",
+                row.qualified_saving * 100.0,
                 row.saving * 100.0,
                 row.oracle_retention * 100.0,
                 if row.error.is_some() { " ⚠" } else { "" }
@@ -684,26 +740,49 @@ fn main() -> Result<()> {
     let mut report = qa.join("RAPPORT.md");
     let mut lm_bin = qa.join("cargo-target/release/lm-resizer");
     let mut report_only = false;
+    let mut update_repo = false;
+    let mut explicit_report = false;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--report" => report = PathBuf::from(args.next().context("--report needs path")?),
+            "--report" => {
+                report = PathBuf::from(args.next().context("--report needs path")?);
+                explicit_report = true;
+            }
             "--lm-bin" => lm_bin = PathBuf::from(args.next().context("--lm-bin needs path")?),
             "--report-only" => report_only = true,
+            "--update-repo" => update_repo = true,
             _ => bail!("unknown argument: {arg}"),
         }
+    }
+    if update_repo && explicit_report {
+        bail!("--update-repo and --report are mutually exclusive");
+    }
+    let absolute_report = normalized_path(&if report.is_absolute() {
+        report.clone()
+    } else {
+        env::current_dir()?.join(&report)
+    });
+    if !update_repo && absolute_report.starts_with(repo_dir()) && !absolute_report.starts_with(&qa)
+    {
+        bail!("report inside checkout requires --update-repo");
     }
     if let Some(parent) = report.parent() {
         fs::create_dir_all(parent)?;
     }
     let cases: Vec<Case> = serde_json::from_str(&fs::read_to_string(bench.join("cases.json"))?)?;
     let rows = if report_only {
-        serde_json::from_str(&fs::read_to_string(bench.join("resultats.json"))?)?
+        serde_json::from_str(&fs::read_to_string(qa.join("resultats.json"))?)?
     } else {
         let bpe = tiktoken_rs::o200k_base()?;
         run_all(&cases, &lm_bin, &qa, &bpe)?
     };
     fs::write(&report, render_report(&cases, &rows, &lm_bin, &qa)?)?;
+    if update_repo {
+        fs::copy(qa.join("preuve_home.json"), bench.join("preuve_home.json"))?;
+        fs::copy(qa.join("resultats.json"), bench.join("resultats.json"))?;
+        fs::copy(&report, bench.join("RAPPORT.md"))?;
+    }
     Ok(())
 }
 
@@ -780,6 +859,46 @@ mod tests {
         assert!(json_missing(&case, &table.to_string()).is_empty());
         table["rows"][143][0] = json!(4300);
         assert!(json_missing(&case, &table.to_string()).contains(&"\"amount\": 4299".to_string()));
+
+        let reordered = json!({"schema":"orders-v3", "count":180,
+            "columns":["state", "id", "amount", "meta"],
+            "rows": serde_json::from_str::<Value>(&fs::read_to_string(bench_dir().join(&case.file)).unwrap()).unwrap()["rows"]
+                .as_array().unwrap().iter().map(|row|
+                    json!([row["state"],row["id"],row["amount"],row["meta"]])
+                ).collect::<Vec<_>>()});
+        assert!(json_missing(&case, &reordered.to_string()).is_empty());
+        let mut truncated = reordered;
+        truncated["rows"][143].as_array_mut().unwrap().pop();
+        assert!(!json_missing(&case, &truncated.to_string()).is_empty());
+    }
+
+    #[test]
+    fn success_oracles_accept_equivalent_words_but_require_scope() {
+        let cases = cases();
+        let npm = cases.iter().find(|case| case.id == "npm_ok").unwrap();
+        assert!(npm_ok_missing(npm, "1 test file passed; PASS (60) FAIL (0)").is_empty());
+        assert_eq!(
+            npm_ok_missing(npm, "PASS (60) FAIL (0)"),
+            vec![npm.oracle[0].clone()]
+        );
+
+        let pytest = cases.iter().find(|case| case.id == "pytest_ok").unwrap();
+        assert!(pytest_ok_missing(
+            pytest,
+            "70 tests collected in tests/test_orders.py; 70 passed"
+        )
+        .is_empty());
+        assert_eq!(
+            pytest_ok_missing(pytest, "Pytest: 70 passed"),
+            vec![pytest.oracle[1].clone()]
+        );
+    }
+
+    #[test]
+    fn report_path_normalization_blocks_parent_traversal() {
+        let checkout = repo_dir();
+        let escaped = checkout.join("target/banc/../../bench/RAPPORT.md");
+        assert_eq!(normalized_path(&escaped), checkout.join("bench/RAPPORT.md"));
     }
 
     #[test]
