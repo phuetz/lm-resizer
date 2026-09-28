@@ -23,6 +23,7 @@ struct Case {
     oracle: Vec<String>,
     rtk_filter: Option<String>,
     command: Option<String>,
+    exit_code: Option<i32>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -209,6 +210,9 @@ fn staged_fixture(case: &Case, original: &Path, qa: &Path) -> Result<PathBuf> {
 }
 
 fn expected_exit(case: &Case) -> i32 {
+    if let Some(code) = case.exit_code {
+        return code;
+    }
     if case.id.ends_with("fail") || ["docker", "psql", "compile_error"].contains(&case.id.as_str())
     {
         1
@@ -538,7 +542,14 @@ fn run_all(cases: &[Case], lm_bin: &Path, qa: &Path, bpe: &CoreBPE) -> Result<Ve
             let raw_out = String::from_utf8_lossy(&output.stdout).into_owned();
             let normalized = normalize_output(&raw_out, &home, &repo_dir());
             let after = count(bpe, &normalized);
-            let error = if ![0, expected_exit(case)].contains(&output.status.code().unwrap_or(-1)) {
+            let actual_exit = output.status.code().unwrap_or(-1);
+            let expected = expected_exit(case);
+            let exit_plausible = if expected == 0 {
+                actual_exit == 0
+            } else {
+                actual_exit >= 0
+            };
+            let error = if !exit_plausible {
                 Some(format!(
                     "code de sortie inattendu {:?}",
                     output.status.code()
@@ -628,7 +639,7 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
     } else {
         format!("Sur ces 22 fixtures, LM Resizer est derrière sur {} cas : {}. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée.", lost_cases.len(), lost_cases.join(", "))
     };
-    let mut report = format!("# Banc comparatif LM Resizer / RTK / Headroom\n\n{verdict} Une économie ne compte que si l'oracle est intégralement conservé.\n\n## Versions et méthode\n\n- Checkout `{commit}` ; SHA-256 du binaire LM Resizer `{binary_hash}`.\n- RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.\n- Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.\n- RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.\n- Les chemins HOME/checkout sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.\n- Latence : processus complet, démarrage Python de Headroom compris.\n");
+    let mut report = format!("# Banc comparatif LM Resizer / RTK / Headroom\n\n{verdict} Une économie ne compte que si l'oracle est intégralement conservé.\n\n## Versions et méthode\n\n- Checkout `{commit}` ; SHA-256 du binaire LM Resizer `{binary_hash}`.\n- RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.\n- Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.\n- `compile_error`, `git_diff` et `dotnet_ok` sont des captures réelles dont les sources figurent dans `bench/capture-src/`. Les autres fixtures sont synthétiques.\n- RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.\n- Les chemins HOME/checkout sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.\n- Le classement n'évalue pas la fidélité du code de sortie de RTK `pipe` ; les codes observés figurent dans `resultats.json`.\n- Latence : processus complet, démarrage Python de Headroom compris ; elle dépend de la machine et du cache.\n");
     if let Ok(proof) =
         serde_json::from_str::<Value>(&fs::read_to_string(qa.join("preuve_home.json"))?)
     {
@@ -819,6 +830,11 @@ mod tests {
 
     #[test]
     fn captured_fixtures_have_real_tool_structure() {
+        let compile_case = cases()
+            .into_iter()
+            .find(|case| case.id == "compile_error")
+            .unwrap();
+        assert_eq!(expected_exit(&compile_case), 101);
         let rust = fs::read_to_string(bench_dir().join("corpus/compile_error.txt")).unwrap();
         assert!(rust.contains("error[E0308]: mismatched types\n --> src/main.rs:2:22"));
         assert!(rust.contains("error: could not compile `atlas-ledger`"));

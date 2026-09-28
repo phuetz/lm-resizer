@@ -235,7 +235,8 @@
       "expected `i64`, found `String`"
     ],
     "rtk_filter": null,
-    "command": "cargo build"
+    "command": "cargo build",
+    "exit_code": 101
   },
   {
     "id": "code_csharp",
