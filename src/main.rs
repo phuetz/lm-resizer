@@ -2105,7 +2105,7 @@ fn run_exec_command(
 
     let mut compressed = if matches!(
         filter.as_str(),
-        "json-passthrough" | "aws-json" | "aws" | "file-read"
+        "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
     ) {
         CompressReport {
             content_type: if matches!(filter.as_str(), "json-passthrough" | "aws-json") {
@@ -2143,7 +2143,7 @@ fn run_exec_command(
             .push("diagnostic_gate:kept_filtered".to_string());
         compressed.cache_keys.clear();
     }
-    let tee_hint = tee_raw_output_if_useful(&raw, &filtered, exit_code)?;
+    let tee_hint = tee_raw_output_if_useful(&raw, &filtered)?;
     let mut final_output = compressed.output;
     if let Some(hint) = &tee_hint {
         if !final_output.ends_with('\n') && !final_output.is_empty() {
@@ -2188,7 +2188,7 @@ fn process_captured_output(
         (raw.to_string(), Vec::new(), Vec::new())
     } else if matches!(
         filter.as_str(),
-        "json-passthrough" | "aws-json" | "aws" | "file-read"
+        "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
     ) {
         (filtered.clone(), Vec::new(), Vec::new())
     } else {
@@ -2556,7 +2556,19 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     {
         return ("psql".to_string(), filter_psql(raw));
     }
-    if normalized_command_text(command) == "cargo test"
+    let cargo_test = command
+        .first()
+        .is_some_and(|program| command_basename(program) == "cargo")
+        && command.get(1).is_some_and(|verb| verb == "test");
+    if cargo_test
+        && raw.lines().any(|line| {
+            let trimmed = line.trim_start().to_ascii_lowercase();
+            trimmed.starts_with("warning:") || trimmed.starts_with("error:")
+        })
+    {
+        return ("cargo_test_diagnostics".to_string(), raw.to_string());
+    }
+    if cargo_test
         && raw.lines().any(|line| line.starts_with("test result: ok."))
         && !raw
             .lines()
@@ -2568,7 +2580,7 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
             .collect();
         if summaries.len() == 1 {
             let summary = summaries[0].trim_start_matches("test result: ok. ");
-            let counts = summary.split(';').take(2).collect::<Vec<_>>().join(";");
+            let counts = summary.split(';').take(3).collect::<Vec<_>>().join(";");
             return ("cargo_test".to_string(), format!("{counts}\n"));
         }
     }
@@ -4224,12 +4236,8 @@ fn append_omitted(mut lines: Vec<String>, skipped: usize) -> String {
     }
 }
 
-fn tee_raw_output_if_useful(raw: &str, filtered: &str, exit_code: i32) -> Result<Option<String>> {
-    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") || raw.len() < 500 {
-        return Ok(None);
-    }
-    let materially_filtered = filtered.len().saturating_mul(2) < raw.len();
-    if exit_code == 0 && !materially_filtered {
+fn tee_raw_output_if_useful(raw: &str, filtered: &str) -> Result<Option<String>> {
+    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") || raw == filtered {
         return Ok(None);
     }
 
@@ -4238,28 +4246,7 @@ fn tee_raw_output_if_useful(raw: &str, filtered: &str, exit_code: i32) -> Result
     let digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
     let path = tee_dir.join(format!("{digest}.log"));
     std::fs::write(&path, raw)?;
-    cleanup_tee_files(&tee_dir, 20)?;
     Ok(Some(format!("[raw: {}]", &digest[..12])))
-}
-
-fn cleanup_tee_files(dir: &Path, max_files: usize) -> Result<()> {
-    let mut entries = std::fs::read_dir(dir)?
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "log"))
-        .collect::<Vec<_>>();
-    if entries.len() <= max_files {
-        return Ok(());
-    }
-    entries.sort_by_key(|entry| {
-        entry
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .ok()
-    });
-    for entry in entries.iter().take(entries.len() - max_files) {
-        let _ = std::fs::remove_file(entry.path());
-    }
-    Ok(())
 }
 
 fn run_tee_command(command: TeeCommand) -> Result<()> {
@@ -11637,7 +11624,19 @@ key = value
         let cargo = include_str!("../bench/corpus/cargo_ok.txt");
         let (_, filtered) = filter_command_output(&["cargo".into(), "test".into()], cargo);
         assert!(filtered.contains("80 passed; 0 failed"));
+        assert!(filtered.contains("0 ignored"));
         assert!(!filtered.contains("parse::case 000"));
+
+        let with_warning = "warning: unused variable at src/lib.rs:7\n\
+test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
+        let (_, filtered) = filter_command_output(&["cargo".into(), "test".into()], with_warning);
+        assert!(filtered.contains("warning: unused variable"));
+        assert!(filtered.contains("0 ignored"));
+        let (_, filtered) = filter_command_output(
+            &["cargo".into(), "test".into(), "--workspace".into()],
+            with_warning,
+        );
+        assert!(filtered.contains("warning: unused variable"));
     }
 
     #[test]
