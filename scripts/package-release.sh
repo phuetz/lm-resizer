@@ -40,8 +40,12 @@ tar -C "$dist" -czf "$tarball" "$(basename "$stage")"
 "$root/scripts/release-evidence.sh"
 "$root/scripts/generate-checksums.sh"
 cp "$root/dist/release-evidence.json" "$stage/"
-cp "$root/dist/SHA256SUMS" "$stage/"
 rm -f "$tarball"
 tar -C "$dist" -czf "$tarball" "$(basename "$stage")"
 "$root/scripts/generate-checksums.sh"
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "$tarball" | sed "s#  $dist/#  #" > "$tarball.sha256"
+else
+  shasum -a 256 "$tarball" | sed "s#  $dist/#  #" > "$tarball.sha256"
+fi
 printf '%s\n' "Packaged $tarball"

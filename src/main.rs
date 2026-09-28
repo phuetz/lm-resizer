@@ -49,6 +49,7 @@ use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
 
 #[derive(Parser)]
 #[command(name = "lm-resizer")]
+#[command(version)]
 #[command(about = "Rust-native context compression for LLM agents")]
 struct Cli {
     #[command(subcommand)]

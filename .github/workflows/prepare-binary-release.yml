@@ -1,0 +1,137 @@
+name: Prepare binary release draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to package, for example v0.2.3"
+        required: true
+        type: string
+      confirm:
+        description: "Type PREPARE_DRAFT to create a draft release with archives"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            artifact: linux
+          - runner: macos-15
+            artifact: darwin-arm64
+          - runner: macos-15-intel
+            artifact: darwin-x86_64
+          - runner: windows-latest
+            artifact: windows
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout the existing tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify confirmation and versions
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: node scripts/check-release-version.cjs
+
+      - name: Check and package POSIX release
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          bash scripts/check-release.sh
+          bash scripts/package-release.sh
+
+      - name: Check and package Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-release.ps1
+          if ($LASTEXITCODE -ne 0) { throw "release check failed" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1
+          if ($LASTEXITCODE -ne 0) { throw "release package failed" }
+
+      - name: Grok skill installer smoke under Git Bash
+        if: runner.os == 'Windows'
+        shell: bash
+        run: bash scripts/test-install-grok-skill.sh
+
+      - name: Install packaged binary without Cargo on PATH
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/test-install-binary.sh dist
+
+      - name: Install packaged Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-install-binary.ps1 -ArchiveDir dist
+
+      - name: Upload archive and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.artifact }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+
+  draft:
+    needs: package
+    runs-on: ubuntu-latest
+    environment: github-release
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout the existing tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Download all platform archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify every archive and prepare aggregate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          test "$(find . -maxdepth 1 -name '*.sha256' | wc -l)" -eq 4
+          for checksum in *.sha256; do sha256sum -c "$checksum"; done
+          sha256sum *.tar.gz *.zip > SHA256SUMS
+
+      - name: Create draft with assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" dist/*.tar.gz dist/*.zip dist/*.sha256 dist/SHA256SUMS \
+            --draft --verify-tag --title "lm-resizer $RELEASE_TAG" \
+            --notes "Binary archives and SHA-256 checksums. Publish this draft only after review."

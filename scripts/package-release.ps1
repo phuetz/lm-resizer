@@ -44,10 +44,12 @@ if ($LASTEXITCODE -ne 0) { throw "release-evidence.ps1 failed" }
 powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "generate-checksums.ps1")
 if ($LASTEXITCODE -ne 0) { throw "generate-checksums.ps1 failed" }
 Copy-Item (Join-Path $root "dist\release-evidence.json") $stage -Force
-Copy-Item (Join-Path $root "dist\SHA256SUMS") $stage -Force
 Remove-Item -Force $zip -ErrorAction SilentlyContinue
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip
 powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "generate-checksums.ps1")
 if ($LASTEXITCODE -ne 0) { throw "generate-checksums.ps1 failed" }
+
+$hash = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+Set-Content -Path "$zip.sha256" -Value "$hash  $([IO.Path]::GetFileName($zip))" -Encoding ASCII
 
 Write-Host "Packaged $zip"

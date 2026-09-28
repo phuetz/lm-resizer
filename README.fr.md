@@ -149,6 +149,33 @@ raisonnement.
 
 ## Installation / build
 
+Après validation et publication de la release `v0.2.3`, installer le binaire
+précompilé en **une commande**, sans Rust ni cache de compilation :
+
+Linux et macOS :
+
+```sh
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.3/install.sh | sh'
+```
+
+Windows PowerShell :
+
+```powershell
+irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.3/install.ps1 | iex
+```
+
+L'installeur vérifie le SHA-256 de l'archive et pose le binaire dans
+`~/.local/bin` (modifiable avec `LM_RESIZER_INSTALL_DIR`). Le fichier `.sha256`
+indique le nom et la somme attendus de l'archive ; ces deux valeurs sont
+contrôlées avant extraction. Sur Linux/macOS,
+ajouter ce répertoire au `PATH` si l'installeur le signale ; sur Windows,
+l'installeur l'ajoute au `PATH` utilisateur. La release `v0.2.2` existante ne
+contient aucune archive binaire : ces commandes exigent la publication préalable
+de `v0.2.3` avec les archives préparées par le workflow manuel.
+Plateformes préparées : Linux x86_64, macOS x86_64/arm64, Windows x86_64.
+
+Pour compiler depuis les sources :
+
 ```bash
 git clone https://github.com/phuetz/lm-resizer
 cd lm-resizer
@@ -433,7 +460,8 @@ powershell -File scripts/package-release.ps1
 ```
 
 Le packaging inclut le binaire, la documentation, les exemples, les fixtures
-provider, le wrapper WASM, `release-evidence.json` et `SHA256SUMS`.
+provider, le wrapper WASM et `release-evidence.json`. Le SHA-256 de l'archive
+est livré à côté dans un fichier `.sha256`.
 
 ## Statut d’implémentation
 

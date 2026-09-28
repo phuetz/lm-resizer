@@ -38,7 +38,4 @@ Invoke-Checked "check-publish-readiness.ps1" {
   powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "check-publish-readiness.ps1")
 }
 
-Invoke-Checked "test-install-grok-skill.sh" {
-  bash (Join-Path $PSScriptRoot "test-install-grok-skill.sh")
-}
 Write-Host "lm-resizer release check passed"
