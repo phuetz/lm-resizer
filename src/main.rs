@@ -3242,18 +3242,43 @@ const DOCKER_NON_BUILD_VERBS: [&str; 14] = [
     "cp", "start",
 ];
 
+/// Les drapeaux globaux de `docker`/`podman` qui consomment l'argument suivant.
+///
+/// Sans cette liste, la **valeur** d'un drapeau est lue comme une
+/// sous-commande : `docker --context build ps` devient un build parce que le
+/// contexte s'appelle « build ». On ne peut pas non plus sauter l'argument qui
+/// suit n'importe quel drapeau : `--debug` et `--tls` sont des booléens, et
+/// `docker --debug build .` est bien un build. Seuls ces drapeaux-ci prennent
+/// une valeur séparée ; la forme collée `--context=build` se traite toute
+/// seule, elle commence par `-`.
+const DOCKER_GLOBAL_FLAGS_WITH_VALUE: [&str; 16] = [
+    "--context",
+    "-c",
+    "--host",
+    "-H",
+    "--log-level",
+    "-l",
+    "--config",
+    "--tlscacert",
+    "--tlscert",
+    "--tlskey",
+    "--connection",
+    "--url",
+    "--identity",
+    "--root",
+    "--runroot",
+    "--storage-driver",
+];
+
 /// Reconnaît un build d'image, sous les formes que docker et podman acceptent.
 ///
 /// La position du verbe n'est pas fixe : `docker --context distant build .`
-/// place un drapeau global et **sa valeur** avant `build`. On cherche donc
-/// `build` ou `bake` parmi les arguments, en s'arrêtant au premier verbe
-/// concurrent. `bake` est la forme buildx multi-cibles ; sa sortie a la même
-/// forme. `compose up --build` n'est pas pris : ses logs de services ne sont
-/// pas un build.
+/// place un drapeau global et **sa valeur** avant `build`. On lit donc les
+/// arguments dans l'ordre, en sautant la valeur des drapeaux qui en prennent
+/// une, et on s'arrête au premier verbe concurrent. `bake` est la forme buildx
+/// multi-cibles ; sa sortie a la même forme. `compose up --build` n'est pas
+/// pris : ses logs de services ne sont pas un build.
 ///
-/// Limite assumée : un contexte ou un réseau qui s'appellerait littéralement
-/// « build » (`docker --context build ps`) serait pris à tort. Le coût se
-/// limite à un filtre mal choisi, que la porte de non-croissance borne.
 /// Un `bash -lc "docker build …"` n'est pas reconnu : le programme est le shell.
 fn command_runs_docker_build(command: &[String]) -> bool {
     let Some(first) = command.first().map(|s| command_basename(s)) else {
@@ -3265,13 +3290,24 @@ fn command_runs_docker_build(command: &[String]) -> bool {
     ) {
         return false;
     }
-    command
-        .iter()
-        .skip(1)
-        .filter(|tok| !tok.starts_with('-'))
-        .map(String::as_str)
-        .take_while(|tok| !DOCKER_NON_BUILD_VERBS.contains(tok))
-        .any(|tok| tok == "build" || tok == "bake")
+    let mut args = command.iter().skip(1).map(String::as_str);
+    while let Some(tok) = args.next() {
+        if DOCKER_GLOBAL_FLAGS_WITH_VALUE.contains(&tok) {
+            // Ce qui suit est la valeur du drapeau, jamais la sous-commande.
+            args.next();
+            continue;
+        }
+        if tok.starts_with('-') {
+            continue;
+        }
+        if tok == "build" || tok == "bake" {
+            return true;
+        }
+        if DOCKER_NON_BUILD_VERBS.contains(&tok) {
+            return false;
+        }
+    }
+    false
 }
 
 /// Une ligne de `docker build` qui annonce un échec ou une annulation.
@@ -9996,6 +10032,59 @@ Successfully tagged localhost/app:latest\n";
         assert!(!v(&["docker", "compose", "up", "--build", "-d"]));
         assert!(!v(&["docker", "buildx", "du"]));
         assert!(!v(&["bash", "-lc", "docker build ."]));
+    }
+
+    #[test]
+    fn docker_build_ne_confond_pas_la_valeur_d_un_drapeau_avec_le_verbe() {
+        let v = |args: &[&str]| {
+            command_runs_docker_build(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+        };
+        // Un contexte nommé « build » : la valeur du drapeau global n'est pas
+        // la sous-commande. Ces quatre commandes ne construisent rien.
+        assert!(!v(&["docker", "--context", "build", "ps"]));
+        assert!(!v(&["docker", "-c", "build", "images"]));
+        assert!(!v(&["docker", "--context", "build", "logs", "app"]));
+        assert!(!v(&["podman", "--connection", "build", "ps", "-a"]));
+        // La forme collée était déjà correcte : elle doit le rester.
+        assert!(!v(&["docker", "--context=build", "ps"]));
+        // Mais construire *depuis* ce contexte reste un build.
+        assert!(v(&["docker", "--context", "build", "build", "."]));
+        assert!(v(&["docker", "--context", "build", "buildx", "build", "."]));
+        // Et un drapeau booléen ne doit pas avaler le verbe qui le suit :
+        // sauter aveuglément l'argument d'après casserait ces deux cas.
+        assert!(v(&["docker", "--debug", "build", "."]));
+        assert!(v(&["docker", "--tls", "build", "."]));
+        assert!(v(&["docker", "--context", "distant", "build", "."]));
+    }
+
+    #[test]
+    fn docker_build_mal_route_ne_transformerait_pas_un_ps_en_build() {
+        // Le test de routage ne prouve pas le câblage : on passe ici la chaîne
+        // entière, avec une sortie `docker ps` assez longue pour que le filtre
+        // `docker_build` la détruise au lieu d'être borné par la non-croissance.
+        let mut brut = String::from(
+            "CONTAINER ID   IMAGE          COMMAND      CREATED       STATUS       PORTS     NAMES\n",
+        );
+        for i in 0..40 {
+            brut.push_str(&format!(
+                "c0ffee{i:06}   app:latest     \"/bin/sh\"    2 hours ago   Up 2 hours   8080/tcp  service-{i}\n"
+            ));
+        }
+        let (filtre, sortie) = filter_command_output(
+            &["docker", "--context", "build", "ps"]
+                .map(String::from)
+                .to_vec(),
+            &brut,
+        );
+        assert_ne!(
+            filtre, "docker_build",
+            "un contexte nomme « build » ne doit pas router un `ps` vers le filtre de build"
+        );
+        // Ce que produisait l'ancienne logique, et qu'on n'accepte plus : une
+        // liste de conteneurs résumée en succès de construction.
+        assert!(!sortie.contains("docker build: completed"));
+        assert!(sortie.contains("service-0"));
+        assert!(sortie.contains("service-39"));
     }
 
     fn filter_command_output_routes_vitest_via_npx() {
