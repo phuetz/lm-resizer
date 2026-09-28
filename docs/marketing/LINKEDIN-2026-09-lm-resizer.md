@@ -1,4 +1,4 @@
-# LinkedIn — lm-resizer 0.2.1 (brouillons, à publier par Patrice / page Agile Up)
+# LinkedIn — lm-resizer 0.2.1 (brouillons, à publier sur le profil et la page Agile Up)
 
 Le chiffre ancien « 398 commandes, 222 247 jetons » a été retiré faute de sortie brute et de méthode versionnées. Pour les mesures publiables, utiliser uniquement `bench/README.md`, `bench/resultats.json` et le rapport du banc, avec leurs limites explicites. Ne pas présenter une économie de sortie comme une économie facturée.
 
