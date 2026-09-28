@@ -145,7 +145,13 @@ ONNX path falls back to deterministic detection. ONNX detection is native-only
 
 ```bash
 cargo build
+cargo install --path . --locked
 ```
+
+`cargo build` leaves the development binary at `target/debug/lm-resizer`.
+`cargo install --path . --locked` installs the CLI in Cargo's bin directory
+(usually `~/.cargo/bin`); ensure that directory is on your `PATH` before
+installing the Claude Code plugin.
 
 Release checks and local packaging:
 
@@ -187,7 +193,13 @@ filters, and Dependabot is configured for Cargo, npm, and GitHub Actions.
 
 ## CLI
 
+Use `exec` when LM Resizer runs the command, or `tool-output --command` for
+output already captured from a named command. `compress --input` handles file
+content without knowing which command produced it, so command-specific
+filters such as `docker build` do not apply there.
+
 ```bash
+lm-resizer tool-output --command "docker build" --input docker.txt --json
 lm-resizer compress --input tool-output.txt --json
 lm-resizer compress --input src/Service.cs --json  # indexed Code Explorer symbols when available
 lm-resizer smart src/Service.cs --json  # source summary with the same indexed symbols
@@ -379,7 +391,7 @@ overwriting an existing file. This metadata is not OCR or scene recognition.
 Voice removes common transcript filler tokens, and `ml-status` reports whether
 optional Magika / ONNX classification is enabled.
 
-## Install as a Claude Code plugin (one command)
+## Install as a Claude Code plugin
 
 The repository is its own plugin marketplace. With the `lm-resizer` binary on
 your `PATH`, this installs the skill **and** the MCP server:
