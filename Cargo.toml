@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   ".",
+  "bench",
   "crates/lm-resizer-core",
   "crates/lm-resizer-wasm",
 ]

@@ -267,7 +267,7 @@
   {
     "id": "code_python",
     "category": "code",
-    "file": "corpus/code_python.py",
+    "file": "corpus/code_python.py.fixture",
     "oracle": [
       "checked_total",
       "result > 10000",

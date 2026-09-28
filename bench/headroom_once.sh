@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
-"""One isolated Headroom call; stdout contains only the resulting tool content."""
+#!/bin/sh
+# Adapter for Headroom's public Python API. The interpreter lives in target/banc.
+exec "$1" -c '
 import sys
 from headroom import compress
-
 content = sys.stdin.read()
 messages = [
     {"role": "user", "content": "Diagnose this tool result using its exact facts."},
@@ -14,5 +14,6 @@ messages = [
 result = compress(messages, model="gpt-4o")
 output = result.messages[-1]["content"]
 if not isinstance(output, str):
-    raise TypeError(f"Unexpected compressed content: {type(output)!r}")
+    raise TypeError("Headroom returned non-text content")
 sys.stdout.write(output)
+'
