@@ -2059,9 +2059,12 @@ fn run_exec_command(
         filter_command_output(command, &raw)
     };
 
-    let mut compressed = if matches!(filter.as_str(), "json-passthrough" | "file-read") {
+    let mut compressed = if matches!(
+        filter.as_str(),
+        "json-passthrough" | "aws-json" | "aws" | "file-read"
+    ) {
         CompressReport {
-            content_type: if filter == "json-passthrough" {
+            content_type: if matches!(filter.as_str(), "json-passthrough" | "aws-json") {
                 "json"
             } else {
                 "text"
@@ -2137,20 +2140,24 @@ fn process_captured_output(
     } else {
         filter_command_output(command, raw)
     };
-    let (mut output, mut steps, mut keys) =
-        if keep_raw || matches!(filter.as_str(), "json-passthrough" | "file-read") {
-            (raw.to_string(), Vec::new(), Vec::new())
-        } else {
-            let result = compress_text_with_pipeline_gate(
-                &filtered,
-                query,
-                store,
-                &build_pipeline(),
-                None,
-                false,
-            )?;
-            (result.output, result.steps_applied, result.cache_keys)
-        };
+    let (mut output, mut steps, mut keys) = if keep_raw {
+        (raw.to_string(), Vec::new(), Vec::new())
+    } else if matches!(
+        filter.as_str(),
+        "json-passthrough" | "aws-json" | "aws" | "file-read"
+    ) {
+        (filtered.clone(), Vec::new(), Vec::new())
+    } else {
+        let result = compress_text_with_pipeline_gate(
+            &filtered,
+            query,
+            store,
+            &build_pipeline(),
+            None,
+            false,
+        )?;
+        (result.output, result.steps_applied, result.cache_keys)
+    };
     if first_lost_indispensable_line(&filtered, &output, &filter).is_some() {
         output = filtered.clone();
         steps.push("diagnostic_gate:kept_filtered".to_string());
@@ -2493,11 +2500,25 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     if command_requests_json(command) && serde_json::from_str::<Value>(raw).is_ok() {
         return ("json-passthrough".to_string(), raw.to_string());
     }
+    if command
+        .first()
+        .is_some_and(|program| command_basename(program) == "aws")
+        && serde_json::from_str::<Value>(raw).is_ok()
+    {
+        return ("aws-json".to_string(), raw.to_string());
+    }
     if let Some((name, summary)) = parity_filters::summarize_for_command(command, raw) {
         return (format!("structured:{name}"), summary);
     }
     if rtk_filters::is_prisma_migrate(command) {
         let (name, filtered) = rtk_filters::filter(command, raw).expect("prisma migrate route");
+        return (name.to_string(), filtered);
+    }
+    if command
+        .first()
+        .is_some_and(|program| command_basename(program) == "aws")
+    {
+        let (name, filtered) = rtk_filters::filter(command, raw).expect("aws route");
         return (name.to_string(), filtered);
     }
     let command_text = normalized_command_text(command);
@@ -6639,26 +6660,6 @@ keep_lines_matching = [
 max_lines = 180
 on_empty = "kubectl: no relevant warnings"
 
-[[filters]]
-name = "aws"
-match_command = "^aws\\s+"
-strip_ansi = true
-keep_lines_matching = [
-  "Error",
-  "ERROR",
-  "Failed",
-  "FAILED",
-  "Arn",
-  "Name",
-  "State",
-  "Status",
-  "FunctionName",
-  "InstanceId",
-  "StackName",
-]
-max_lines = 180
-on_empty = "aws: completed"
-
 # ruby-prisma-debut
 # RSpec : l'échec est un en-tête numéroté, puis `expected:` / `got:` et le
 # cadre `# ./fichier.rb:ligne`. `got:` n'est pas un mot du filtre ligne à
@@ -10047,7 +10048,7 @@ expected = "error: bad\n"
             (
                 vec!["aws", "lambda", "list-functions"],
                 "{\"FunctionName\":\"demo\"}\n",
-                "toml:aws",
+                "aws-json",
             ),
         ];
 

@@ -46,6 +46,22 @@ pub fn filter(command: &[String], raw: &str) -> Option<(&'static str, String)> {
         ("golangci-lint", "run", _) => ("golangci-lint", Rule::GoLint),
         ("go", "build", _) => ("go-build", Rule::GoBuild),
         ("curl", _, _) => ("curl", Rule::Curl),
+        ("aws", _, _) => {
+            let table = command
+                .windows(2)
+                .any(|pair| pair[0] == "--output" && pair[1].eq_ignore_ascii_case("table"))
+                || command
+                    .iter()
+                    .any(|arg| arg.eq_ignore_ascii_case("--output=table"));
+            (
+                "aws",
+                if table {
+                    Rule::AwsTable
+                } else {
+                    Rule::Identity
+                },
+            )
+        }
         ("wc", _, _) => ("wc", Rule::Rows),
         _ => return None,
     };
@@ -67,6 +83,7 @@ enum Rule {
     GoBuild,
     GoLint,
     Curl,
+    AwsTable,
     PrismaMigrate,
     Identity,
 }
@@ -122,6 +139,11 @@ fn apply(raw: &str, rule: Rule) -> String {
                 trim.starts_with("% Total    % Received")
                     || trim.starts_with("Dload  Upload   Total")
                     || trim.starts_with("--:--:--")
+            }
+            Rule::AwsTable => {
+                trim.len() > 2
+                    && trim.contains('-')
+                    && trim.chars().all(|ch| matches!(ch, '-' | '+' | '|'))
             }
             Rule::PrismaMigrate => {
                 trim.starts_with("Environment variables loaded from ")
@@ -280,6 +302,30 @@ mod tests {
             filter(&command, raw),
             Some(("ast-grep-json", raw.to_string()))
         );
+    }
+
+    #[test]
+    fn aws_table_removes_only_borders_and_preserves_every_field() {
+        let raw = "------------------------------\n|        ListFunctions       |\n+----------------------------+\n||         Functions        ||\n|+--------------+-----------+|\n|| FunctionName |  Runtime  ||\n|+--------------+-----------+|\n|| sample-api   | python3.12||\n|| sample-job   | nodejs20.x||\n|+--------------+-----------+|\n";
+        let out = run(
+            &["aws", "lambda", "list-functions", "--output", "table"],
+            raw,
+            &[
+                "FunctionName",
+                "Runtime",
+                "sample-api",
+                "python3.12",
+                "sample-job",
+                "nodejs20.x",
+            ],
+        );
+        assert!(!out.contains("+--------------+"));
+        let text = run(
+            &["aws", "lambda", "list-functions", "--output", "text"],
+            "sample-api\tpython3.12\n",
+            &["sample-api", "python3.12"],
+        );
+        assert_eq!(text, "sample-api\tpython3.12\n");
     }
 
     #[test]

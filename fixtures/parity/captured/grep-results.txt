@@ -1,0 +1,3 @@
+src/lib.rs:11:sample_symbol()
+src/lib.rs:21:sample_symbol()
+src/main.rs:42:sample_symbol()

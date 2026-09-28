@@ -1201,6 +1201,7 @@ mod tests {
             return;
         }
 
+        let store_dir = tempfile::tempdir().unwrap();
         let mut proxy = Command::new(&exe)
             .args([
                 "mcp-proxy",
@@ -1213,6 +1214,8 @@ mod tests {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .env("LM_RESIZER_STORE", store_dir.path().join("ccr.sqlite3"))
+            .env("LM_RESIZER_STATE_DIR", store_dir.path().join("state"))
             .spawn()
             .expect("must spawn mcp-proxy");
 
@@ -1273,6 +1276,7 @@ mod tests {
             return;
         }
 
+        let store_dir = tempfile::tempdir().unwrap();
         let mut proxy = Command::new(&exe)
             .args([
                 "mcp-proxy",
@@ -1285,6 +1289,8 @@ mod tests {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .env("LM_RESIZER_STORE", store_dir.path().join("ccr.sqlite3"))
+            .env("LM_RESIZER_STATE_DIR", store_dir.path().join("state"))
             .spawn()
             .expect("must spawn mcp-proxy");
 
@@ -1373,6 +1379,7 @@ mod tests {
             return;
         }
 
+        let store_dir = tempfile::tempdir().unwrap();
         let mut proxy = Command::new(&exe)
             .args([
                 "mcp-proxy",
@@ -1385,6 +1392,8 @@ mod tests {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .env("LM_RESIZER_STORE", store_dir.path().join("ccr.sqlite3"))
+            .env("LM_RESIZER_STATE_DIR", store_dir.path().join("state"))
             .spawn()
             .expect("must spawn mcp-proxy");
 
