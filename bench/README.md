@@ -16,4 +16,6 @@ Le format JSON compact de LM Resizer utilise `columns` et des `rows` positionnel
 
 Le cas Git exige les 46 sujets et un SHA abrégé qui identifie uniquement le commit visé parmi ceux de la fixture. Le cas JSON vérifie les 180 lignes, l'anomalie et trois lignes témoins, y compris avec la table compacte de SmartCrusher. Les tests Rust du harnais protègent ces invariants. La tâche agent reste non évaluée : l'essai antérieur a échoué sur un verrou de sandbox avant toute modification et ne figure pas au classement.
 
+`resultats-avant.json` conserve le premier rejeu sur `753e42c99c338487e1dea98de402cbfecc473cf2` avant les corrections de compression. `resultats.json` et `RAPPORT.md` décrivent le rejeu final ; le rapport indique l'empreinte exacte du binaire compilé depuis son checkout.
+
 Sources officielles : [release RTK](https://github.com/rtk-ai/rtk/releases/tag/v0.50.0), [README RTK](https://github.com/rtk-ai/rtk/blob/develop/README.md), [installation Headroom](https://github.com/headroomlabs-ai/headroom/blob/main/README.md), [API Headroom](https://github.com/headroomlabs-ai/headroom/blob/main/wiki/integration-guide.md).
