@@ -1,0 +1,11 @@
+[xUnit.net 00:00:00.21]     Calc.Tests.CalculTests.Somme_grands [FAIL]
+  Failed Calc.Tests.CalculTests.Somme_grands [< 1 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 300
+Actual:   301
+  Stack Trace:
+     at Calc.Tests.CalculTests.Somme_grands() in /src/CalculTests.cs:line 22
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)
+  Passed Calc.Tests.CalculTests.Autre [1 ms]
+Failed!  - Failed:     1, Passed:    43, Skipped:     1, Total:    45

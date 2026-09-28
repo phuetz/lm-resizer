@@ -1,0 +1,7 @@
+Environment variables loaded from .env
+Prisma schema loaded from prisma/schema.prisma
+Error: P3009
+The migrate found failed migrations in the target database; new migrations will not be applied.
+Migration name: 20260928_add_orders
+Database error: relation orders already exists
+Prisma CLI Version : 5.15.0

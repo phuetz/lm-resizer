@@ -1,0 +1,11 @@
+Environment variables loaded from .env
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": PostgreSQL database "sample" at "localhost:5432"
+2 migrations found in prisma/migrations
+Applying migration `20260928_add_orders`
+The following migration(s) have been applied:
+
+  migrations/20260928_add_orders/migration.sql
+
+All migrations have been successfully applied.
+Prisma CLI Version : 5.15.0

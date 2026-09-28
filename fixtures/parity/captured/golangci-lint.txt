@@ -1,0 +1,4 @@
+level=info msg="golangci-lint has version 1.59.0"
+src/main.go:42:4: Error return value of `run` is not checked (errcheck)
+src/worker.go:31:9: ineffectual assignment to count (ineffassign)
+2 issues found

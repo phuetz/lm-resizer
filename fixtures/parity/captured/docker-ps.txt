@@ -1,0 +1,3 @@
+CONTAINER ID   IMAGE              COMMAND           CREATED      STATUS         PORTS                 NAMES
+abc123def456   sample-api:latest  "./server"        2 days ago   Up 2 days      8080->80/tcp          sample-api
+fed987654321   postgres:16        "docker-entry"    3 days ago   Up 3 days      5432/tcp              sample-db

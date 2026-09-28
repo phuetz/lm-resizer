@@ -1,0 +1,11 @@
+commit abc123def4567890abc123def4567890abc123de
+Author: Example Contributor <example@example.org>
+Date:   Mon Sep 28 10:00:00 2026 +0200
+
+    Fix error handling
+
+commit fed9876543210fed9876543210fed9876543210f
+Author: Another Contributor <another@example.org>
+Date:   Sun Sep 27 09:00:00 2026 +0200
+
+    Add parser tests

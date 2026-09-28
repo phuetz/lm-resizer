@@ -1,0 +1,4 @@
+Formatting code files in workspace '/src/Sample.sln'.
+Formatted code file '/src/Program.cs'.
+Formatted code file '/src/Services/OrderService.cs'.
+Format complete in 00:00:02.347.

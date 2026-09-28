@@ -1,0 +1,4 @@
+2026-09-28T10:00:00Z INFO starting worker
+2026-09-28T10:00:01Z INFO poll complete
+2026-09-28T10:00:02Z Error: failed to load /app/config.yaml:42
+2026-09-28T10:00:03Z Warning: retrying database connection

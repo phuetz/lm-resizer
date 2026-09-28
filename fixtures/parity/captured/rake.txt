@@ -1,0 +1,8 @@
+** Invoke test (first_time)
+** Execute test
+Run options: --seed 18
+** Invoke db:prepare (first_time)
+** Execute db:prepare
+Failure: UserTest#save [test/user_test.rb:19]
+Expected true, got false
+5 tests, 1 failures

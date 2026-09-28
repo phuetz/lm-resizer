@@ -1,0 +1,5 @@
+/src/orders.ts
+  42:9  error  'missingTotal' is not defined  no-undef
+  57:3  warning  Unexpected console statement  no-console
+
+✖ 2 problems (1 error, 1 warning)

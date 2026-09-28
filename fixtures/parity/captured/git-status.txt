@@ -1,0 +1,10 @@
+On branch feature/parser
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+        modified:   src/main.rs
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        tests/parser.rs
+
+no changes added to commit (use "git add" and/or "git commit -a")

@@ -9,6 +9,7 @@ pub mod relevance;
 pub mod signals;
 // Token counting (tiktoken / HF tokenizers) is native-only and reached only by
 // the live-zone dispatcher — never on the wasm `compress` path. See Cargo.toml.
+pub mod output;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tokenizer;
 pub mod transforms;
@@ -24,8 +25,11 @@ use ccr::{CcrStore, InMemoryCcrStore};
 use serde::Serialize;
 use transforms::{
     detect_content_type, CompressionContext, CompressionPipeline, DiffNoise, DiffOffload,
-    JsonMinifier, JsonOffload, LogOffload, LogTemplate, PipelineConfig, SourceCompressor,
+    JsonMinifier, JsonOffload, LogOffload, LogTemplate, PipelineConfig, ProseCompressor,
+    SourceCompressor,
 };
+
+pub use transforms::{SourceCompressionResult, SourceLanguage};
 
 // Re-exports for the live-zone dispatcher (Phase B PR-B2 consumes this).
 // Hoisted to the crate root so the proxy crate gets one stable import
@@ -33,6 +37,10 @@ use transforms::{
 // `cache_control` module public too means downstream code can reach
 // the helper types directly when needed.
 pub use cache_control::compute_frozen_count;
+pub use output::{
+    classify_request_turn, classify_turn, has_concision_instruction, route_effort, steer_verbosity,
+    EffortRoutingError, OutputShapingError, TurnClassification, CONCISION_PROMPT,
+};
 
 /// Stable high-level compression report for embedding applications.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -125,6 +133,7 @@ pub fn default_pipeline() -> CompressionPipeline {
         .with_reformat(JsonMinifier)
         .with_reformat(LogTemplate::new(cfg.reformat.log_template))
         .with_reformat(SourceCompressor::default())
+        .with_offload(ProseCompressor)
         .with_offload(JsonOffload::new(cfg.offload.json))
         .with_offload(LogOffload::new(cfg.bloat.log))
         .with_offload(DiffOffload::new(cfg.bloat.diff))

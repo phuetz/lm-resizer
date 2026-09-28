@@ -1,0 +1,19 @@
+diff --git a/src/main.rs b/src/main.rs
+index 0000001..0000002 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,2 +1,13 @@
+ context line
+-old implementation
++changed line 0
++changed line 1
++changed line 2
++changed line 3
++changed line 4
++changed line 5
++changed line 6
++changed line 7
++changed line 8
++changed line 9
++changed line 10
++changed line 11

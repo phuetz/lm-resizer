@@ -1,0 +1,21 @@
+START [ 0.01s] sample::pass_01
+PASS [ 0.02s] sample::pass_01
+START [ 0.01s] sample::pass_02
+PASS [ 0.02s] sample::pass_02
+START [ 0.01s] sample::pass_03
+PASS [ 0.02s] sample::pass_03
+START [ 0.01s] sample::pass_04
+PASS [ 0.02s] sample::pass_04
+START [ 0.01s] sample::pass_05
+PASS [ 0.02s] sample::pass_05
+START [ 0.01s] sample::pass_06
+PASS [ 0.02s] sample::pass_06
+START [ 0.01s] sample::pass_07
+PASS [ 0.02s] sample::pass_07
+START [ 0.01s] sample::pass_08
+PASS [ 0.02s] sample::pass_08
+FAIL [ 0.03s] sample::fails_on_empty
+---- sample::fails_on_empty stdout ----
+thread 'sample::fails_on_empty' panicked at src/lib.rs:42:9:
+assertion failed: expected nonempty value
+Summary [ 0.20s] 8 passed, 1 failed, 9 run

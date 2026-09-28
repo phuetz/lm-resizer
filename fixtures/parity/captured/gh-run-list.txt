@@ -1,0 +1,3 @@
+STATUS  TITLE                 WORKFLOW   BRANCH          EVENT  ID
+failure Parser tests         CI         feature/parser  push   42
+success Documentation build  CI         main            push   43

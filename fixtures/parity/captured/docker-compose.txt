@@ -1,0 +1,8 @@
+[+] Running 3/3
+[+] Building 3/3
+ Container sample-db Started
+ Container sample-cache Started
+ Container sample-api Error
+sample-api | Failed to bind port
+sample-api | at src/server.cs:42
+dependency failed to start: container sample-api exited (1)

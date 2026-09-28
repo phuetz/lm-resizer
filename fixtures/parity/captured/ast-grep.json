@@ -1,0 +1,4 @@
+[
+  {"file":"src/lib.rs","line":42,"column":9,"text":"fn calculate_total() {","ruleId":"sample-rule"},
+  {"file":"src/main.rs","line":80,"column":3,"text":"fn calculate_total() {","ruleId":"sample-rule"}
+]

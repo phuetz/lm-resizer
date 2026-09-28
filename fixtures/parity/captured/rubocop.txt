@@ -1,0 +1,5 @@
+Inspecting 120 files
+CCCCCCCCCCCCCCCCCCCC
+app/models/user.rb:17:4: C: Style/GuardClause: Use a guard clause.
+app/jobs/sync_job.rb:28:9: W: Lint/ShadowingOuterLocalVariable: Shadowing outer local variable.
+120 files inspected, 2 offenses detected

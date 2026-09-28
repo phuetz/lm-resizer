@@ -1,0 +1,5 @@
+ id | name  | status
+----+-------+--------
+  1 | Alice | active
+  2 | Bob   | failed
+(2 rows)

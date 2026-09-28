@@ -1,0 +1,15 @@
+   Compiling sample v0.1.0 (/src/sample)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.00s
+     Running unittests src/lib.rs
+
+running 2 tests
+test tests::passes ... ok
+test tests::fails ... FAILED
+
+failures:
+
+---- tests::fails stdout ----
+thread 'tests::fails' panicked at src/lib.rs:42:9:
+assertion `left == right` failed
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored

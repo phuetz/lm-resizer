@@ -1,0 +1,14 @@
+commit abc123def456
+Author: Example Contributor <example@example.org>
+Date:   Mon Sep 28 2026
+
+    Repair error handling
+
+diff --git a/src/main.rs b/src/main.rs
+index 0000001..0000002 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,2 +1,2 @@
+ context line
+-old implementation
++new implementation

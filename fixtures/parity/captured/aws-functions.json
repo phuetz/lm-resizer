@@ -1,0 +1,7 @@
+{
+  "Functions": [
+    {"FunctionName":"sample-import","FunctionArn":"arn:aws:lambda:eu-west-1:000000000000:function:sample-import","Runtime":"python3.12","LastModified":"2026-09-28T00:00:00Z","State":"Active"},
+    {"FunctionName":"sample-export","FunctionArn":"arn:aws:lambda:eu-west-1:000000000000:function:sample-export","Runtime":"nodejs20.x","LastModified":"2026-09-27T00:00:00Z","State":"Active"}
+  ],
+  "NextMarker": null
+}

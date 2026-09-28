@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 /// Lines that report a failure.
 pub static FAILURE_SIGNAL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)##\[error\]|\berror\b|\bfail(ed|ure|s)?\b|\bFAIL\b|✘|✗|×|exception|panic|traceback|assertion|\b(expected|actual|received)\b|:line\s+[0-9]+|\bvalues differ\b|\bdiff(erence)?\b|exit code [1-9]|timed? ?out",
+        r"(?i)##\[error\]|\berror\b|\bfail(ed|ure|s)?\b|\bFAIL\b|✘|✗|×|exception|panic|traceback|\bassertion\b|\b(expected|actual|received)\b|:line\s+[0-9]+|\bvalues differ\b|\bdiff(erence)?\b|exit code [1-9]|timed? ?out",
     )
     .expect("valid failure regex")
 });

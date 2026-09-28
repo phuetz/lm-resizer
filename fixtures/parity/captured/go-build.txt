@@ -1,0 +1,5 @@
+go: downloading example.org/module v1.2.3
+go: downloading example.org/another v0.4.5
+# example.org/sample
+./main.go:17:2: undefined: MissingSymbol
+./worker.go:31:9: cannot use count (variable of type int) as string value

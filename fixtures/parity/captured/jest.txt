@@ -1,0 +1,10 @@
+FAIL tests/orders.test.ts
+  ● orders › calculates total
+
+    expect(received).toBe(expected)
+    Expected: 300
+    Received: 301
+      at tests/orders.test.ts:42:9
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 3 passed, 4 total

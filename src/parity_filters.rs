@@ -661,15 +661,13 @@ fn parse_trx(raw: &str) -> Option<TrxReport> {
                 capture = None;
             }
             XmlEv::Start { name, empty, .. }
-                if in_error && (name == "Message" || name == "StackTrace") =>
+                if in_error && (name == "Message" || name == "StackTrace") && !empty =>
             {
-                if !empty {
-                    capture = Some(if name == "Message" {
-                        Capture::Message
-                    } else {
-                        Capture::Stack
-                    });
-                }
+                capture = Some(if name == "Message" {
+                    Capture::Message
+                } else {
+                    Capture::Stack
+                });
             }
             XmlEv::End { name } if name == "Message" || name == "StackTrace" => {
                 capture = None;
@@ -1516,6 +1514,7 @@ Actual:   301</Message>
         buf.extend(text.as_bytes());
     }
 
+    #[allow(clippy::too_many_arguments)] // Encodes the eight fields in a binary fixture record.
     fn push_diagnostic(
         buf: &mut Vec<u8>,
         kind: u32,

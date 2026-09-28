@@ -1,0 +1,4 @@
+REPOSITORY TAG IMAGE ID CREATED SIZE
+sample-api latest abc123 2 days ago 120MB
+sample-db stable def456 3 weeks ago 90MB
+<none> <none> 765fed 4 months ago 42MB
