@@ -21,6 +21,7 @@ stage="$dist/lm-resizer-$version-$(uname -s | tr '[:upper:]' '[:lower:]')-$(unam
 rm -rf "$stage"
 mkdir -p "$stage"
 cp "$bin" "$stage/lm-resizer"
+cp "$root/LICENSE" "$stage/"
 cp "$root/README.md" "$stage/"
 cp "$root/CONTRIBUTING.md" "$stage/"
 cp "$root/SECURITY.md" "$stage/"
