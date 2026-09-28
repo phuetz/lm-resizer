@@ -1,21 +1,17 @@
 {
-  "generated_at_utc": "2026-07-02T19:42:44.557Z",
-  "version": "0.2.0",
+  "generated_at_utc": "2026-09-28T14:16:12.348Z",
+  "version": "0.2.2",
   "cargo_versions": {
-    "root": "0.2.0",
-    "core": "0.2.0",
-    "wasm": "0.2.0"
+    "root": "0.2.2",
+    "core": "0.2.2",
+    "wasm": "0.2.2"
   },
-  "npm_version": "0.2.0",
+  "npm_version": "0.2.2",
   "wasm_tarballs": [
-    "lm-resizer-wasm-0.1.0.tgz",
-    "phuetz-lm-resizer-0.1.0.tgz",
-    "phuetz-lm-resizer-0.2.0.tgz",
-    "phuetz-lm-resizer-wasm-0.1.0.tgz"
+    "phuetz-lm-resizer-0.2.2.tgz"
   ],
   "binary_archives": [
-    "lm-resizer-0.1.0-windows-x86_64.zip",
-    "lm-resizer-0.2.0-linux-x86_64.tar.gz"
+    "lm-resizer-0.2.2-linux-x86_64.tar.gz"
   ],
   "provider_cache_fixtures": [
     "anthropic-messages.json",
