@@ -3246,11 +3246,15 @@ const DOCKER_NON_BUILD_VERBS: [&str; 14] = [
 ///
 /// La position du verbe n'est pas fixe : `docker --context distant build .`
 /// place un drapeau global et **sa valeur** avant `build`. On cherche donc
-/// `build` parmi les arguments, en s'arrêtant au premier verbe concurrent.
+/// `build` ou `bake` parmi les arguments, en s'arrêtant au premier verbe
+/// concurrent. `bake` est la forme buildx multi-cibles ; sa sortie a la même
+/// forme. `compose up --build` n'est pas pris : ses logs de services ne sont
+/// pas un build.
 ///
 /// Limite assumée : un contexte ou un réseau qui s'appellerait littéralement
 /// « build » (`docker --context build ps`) serait pris à tort. Le coût se
 /// limite à un filtre mal choisi, que la porte de non-croissance borne.
+/// Un `bash -lc "docker build …"` n'est pas reconnu : le programme est le shell.
 fn command_runs_docker_build(command: &[String]) -> bool {
     let Some(first) = command.first().map(|s| command_basename(s)) else {
         return false;
@@ -3267,18 +3271,71 @@ fn command_runs_docker_build(command: &[String]) -> bool {
         .filter(|tok| !tok.starts_with('-'))
         .map(String::as_str)
         .take_while(|tok| !DOCKER_NON_BUILD_VERBS.contains(tok))
-        .any(|tok| tok == "build")
+        .any(|tok| tok == "build" || tok == "bake")
 }
 
-/// Une ligne de `docker build` qui annonce un échec.
+/// Une ligne de `docker build` qui annonce un échec ou une annulation.
 ///
 /// BuildKit dit l'échec trois fois — sur l'étape (`#8 ERROR:`), dans le rappel
-/// (`> [4/9] RUN …`) et en conclusion (`failed to solve:`). Reconnaître
-/// n'importe laquelle suffit à basculer le filtre en mode « tout garder ».
+/// (`> [4/9] RUN …`) et en conclusion (`failed to solve:`). Le builder
+/// classique (`DOCKER_BUILDKIT=0`) ne dit rien de tout cela : sa seule phrase
+/// d'échec est `returned a non-zero code`. Une annulation n'est souvent qu'une
+/// ligne `CANCELED`. Aucune de ces formes ne doit être lue comme un succès.
 fn docker_build_line_is_failure(line: &str) -> bool {
-    line.contains("ERROR:")
-        || line.contains("failed to solve")
-        || line.contains("did not complete successfully")
+    let lower = line.to_ascii_lowercase();
+    lower.contains("error:")
+        || lower.contains(" error ")
+        || lower.starts_with("error:")
+        || lower.starts_with("error ")
+        || lower.contains("failed to solve")
+        || lower.contains("did not complete successfully")
+        || lower.contains("returned a non-zero code")
+        || lower.contains("executor failed")
+        || lower.contains("canceled")
+        || lower.contains("cancelled")
+}
+
+/// En-tête d'étape, builder classique (`Step N/M`), Buildah (`STEP N/M`) ou
+/// BuildKit plain (`#N [stage] RUN …`). Sert à rattacher la sortie d'un `RUN`
+/// à l'échec qui la conclut : le classique ne répète pas cette sortie après.
+fn docker_build_line_is_step_header(line: &str) -> bool {
+    let t = line.trim_start();
+    if t.starts_with("Step ") || t.starts_with("STEP ") {
+        return true;
+    }
+    let Some(rest) = t.strip_prefix('#') else {
+        return false;
+    };
+    let Some((step, rest)) = rest.split_once(' ') else {
+        return false;
+    };
+    step.chars().all(|c| c.is_ascii_digit()) && rest.starts_with('[')
+}
+
+/// Identité de l'image produite, sous les formes que les builders écrivent
+/// vraiment : BuildKit (`writing image`, `naming to`, `unpacking to`,
+/// `pushing manifest for`), builder classique (`Successfully built` /
+/// `tagged`), `docker build -q` (une ligne `sha256:` et rien d'autre) et
+/// Podman (`COMMIT`).
+fn docker_build_line_is_identity(line: &str) -> bool {
+    let trimmed = line.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("writing image")
+        || lower.contains("naming to")
+        || lower.contains("unpacking to")
+        || lower.contains("pushing manifest for")
+        || lower.contains("successfully built")
+        || lower.contains("successfully tagged")
+    {
+        return true;
+    }
+    if trimmed.starts_with("COMMIT ") {
+        return true;
+    }
+    let Some(hex) = trimmed.strip_prefix("sha256:") else {
+        return false;
+    };
+    (12..=64).contains(&hex.len()) && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Le bruit mécanique de BuildKit : un préfixe `#N` suivi d'un mot d'état.
@@ -3301,14 +3358,7 @@ fn docker_build_line_is_mechanical(line: &str) -> bool {
     matches!(
         rest.split_whitespace().next(),
         Some(
-            "DONE"
-                | "CACHED"
-                | "CANCELED"
-                | "transferring"
-                | "extracting"
-                | "resolve"
-                | "preparing"
-                | "sha256:"
+            "DONE" | "CACHED" | "transferring" | "extracting" | "resolve" | "preparing" | "sha256:"
         )
     ) || rest.starts_with("exporting layers")
         || rest.starts_with("exporting manifest")
@@ -3316,27 +3366,36 @@ fn docker_build_line_is_mechanical(line: &str) -> bool {
         || rest.starts_with("sha256:")
 }
 
-/// Sortie d'un `docker build` (BuildKit).
+/// Sortie d'un `docker build` (BuildKit, builder classique, buildx, podman).
 ///
 /// Un build qui réussit est presque entièrement mécanique : numéros d'étape,
-/// octets transférés, durées, couches en cache. Un build qui échoue se lit au
-/// contraire en entier — le bloc `ERROR:`, le rappel de l'étape fautive et
-/// l'extrait du Dockerfile sont la seule chose qui compte, et les couper
-/// rendrait la sortie inutile. Le filtre traite donc les deux cas séparément
-/// plutôt que d'appliquer la même coupe aux deux.
+/// octets transférés, durées, couches en cache. On n'en garde que les
+/// identités d'image et les avertissements. Un build qui échoue se lit depuis
+/// l'en-tête de l'étape fautive : le classique écrit la sortie du `RUN` *avant*
+/// `returned a non-zero code` et ne la répète pas. Remplacer ce bloc par
+/// `docker build: completed` serait un faux succès. Ce message n'est émis que
+/// lorsqu'il ne reste aucune ligne utile et aucun signal d'échec.
 fn filter_docker_build(raw: &str) -> String {
+    let lines: Vec<&str> = raw.lines().collect();
+    let keep_from = lines
+        .iter()
+        .position(|line| docker_build_line_is_failure(line))
+        .map(|idx| {
+            let mut start = idx;
+            for i in (0..idx).rev() {
+                if docker_build_line_is_step_header(lines[i]) {
+                    start = i;
+                    break;
+                }
+            }
+            start
+        });
+
     let mut kept = Vec::new();
     let mut skipped = 0usize;
-    let mut in_failure = false;
-
-    for line in raw.lines() {
-        if !in_failure && docker_build_line_is_failure(line) {
-            in_failure = true;
-        }
-        // À partir du premier signe d'échec, on ne trie plus : le diagnostic
-        // est un bloc, et une ligne retirée au milieu le rend illisible.
-        if in_failure {
-            kept.push(line.to_string());
+    for (i, line) in lines.iter().enumerate() {
+        if keep_from.is_some_and(|start| i >= start) {
+            kept.push((*line).to_string());
             continue;
         }
         if line.trim().is_empty() || docker_build_line_is_mechanical(line) {
@@ -3344,24 +3403,27 @@ fn filter_docker_build(raw: &str) -> String {
             continue;
         }
         let lower = line.to_ascii_lowercase();
-        // `npm ERR!` et consorts ne contiennent pas le mot « error » : sans ce
-        // motif-là, une sortie d'outil en détresse passerait pour du bruit.
+        // `npm ERR!` ne contient pas le mot « error ». « deprecat » couvre
+        // `deprecated` et `DEPRECATION NOTICE`, que le builder écrit sans
+        // le mot « warn ».
         if lower.contains("error")
             || lower.contains("err!")
             || lower.contains("warn")
-            || lower.contains("deprecated")
+            || lower.contains("deprecat")
             || lower.contains("failed")
             || lower.contains("fatal")
-            || line.contains("writing image")
-            || line.contains("naming to")
+            || docker_build_line_is_identity(line)
         {
-            kept.push(line.to_string());
+            kept.push((*line).to_string());
         } else {
             skipped += 1;
         }
     }
 
     if kept.is_empty() {
+        if lines.iter().any(|line| docker_build_line_is_failure(line)) {
+            return append_omitted(lines.iter().map(|line| (*line).to_string()).collect(), 0);
+        }
         "docker build: completed\n".to_string()
     } else {
         append_omitted(kept, skipped)
@@ -9701,6 +9763,239 @@ expected = "error: bad\n"
             sortie.len(),
             brut.len()
         );
+    }
+
+    /// Builder classique (`DOCKER_BUILDKIT=0`) : l'échec tient en une phrase
+    /// sans le mot « error ». Le filtre ne doit pas la remplacer par un succès.
+    #[test]
+    fn docker_build_classique_echoue_ne_devient_pas_un_succes() {
+        let brut = "\
+Sending build context to Docker daemon  3.072kB\n\
+Step 1/2 : FROM alpine:3.19\n\
+ ---> 6b6e8e0b0c2a\n\
+Step 2/2 : RUN false\n\
+ ---> Running in 0abc123def45\n\
+The command '/bin/sh -c false' returned a non-zero code: 1\n";
+        let (filtre, sortie) = filter_command_output(
+            &["docker", "build", "--no-cache", "."]
+                .map(String::from)
+                .to_vec(),
+            brut,
+        );
+        assert_eq!(filtre, "docker_build");
+        assert!(
+            !sortie.contains("docker build: completed"),
+            "faux succes : {sortie:?}"
+        );
+        assert!(
+            sortie.contains("returned a non-zero code: 1"),
+            "synthese d'echec perdue : {sortie:?}"
+        );
+        assert!(
+            sortie.contains("Step 2/2 : RUN false"),
+            "etape fautive perdue : {sortie:?}"
+        );
+    }
+
+    /// La sortie du `RUN` précède le résumé classique et n'est pas répétée.
+    #[test]
+    fn docker_build_classique_conserve_la_sortie_du_run_en_echec() {
+        let brut = "\
+Step 1/2 : FROM gcc:13\n\
+ ---> aaa111\n\
+Step 2/2 : RUN cc main.c\n\
+ ---> Running in bbb222\n\
+/usr/bin/ld: /tmp/ccx.o: undefined reference to `main'\n\
+collect2: error: ld returned 1 exit status\n\
+The command '/bin/sh -c cc main.c' returned a non-zero code: 1\n";
+        let (_, sortie) =
+            filter_command_output(&["docker", "build", "."].map(String::from).to_vec(), brut);
+        assert!(
+            sortie.contains("undefined reference to `main'"),
+            "diagnostic du linker perdu : {sortie:?}"
+        );
+        assert!(
+            sortie.contains("returned a non-zero code: 1"),
+            "code de sortie perdu : {sortie:?}"
+        );
+        assert!(!sortie.contains("docker build: completed"), "{sortie:?}");
+    }
+
+    #[test]
+    fn docker_build_classique_reussi_garde_l_identite_image() {
+        let mut brut = String::new();
+        for n in 1..=24 {
+            brut.push_str(&format!(
+                "Step {n}/24 : RUN echo etape {n}\n ---> deadbeef{n:04}\n"
+            ));
+        }
+        brut.push_str(
+            "Successfully built 6b6e8e0b0c2a9f1c\n\
+             Successfully tagged registry.example/app:1.2.3\n",
+        );
+        let (filtre, sortie) = filter_command_output(
+            &["docker", "build", "-t", "registry.example/app:1.2.3", "."]
+                .map(String::from)
+                .to_vec(),
+            &brut,
+        );
+        assert_eq!(filtre, "docker_build");
+        assert!(
+            sortie.contains("Successfully built 6b6e8e0b0c2a9f1c"),
+            "{sortie}"
+        );
+        assert!(
+            sortie.contains("Successfully tagged registry.example/app:1.2.3"),
+            "{sortie}"
+        );
+        assert!(!sortie.contains("docker build: completed"), "{sortie}");
+        assert!(
+            sortie.len() < brut.len() / 2,
+            "{} vs {}",
+            sortie.len(),
+            brut.len()
+        );
+    }
+
+    #[test]
+    fn docker_build_quiet_garde_le_sha_stdout() {
+        let brut = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n";
+        let (_, sortie) = filter_command_output(
+            &["docker", "build", "-q", "-t", "app", "."]
+                .map(String::from)
+                .to_vec(),
+            brut,
+        );
+        assert!(
+            sortie.contains(
+                "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            ),
+            "identite -q perdue : {sortie:?}"
+        );
+        assert!(!sortie.contains("docker build: completed"), "{sortie:?}");
+    }
+
+    /// `-q` écrit l'id sur stdout et le progrès sur stderr, réunis par le outil.
+    #[test]
+    fn docker_build_quiet_conserve_le_sha_meme_si_stderr_est_present() {
+        let brut = "\
+sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\
+[stderr]\n\
+#1 [internal] load build definition from Dockerfile\n\
+#1 transferring dockerfile: 12B done\n\
+#1 DONE 0.0s\n";
+        let (_, sortie) = filter_command_output(
+            &["docker", "build", "--quiet", "."]
+                .map(String::from)
+                .to_vec(),
+            brut,
+        );
+        assert!(
+            sortie.contains(
+                "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            ),
+            "sha stdout perdu derriere stderr : {sortie:?}"
+        );
+    }
+
+    #[test]
+    fn docker_buildx_push_garde_le_digest_publie() {
+        let brut = "\
+#11 exporting to image\n\
+#11 pushing layers 0.4s done\n\
+#11 pushing manifest for docker.io/library/app:1@sha256:9f1c2b3a4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8 0.2s done\n\
+#11 DONE 0.7s\n";
+        let (filtre, sortie) = filter_command_output(
+            &["docker", "buildx", "build", "--push", "-t", "app:1", "."]
+                .map(String::from)
+                .to_vec(),
+            brut,
+        );
+        assert_eq!(filtre, "docker_build");
+        assert!(
+            sortie.contains("pushing manifest for docker.io/library/app:1@sha256:9f1c2b3a4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8"),
+            "digest publie perdu : {sortie:?}"
+        );
+        assert!(!sortie.contains("docker build: completed"), "{sortie:?}");
+    }
+
+    #[test]
+    fn docker_build_annulation_n_est_pas_un_succes() {
+        let brut = "\
+#3 [1/2] RUN sleep 100\n\
+#3 CANCELED\n";
+        let (_, sortie) =
+            filter_command_output(&["docker", "build", "."].map(String::from).to_vec(), brut);
+        assert!(
+            !sortie.contains("docker build: completed"),
+            "annulation presentee comme un succes : {sortie:?}"
+        );
+        assert!(sortie.contains("CANCELED"), "{sortie:?}");
+    }
+
+    #[test]
+    fn docker_build_garde_une_deprecation_sans_le_mot_deprecated() {
+        let brut = "\
+#4 [1/1] RUN true\n\
+#4 DEPRECATION NOTICE: the legacy builder frontend is going away\n\
+#4 DONE 0.1s\n";
+        let (_, sortie) =
+            filter_command_output(&["docker", "build", "."].map(String::from).to_vec(), brut);
+        assert!(
+            sortie.contains("DEPRECATION NOTICE"),
+            "avertissement de depreciation perdu : {sortie:?}"
+        );
+    }
+
+    #[test]
+    fn podman_build_reussi_garde_le_tag() {
+        let brut = "\
+STEP 1/1: FROM alpine\n\
+COMMIT localhost/app:latest\n\
+--> 9f1c2b3a4d5e\n\
+Successfully tagged localhost/app:latest\n";
+        let (filtre, sortie) = filter_command_output(
+            &["podman", "build", "-t", "localhost/app:latest", "."]
+                .map(String::from)
+                .to_vec(),
+            brut,
+        );
+        assert_eq!(filtre, "docker_build");
+        assert!(
+            sortie.contains("Successfully tagged localhost/app:latest"),
+            "{sortie}"
+        );
+        assert!(sortie.contains("COMMIT localhost/app:latest"), "{sortie}");
+        assert!(!sortie.contains("docker build: completed"), "{sortie:?}");
+    }
+
+    #[test]
+    fn docker_build_route_bake_et_refuse_compose_up() {
+        let v = |args: &[&str]| {
+            command_runs_docker_build(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+        };
+        assert!(v(&[
+            "docker",
+            "buildx",
+            "bake",
+            "-f",
+            "docker-bake.hcl",
+            "web"
+        ]));
+        assert!(v(&["docker", "bake", "web"]));
+        assert!(v(&[
+            "docker",
+            "--context",
+            "distant",
+            "buildx",
+            "build",
+            "--push",
+            "."
+        ]));
+        // `up --build` mélange des logs de services : ce n'est pas un build seul.
+        assert!(!v(&["docker", "compose", "up", "--build", "-d"]));
+        assert!(!v(&["docker", "buildx", "du"]));
+        assert!(!v(&["bash", "-lc", "docker build ."]));
     }
 
     fn filter_command_output_routes_vitest_via_npx() {
