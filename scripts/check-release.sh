@@ -15,5 +15,6 @@ cargo build --release
 "$root/scripts/release-evidence.sh"
 "$root/scripts/generate-checksums.sh"
 "$root/scripts/check-publish-readiness.sh" >/dev/null
+"$root/scripts/test-install-grok-skill.sh"
 
 printf '%s\n' "lm-resizer release check passed"
