@@ -1,0 +1,4 @@
+def total(items):
+    subtotal = sum(items)
+    tax = subtotal * 0.2
+    return subtotal + tax

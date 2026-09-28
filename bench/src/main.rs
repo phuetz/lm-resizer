@@ -221,6 +221,7 @@ fn missing_oracle(case: &Case, output: &str) -> Vec<String> {
     match case.id.as_str() {
         "git_log" => git_log_missing(case, output),
         "json_large" => json_missing(case, output),
+        "dotnet_ok" => dotnet_ok_missing(case, output),
         "npm_ok" => npm_ok_missing(case, output),
         "pytest_ok" => pytest_ok_missing(case, output),
         _ => case
@@ -229,6 +230,17 @@ fn missing_oracle(case: &Case, output: &str) -> Vec<String> {
             .filter(|fact| !output.contains(fact.as_str()))
             .cloned()
             .collect(),
+    }
+}
+
+fn dotnet_ok_missing(case: &Case, output: &str) -> Vec<String> {
+    let passed = Regex::new(r"(?i)(?:passed\s*:\s*65|65\s+tests\s+passed|65\s+passed)")
+        .unwrap()
+        .is_match(output);
+    if passed {
+        Vec::new()
+    } else {
+        case.oracle.clone()
     }
 }
 
@@ -601,18 +613,20 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
         .output()?;
     let commit = String::from_utf8_lossy(&commit.stdout).trim().to_string();
     let binary_hash = format!("{:x}", Sha256::digest(fs::read(lm_bin)?));
-    let covers_all = cases.iter().all(|case| {
-        let lm = row_for(rows, &case.id, "LM Resizer");
-        lm.oracle_retention == 1.0
-            && lm.error.is_none()
-            && TOOLS[1..]
+    let lost_cases: Vec<&str> = cases
+        .iter()
+        .filter_map(|case| {
+            let lm = row_for(rows, &case.id, "LM Resizer");
+            TOOLS[1..]
                 .iter()
-                .all(|tool| lm.qualified_saving >= row_for(rows, &case.id, tool).qualified_saving)
-    });
-    let verdict = if covers_all {
-        "Sur ces 22 fixtures, LM Resizer est devant ou à égalité sur chaque économie qualifiée, avec tous ses oracles complets. La généralisation hors de ce corpus n'est pas démontrée."
+                .any(|tool| lm.qualified_saving < row_for(rows, &case.id, tool).qualified_saving)
+                .then_some(case.id.as_str())
+        })
+        .collect();
+    let verdict = if lost_cases.is_empty() {
+        "Sur ces 22 fixtures, LM Resizer est devant ou à égalité sur chaque économie qualifiée. La généralisation hors de ce corpus n'est pas démontrée.".to_string()
     } else {
-        "Aucune supériorité cas par cas démontrée."
+        format!("Sur ces 22 fixtures, LM Resizer est derrière sur {} cas : {}. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée.", lost_cases.len(), lost_cases.join(", "))
     };
     let mut report = format!("# Banc comparatif LM Resizer / RTK / Headroom\n\n{verdict} Une économie ne compte que si l'oracle est intégralement conservé.\n\n## Versions et méthode\n\n- Checkout `{commit}` ; SHA-256 du binaire LM Resizer `{binary_hash}`.\n- RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.\n- Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.\n- RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.\n- Les chemins HOME/checkout sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.\n- Latence : processus complet, démarrage Python de Headroom compris.\n");
     if let Ok(proof) =
@@ -694,7 +708,7 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
         ));
     }
     report.push_str("\n## Cas encore derrière un concurrent\n\n");
-    if covers_all {
+    if lost_cases.is_empty() {
         report.push_str("Aucun sur les 22 fixtures de ce banc.\n");
     }
     for case in cases {
@@ -801,6 +815,56 @@ mod tests {
             assert!(!case.oracle.is_empty(), "{}", case.id);
             assert!(missing_oracle(&case, &original).is_empty(), "{}", case.id);
         }
+    }
+
+    #[test]
+    fn captured_fixtures_have_real_tool_structure() {
+        let rust = fs::read_to_string(bench_dir().join("corpus/compile_error.txt")).unwrap();
+        assert!(rust.contains("error[E0308]: mismatched types\n --> src/main.rs:2:22"));
+        assert!(rust.contains("error: could not compile `atlas-ledger`"));
+
+        let dotnet = fs::read_to_string(bench_dir().join("corpus/dotnet_ok.txt")).unwrap();
+        assert!(dotnet.contains("Passed!  - Failed:     0, Passed:    65"));
+        assert!(dotnet_ok_missing(
+            cases().iter().find(|case| case.id == "dotnet_ok").unwrap(),
+            "ok dotnet test: 65 tests passed, 0 warnings in 1 projects"
+        )
+        .is_empty());
+
+        let diff = fs::read_to_string(bench_dir().join("corpus/git_diff.txt")).unwrap();
+        let hunk = Regex::new(r"^@@ -\d+,(\d+) \+\d+,(\d+) @@").unwrap();
+        let mut expected = None;
+        let mut seen = (0, 0);
+        let mut hunks = 0;
+        for line in diff.lines() {
+            if let Some(captures) = hunk.captures(line) {
+                if let Some(counts) = expected {
+                    assert_eq!(seen, counts);
+                }
+                expected = Some((
+                    captures[1].parse::<usize>().unwrap(),
+                    captures[2].parse::<usize>().unwrap(),
+                ));
+                seen = (0, 0);
+                hunks += 1;
+            } else if line.starts_with("diff --git") {
+                if let Some(counts) = expected.take() {
+                    assert_eq!(seen, counts);
+                }
+            } else if expected.is_some() {
+                match line.as_bytes().first() {
+                    Some(b' ') => {
+                        seen.0 += 1;
+                        seen.1 += 1;
+                    }
+                    Some(b'-') => seen.0 += 1,
+                    Some(b'+') => seen.1 += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(seen, expected.unwrap());
+        assert_eq!(hunks, 2);
     }
 
     #[test]

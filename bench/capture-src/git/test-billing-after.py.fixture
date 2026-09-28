@@ -1,0 +1,5 @@
+from src.billing import total
+def test_total():
+    assert total([5]) == 6
+def test_rounding():
+    assert total([1.005]) == 1.21

@@ -28,8 +28,7 @@
     "category": "tests",
     "file": "corpus/dotnet_ok.txt",
     "oracle": [
-      "Test Run Successful",
-      "Passed: 65"
+      "65 passed"
     ],
     "rtk_filter": null,
     "command": "dotnet test"
@@ -103,13 +102,13 @@
     "file": "corpus/git_diff.txt",
     "oracle": [
       "src/billing.py",
-      "@@ -17,7 +17,7 @@",
+      "@@ -1,4 +1,4 @@",
       "-    return subtotal + tax",
       "+    return round(subtotal + tax, 2)",
       "tests/test_billing.py",
       "test_rounding",
       "1.005",
-      "1.01"
+      "1.21"
     ],
     "rtk_filter": "git-diff",
     "command": "git diff"
@@ -231,10 +230,9 @@
     "category": "build",
     "file": "corpus/compile_error.txt",
     "oracle": [
-      "src/ledger.rs:73:18",
+      "src/main.rs:2:22",
       "error[E0308]",
-      "expected `i64`, found `String`",
-      "atlas-ledger"
+      "expected `i64`, found `String`"
     ],
     "rtk_filter": null,
     "command": "cargo build"

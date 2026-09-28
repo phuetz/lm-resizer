@@ -1,79 +1,10 @@
-Compiling module 000 ........................................ ok
-Compiling module 001 ........................................ ok
-Compiling module 002 ........................................ ok
-Compiling module 003 ........................................ ok
-Compiling module 004 ........................................ ok
-Compiling module 005 ........................................ ok
-Compiling module 006 ........................................ ok
-Compiling module 007 ........................................ ok
-Compiling module 008 ........................................ ok
-Compiling module 009 ........................................ ok
-Compiling module 010 ........................................ ok
-Compiling module 011 ........................................ ok
-Compiling module 012 ........................................ ok
-Compiling module 013 ........................................ ok
-Compiling module 014 ........................................ ok
-Compiling module 015 ........................................ ok
-Compiling module 016 ........................................ ok
-Compiling module 017 ........................................ ok
-Compiling module 018 ........................................ ok
-Compiling module 019 ........................................ ok
-Compiling module 020 ........................................ ok
-Compiling module 021 ........................................ ok
-Compiling module 022 ........................................ ok
-Compiling module 023 ........................................ ok
-Compiling module 024 ........................................ ok
-Compiling module 025 ........................................ ok
-Compiling module 026 ........................................ ok
-Compiling module 027 ........................................ ok
-Compiling module 028 ........................................ ok
-Compiling module 029 ........................................ ok
-Compiling module 030 ........................................ ok
-Compiling module 031 ........................................ ok
-Compiling module 032 ........................................ ok
-Compiling module 033 ........................................ ok
-Compiling module 034 ........................................ ok
-Compiling module 035 ........................................ ok
-Compiling module 036 ........................................ ok
-Compiling module 037 ........................................ ok
-Compiling module 038 ........................................ ok
-Compiling module 039 ........................................ ok
-Compiling module 040 ........................................ ok
-Compiling module 041 ........................................ ok
-Compiling module 042 ........................................ ok
-Compiling module 043 ........................................ ok
-Compiling module 044 ........................................ ok
-Compiling module 045 ........................................ ok
-Compiling module 046 ........................................ ok
-Compiling module 047 ........................................ ok
-Compiling module 048 ........................................ ok
-Compiling module 049 ........................................ ok
-Compiling module 050 ........................................ ok
-Compiling module 051 ........................................ ok
-Compiling module 052 ........................................ ok
-Compiling module 053 ........................................ ok
-Compiling module 054 ........................................ ok
-Compiling module 055 ........................................ ok
-Compiling module 056 ........................................ ok
-Compiling module 057 ........................................ ok
-Compiling module 058 ........................................ ok
-Compiling module 059 ........................................ ok
-Compiling module 060 ........................................ ok
-Compiling module 061 ........................................ ok
-Compiling module 062 ........................................ ok
-Compiling module 063 ........................................ ok
-Compiling module 064 ........................................ ok
-Compiling module 065 ........................................ ok
-Compiling module 066 ........................................ ok
-Compiling module 067 ........................................ ok
-Compiling module 068 ........................................ ok
-Compiling module 069 ........................................ ok
-Compiling module 070 ........................................ ok
-Compiling module 071 ........................................ ok
-Compiling module 072 ........................................ ok
-Compiling module 073 ........................................ ok
-Compiling module 074 ........................................ ok
-src/ledger.rs:73:18: error[E0308]: mismatched types
-expected `i64`, found `String`
-src/ledger.rs:91:5: warning: unused variable: `currency`
-error: could not compile `atlas-ledger` due to 1 previous error
+error[E0308]: mismatched types
+ --> src/main.rs:2:22
+  |
+2 |     let total: i64 = String::from("1");
+  |                ---   ^^^^^^^^^^^^^^^^^ expected `i64`, found `String`
+  |                |
+  |                expected due to this
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `atlas-ledger` (bin "atlas-ledger") due to 1 previous error
