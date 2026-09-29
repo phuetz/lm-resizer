@@ -9,10 +9,15 @@
 //! if the language is unsupported or syntax analysis fails.
 
 use regex::Regex;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::ccr::{compute_key, CcrStore};
 use crate::transforms::retention_advice::{RetentionAdvice, RetentionRange};
+
+static CRITICAL_PATH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)[a-z0-9_-]+/[a-z0-9_-]+\.[a-z0-9]+").expect("valid critical path regex")
+});
 
 /// Supported target languages for structural compression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,9 +226,17 @@ impl SourceCompressor {
                 }
 
                 if let Some((structural, is_approximate, engine_used)) = structural_opt {
+                    let restored = restore_critical_comments(input, &structural.compressed, lang);
+                    if restored
+                        .as_ref()
+                        .is_some_and(|text| text.len() > input.len())
+                    {
+                        return self.compress_conservative(input);
+                    }
+                    let compressed = restored.unwrap_or(structural.compressed);
                     if structural.omitted_body_lines > 0
                         || structural.omitted_import_lines > 0
-                        || structural.compressed.len() < input.len()
+                        || compressed.len() < input.len()
                     {
                         let ccr_key = compute_key(input.as_bytes());
                         if let Some(s) = store {
@@ -231,7 +244,7 @@ impl SourceCompressor {
                         }
                         return SourceCompressionResult {
                             original: input.to_string(),
-                            compressed: structural.compressed,
+                            compressed,
                             removed_comment_lines: 0,
                             removed_blank_lines: 0,
                             omitted_body_lines: structural.omitted_body_lines,
@@ -261,13 +274,21 @@ impl SourceCompressor {
     ) -> Option<SourceCompressionResult> {
         let res = compress_with_ast_symbols(input, lang, symbols)?;
         let structural = build_structural_output(input, lang, res, false);
+        let restored = restore_critical_comments(input, &structural.compressed, lang);
+        if restored
+            .as_ref()
+            .is_some_and(|text| text.len() > input.len())
+        {
+            return Some(self.compress_conservative(input));
+        }
+        let compressed = restored.unwrap_or(structural.compressed);
         let ccr_key = compute_key(input.as_bytes());
         if let Some(s) = store {
             s.put(&ccr_key, input);
         }
         Some(SourceCompressionResult {
             original: input.to_string(),
-            compressed: structural.compressed,
+            compressed,
             removed_comment_lines: 0,
             removed_blank_lines: 0,
             omitted_body_lines: structural.omitted_body_lines,
@@ -331,7 +352,7 @@ impl SourceCompressor {
 
             let trimmed = line.trim_start();
 
-            if is_full_line_comment(trimmed) {
+            if is_full_line_comment(trimmed) && !is_critical_comment(line) {
                 removed_comment_lines += 1;
                 continue;
             }
@@ -398,7 +419,7 @@ impl SourceCompressor {
         for line in input.lines() {
             let trimmed = line.trim_start();
 
-            if is_full_line_comment(trimmed) {
+            if is_full_line_comment(trimmed) && !is_critical_comment(line) {
                 removed_comment_lines += 1;
                 continue;
             }
@@ -1053,6 +1074,58 @@ fn is_full_line_comment(trimmed: &str) -> bool {
         || trimmed.starts_with("*/")
 }
 
+fn is_critical_comment(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    lower.contains("error")
+        || lower.contains("assert")
+        || CRITICAL_PATH.is_match(line)
+        || super::diagnostic_gate::FAILURE_SIGNAL.is_match(line)
+}
+
+fn restore_critical_comments(input: &str, output: &str, lang: SourceLanguage) -> Option<String> {
+    let mut required = HashMap::new();
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if is_full_line_comment(trimmed) && is_critical_comment(trimmed) {
+            *required.entry(trimmed).or_insert(0usize) += 1;
+        }
+    }
+    if required.is_empty() {
+        return None;
+    }
+    for line in output.lines() {
+        if let Some(count) = required.get_mut(line.trim()) {
+            *count = count.saturating_sub(1);
+        }
+    }
+    if required.values().all(|&count| count == 0) {
+        return None;
+    }
+
+    let mut restored = output.to_string();
+    if !restored.ends_with('\n') {
+        restored.push('\n');
+    }
+    let prefix = if lang == SourceLanguage::Python {
+        "#"
+    } else {
+        "//"
+    };
+    restored.push_str(prefix);
+    restored.push_str(" [Commentaires critiques conservés depuis les parties omises]\n");
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if let Some(count) = required.get_mut(trimmed) {
+            if *count > 0 {
+                restored.push_str(trimmed);
+                restored.push('\n');
+                *count -= 1;
+            }
+        }
+    }
+    Some(restored)
+}
+
 // ─── Language Detection ────────────────────────────────────────────────
 
 pub fn detect_language(input: &str) -> Option<SourceLanguage> {
@@ -1488,6 +1561,7 @@ fn compress_rust(input: &str) -> Option<InternalStructural> {
         if is_full_line_comment(trimmed)
             && !trimmed.starts_with("///")
             && !trimmed.starts_with("//!")
+            && !is_critical_comment(line)
         {
             i += 1;
             continue;
@@ -1995,7 +2069,10 @@ fn compress_ts_js(input: &str, _is_ts: bool) -> Option<InternalStructural> {
         let (net, _) = scan_js_tokens(line, &mut lex_state);
         global_braces = (global_braces + net).max(0);
 
-        if is_full_line_comment(trimmed) && !trimmed.starts_with("/**") && !trimmed.starts_with('*')
+        if is_full_line_comment(trimmed)
+            && !trimmed.starts_with("/**")
+            && !trimmed.starts_with('*')
+            && !is_critical_comment(line)
         {
             i += 1;
             continue;
