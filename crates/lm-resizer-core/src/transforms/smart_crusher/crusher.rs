@@ -945,7 +945,7 @@ fn group_key(item: &Value) -> &'static str {
 #[derive(Default)]
 struct GroupBuckets {
     entries: Vec<(&'static str, Vec<usize>, Vec<Value>)>,
-    index_of: std::collections::HashMap<&'static str, usize>,
+    index_of: std::collections::BTreeMap<&'static str, usize>,
 }
 
 impl GroupBuckets {

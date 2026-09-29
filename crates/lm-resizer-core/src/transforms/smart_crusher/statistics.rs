@@ -7,7 +7,7 @@
 //! here mirrors Python step-by-step.
 
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Check if a string looks like a UUID.
 ///
@@ -58,7 +58,7 @@ pub fn calculate_string_entropy(s: &str) -> f64 {
         return 0.0;
     }
 
-    let mut freq: HashMap<char, usize> = HashMap::new();
+    let mut freq: BTreeMap<char, usize> = BTreeMap::new();
     for c in s.chars() {
         *freq.entry(c).or_insert(0) += 1;
     }
@@ -321,6 +321,17 @@ mod tests {
         // Approximation of a UUID-ish hex string. Should be > 0.7.
         let e = calculate_string_entropy("a3f7b2c9d8e1f4a7");
         assert!(e > 0.7);
+    }
+
+    #[test]
+    fn entropy_is_bitwise_stable_across_repeated_maps() {
+        let input: String = (33u8..=126)
+            .flat_map(|byte| std::iter::repeat(byte as char).take((byte % 13 + 1) as usize))
+            .collect();
+        let expected = calculate_string_entropy(&input).to_bits();
+        for _ in 0..256 {
+            assert_eq!(calculate_string_entropy(&input).to_bits(), expected);
+        }
     }
 
     // ---------- detect_sequential_pattern ----------
