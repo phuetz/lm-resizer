@@ -11,6 +11,8 @@ archives to a release.
 - [ ] `dist/release-evidence.json` lists the WASM npm tarball.
 - [ ] `dist/release-evidence.json` lists the platform binary archive.
 - [ ] `dist/SHA256SUMS` lists hashes for release artifacts.
+- [ ] Each binary archive has a matching `.sha256` sidecar, and the public
+      release contains both files.
 - [ ] `dist/release-evidence.json` lists provider cache fixtures.
 - [ ] The npm publish dry-run completed successfully.
 - [ ] `scripts/check-publish-readiness.ps1` or
@@ -19,6 +21,7 @@ archives to a release.
 - [ ] The release archive contains `release-evidence.json`, docs, examples,
       fixtures, scripts, GitHub workflow/templates, contribution/security
       guidance, the C header, and the WASM wrapper package.
+- [ ] The separate install smoke jobs passed on Linux, macOS and Windows.
 
 ## Publish Approval
 
@@ -37,6 +40,15 @@ archives to a release.
       unsigned binaries plus `SHA256SUMS`.
 
 ## Commands
+
+To prepare the next binary release, first merge the version-aligned code and
+create a new tag (`v0.2.3` for this change). Run **Prepare binary release draft**
+with that existing tag and `confirm=PREPARE_DRAFT`. The workflow builds four
+platform archives, verifies their checksums, and creates a draft with the
+archives and sidecars. Review its assets before publishing the draft manually.
+The installer URLs in the README become usable only after that publication.
+Do not reuse the asset-free `v0.2.2` tag. The generated `dist` evidence and
+checksums are build artifacts; stale copies are not kept in Git.
 
 PowerShell:
 

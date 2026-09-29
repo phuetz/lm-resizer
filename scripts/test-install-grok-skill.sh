@@ -76,6 +76,34 @@ grep -q 'Compress large command' "$dest/SKILL.md" || fail "force replaced skill"
 [ -f "$dest/NOTES.txt" ] || fail "force kept extra"
 ls -d "$dest".bak.* >/dev/null || fail "backup dir"
 grep -qx 'custom-skill' "$dest".bak.*/SKILL.md || fail "backup had custom skill"
+# A linked destination must back up its contents before --force replaces them.
+mkdir -p "$TMP/link-real"
+echo 'linked-custom' > "$TMP/link-real/SKILL.md"
+if ln -s "$TMP/link-real" "$TMP/link-dest" 2>/dev/null && [ -L "$TMP/link-dest" ]; then
+  bash "$INS" --target grok --dest "$TMP/link-dest" --force >/dev/null
+  grep -qx 'linked-custom' "$TMP"/link-dest.bak.*/SKILL.md || fail "linked destination backup lost original content"
+else
+  case "$(uname -s)" in
+    Linux|Darwin) fail "could not create a test symlink" ;;
+    *) echo "SKIP symlink backup: this runner cannot create a real symlink" >&2 ;;
+  esac
+fi
+
+# A failed backup must stop --force before reporting an installation.
+mkdir -p "$TMP/failing-bin" "$TMP/failing-dest"
+echo 'do-not-replace' > "$TMP/failing-dest/SKILL.md"
+cat > "$TMP/failing-bin/cp" <<'EOF'
+#!/bin/sh
+if [ "$1" = '-a' ]; then exit 1; fi
+exec "$REAL_CP" "$@"
+EOF
+chmod +x "$TMP/failing-bin/cp"
+set +e
+PATH="$TMP/failing-bin:$PATH" REAL_CP="$(command -v cp)" bash "$INS" --target grok --dest "$TMP/failing-dest" --force >/dev/null 2>&1
+backup_status=$?
+set -e
+[ "$backup_status" -ne 0 ] || fail "failed backup reported success"
+grep -qx 'do-not-replace' "$TMP/failing-dest/SKILL.md" || fail "failed backup changed destination"
 
 # 7. --target codex with dest
 bash "$INS" --target codex --dest "$TMP/codex/lm-resizer" | grep -q 'target=codex' || fail "codex target"

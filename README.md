@@ -170,7 +170,8 @@ powershell -File scripts/publish-wasm.ps1  # requires NPM_TOKEN or npm login
 ```
 
 `package-release` includes the binary, current docs, examples, provider fixtures,
-the WASM wrapper package, `release-evidence.json`, and `SHA256SUMS`.
+the WASM wrapper package, and `release-evidence.json`. The archive's SHA-256
+checksum is distributed beside it as a `.sha256` release asset.
 Use [docs/RELEASE.md](docs/RELEASE.md) as the approval checklist before running
 the real npm publish command.
 
@@ -390,10 +391,39 @@ overwriting an existing file. This metadata is not OCR or scene recognition.
 Voice removes common transcript filler tokens, and `ml-status` reports whether
 optional Magika / ONNX classification is enabled.
 
+## Install the prebuilt binary (one command)
+
+After the `v0.2.3` release draft has been reviewed and published, run one of
+these commands. No Rust toolchain or build cache is needed. The installer
+downloads the matching archive, verifies its SHA-256 checksum, and installs
+`lm-resizer` in `~/.local/bin` by default.
+The `.sha256` sidecar names the archive and contains its expected hash; the
+installer verifies both before extracting the binary.
+The prepared archives cover Linux x86_64, macOS x86_64/arm64, and Windows x86_64.
+
+Linux and macOS:
+
+```sh
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.3/install.sh | sh'
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.3/install.ps1 | iex
+```
+
+The Windows installer adds `~/.local/bin` to the user PATH. On Linux and macOS,
+add that directory to PATH if the installer prints a reminder. CI is configured
+to check the installation from a packaged release archive on fresh runners, including a
+Linux job without Cargo in PATH. Set `LM_RESIZER_INSTALL_DIR` to choose another
+directory. The archives must first be attached to the release; the existing
+`v0.2.2` release has no binary assets.
+
 ## Install as a Claude Code plugin
 
-The repository is its own plugin marketplace. With the `lm-resizer` binary on
-your `PATH`, this installs the skill **and** the MCP server:
+The repository is its own plugin marketplace. After installing the binary and
+putting it on your `PATH`, these commands install the skill and MCP configuration:
 
 ```bash
 claude plugin marketplace add phuetz/lm-resizer

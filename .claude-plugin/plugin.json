@@ -1,6 +1,6 @@
 {
   "name": "lm-resizer",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "displayName": "lm-resizer",
   "description": "Keep noisy command output (tests, builds, package managers, diffs, logs) out of the context window. Ships the lm-resizer skill and the lm-resizer MCP server (compress, tool_output, retrieve, stats). Requires the lm-resizer binary on PATH.",
   "author": {

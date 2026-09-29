@@ -14,5 +14,6 @@ cargo build --release
 "$root/scripts/publish-wasm.sh" --dry-run
 "$root/scripts/package-release.sh"
 "$root/scripts/check-publish-readiness.sh" >/dev/null
+"$root/scripts/test-install-grok-skill.sh"
 
 printf '%s\n' "lm-resizer release check passed"

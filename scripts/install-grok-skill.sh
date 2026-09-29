@@ -101,7 +101,7 @@ if [ "$FORCE" -eq 1 ] && [ "$PREEXISTED" -eq 1 ]; then
     exit 1
   fi
   mkdir -p "$bak"
-  cp -a "$DEST"/. "$bak"/ 2>/dev/null || true
+  cp -a "$DEST"/. "$bak"/
   echo "backup: $bak"
 fi
 

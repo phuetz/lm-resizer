@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.3] - à publier
+
+### Added
+- Installateurs binaires en une commande pour Linux, macOS et Windows, avec vérification SHA-256 des archives de release.
+- Test CI de l'installation Linux sur un runner neuf sans Rust et préparation d'une release avec archives.
+
 ## [0.2.2] - 2026-09-16
 
 ### Added
