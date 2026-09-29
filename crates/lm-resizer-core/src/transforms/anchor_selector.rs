@@ -32,7 +32,7 @@
 
 use md5::{Digest, Md5};
 use serde_json::Value;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 // ============================================================================
 // Configuration (Python `lm-resizer/config.py:294` AnchorConfig)
@@ -211,7 +211,7 @@ fn calculate_value_uniqueness(item: &Value, all_items: &[Value]) -> f64 {
     // Build per-field value counts using Python-compatible string keys.
     // Python: json.dumps(value, sort_keys=True) for non-strings; raw
     // string for strings.
-    let mut field_counts: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    let mut field_counts: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
     for other in all_items {
         let Some(obj) = other.as_object() else {
             continue;
@@ -301,7 +301,7 @@ fn calculate_structural_uniqueness(item: &Value, all_items: &[Value]) -> f64 {
         return 0.5;
     }
 
-    let mut field_counts: HashMap<&String, usize> = HashMap::new();
+    let mut field_counts: BTreeMap<&String, usize> = BTreeMap::new();
     for obj in &valid {
         for key in obj.keys() {
             *field_counts.entry(key).or_insert(0) += 1;

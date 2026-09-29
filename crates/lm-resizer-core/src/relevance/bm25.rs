@@ -13,7 +13,7 @@
 //! high-signal matches). Final score is clamped to `[0, 1]` via
 //! `RelevanceScore::new`.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -87,7 +87,7 @@ impl BM25Scorer {
     fn bm25_score(
         &self,
         doc_tokens: &[String],
-        query_freq: &HashMap<String, usize>,
+        query_freq: &BTreeMap<String, usize>,
         avg_doc_len: f64,
     ) -> (f64, Vec<String>) {
         if doc_tokens.is_empty() || query_freq.is_empty() {
@@ -104,7 +104,7 @@ impl BM25Scorer {
         };
 
         // Doc-side term frequency.
-        let mut doc_freq: HashMap<&str, usize> = HashMap::new();
+        let mut doc_freq: BTreeMap<&str, usize> = BTreeMap::new();
         for t in doc_tokens {
             *doc_freq.entry(t.as_str()).or_insert(0) += 1;
         }
@@ -113,7 +113,7 @@ impl BM25Scorer {
         let mut matched: Vec<String> = Vec::new();
         let idf = 2.0_f64.ln();
 
-        // Iterate query_freq in HashMap order — Python iterates dict
+        // Iterate query_freq in BTreeMap order — Python iterates dict
         // order (insertion order in 3.7+). For matched_terms we only
         // care about MEMBERSHIP not ordering downstream, but we sort
         // tokens alphabetically here for deterministic test output
@@ -158,7 +158,7 @@ impl RelevanceScorer for BM25Scorer {
         let context_tokens = self.tokenize(context);
 
         // Build query frequency map from context.
-        let mut query_freq: HashMap<String, usize> = HashMap::new();
+        let mut query_freq: BTreeMap<String, usize> = BTreeMap::new();
         for t in &context_tokens {
             *query_freq.entry(t.clone()).or_insert(0) += 1;
         }
@@ -197,7 +197,7 @@ impl RelevanceScorer for BM25Scorer {
                 .collect();
         }
 
-        let mut query_freq: HashMap<String, usize> = HashMap::new();
+        let mut query_freq: BTreeMap<String, usize> = BTreeMap::new();
         for t in &context_tokens {
             *query_freq.entry(t.clone()).or_insert(0) += 1;
         }
