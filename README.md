@@ -42,7 +42,7 @@ The CLI also offers `compress` for files or standard input, `tool-output` for al
 | Sole wins on qualified saving | 12 | 3 | 0 |
 | Shared win | 1 with RTK | 1 with LM Resizer | 0 |
 | Median qualified saving across cases | 74.7% | 0.0% | 0.0% |
-| Complete stated oracle | 22/22 | 16/22 | 22/22 |
+| Complete stated oracle | 22/22 | 15/22 | 22/22 |
 
 Six further cases have **no qualified gain from any tool**. Examples below use the measured input token count and qualified saving; zero can mean unchanged output or an incomplete oracle.
 
@@ -55,7 +55,7 @@ Six further cases have **no qualified gain from any tool**. Examples below use t
 | `compile_error` | 106 | 0% | **26%** | 0% | RTK saves more. |
 | Six source-code cases | 379–481 each | 0% | 0% | 0% | No measured saving. |
 
-RTK's raw reductions on six cases omit at least one required oracle fact and therefore count as zero qualified saving. These fixtures do not measure provider bills, coding-agent task success or performance on arbitrary real-world output. Latency depends on the machine and cache. The [published case-level data](bench/resultats.json) matches this replay on token counts and oracle retention; measured latencies changed.
+RTK's raw reductions on seven cases omit at least one required oracle fact and therefore count as zero qualified saving. These fixtures do not measure provider bills, coding-agent task success or performance on arbitrary real-world output. Latency depends on the machine and cache. The [published case-level data](bench/resultats.json) matches this replay on token counts and oracle retention; measured latencies changed.
 
 ## When not to use it
 

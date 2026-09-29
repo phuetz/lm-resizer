@@ -42,7 +42,7 @@ Le CLI propose aussi `compress` pour les fichiers ou l'entrée standard, `tool-o
 | Victoires seules sur l'économie qualifiée | 12 | 3 | 0 |
 | Victoire partagée | 1 avec RTK | 1 avec LM Resizer | 0 |
 | Médiane de l'économie qualifiée entre cas | 74,7 % | 0,0 % | 0,0 % |
-| Oracle déclaré complet | 22/22 | 16/22 | 22/22 |
+| Oracle déclaré complet | 22/22 | 15/22 | 22/22 |
 
 Six autres cas n'ont **aucun gain qualifié, quel que soit l'outil**. Ces exemples donnent le nombre mesuré de jetons en entrée et l'économie qualifiée ; zéro peut signifier une sortie inchangée ou un oracle incomplet.
 
@@ -55,7 +55,7 @@ Six autres cas n'ont **aucun gain qualifié, quel que soit l'outil**. Ces exempl
 | `compile_error` | 106 | 0 % | **26 %** | 0 % | RTK économise davantage. |
 | Six cas de code source | 379–481 chacun | 0 % | 0 % | 0 % | Aucun gain mesuré. |
 
-Sur six cas, les réductions brutes de RTK omettent au moins un fait exigé par l'oracle : leur économie qualifiée vaut donc zéro. Ces fixtures ne mesurent ni la facture des fournisseurs, ni la réussite de tâches par un agent de code, ni les performances sur toute sortie réelle. La latence dépend de la machine et du cache. Les [données publiées par cas](bench/resultats.json) concordent avec ce rejeu sur les jetons et la conservation des oracles ; les latences mesurées ont changé.
+Sur sept cas, les réductions brutes de RTK omettent au moins un fait exigé par l'oracle : leur économie qualifiée vaut donc zéro. Ces fixtures ne mesurent ni la facture des fournisseurs, ni la réussite de tâches par un agent de code, ni les performances sur toute sortie réelle. La latence dépend de la machine et du cache. Les [données publiées par cas](bench/resultats.json) concordent avec ce rejeu sur les jetons et la conservation des oracles ; les latences mesurées ont changé.
 
 ## Quand ne pas l'utiliser
 
