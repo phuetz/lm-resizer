@@ -3428,6 +3428,11 @@ fn first_lost_failure_line<'a>(before: &'a str, after: &str) -> Option<&'a str> 
             if trimmed.starts_with("% Total    % Received") {
                 return false;
             }
+            // Git's structural header contains "diff", which the generic
+            // failure regex also matches. It is not a diagnostic.
+            if trimmed.starts_with("diff --git ") {
+                return false;
+            }
             if trimmed.starts_with("test result: ok.") {
                 return false;
             }
@@ -3577,12 +3582,26 @@ fn filter_diff_summary(raw: &str) -> String {
     }
     let mut kept = Vec::new();
 
-    for line in raw.lines() {
-        if line.starts_with("diff --git")
-            || line.starts_with("+++ ")
-            || line.starts_with("--- ")
-            || line.starts_with("@@")
-        {
+    let lines: Vec<&str> = raw.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        if line.starts_with("diff --git") {
+            // `---` and `+++` already name both paths. Keep the Git header
+            // when either marker is absent (binary or truncated diffs).
+            let file_lines = lines[index + 1..]
+                .iter()
+                .take_while(|next| !next.starts_with("diff --git"));
+            let mut old_path = false;
+            let mut new_path = false;
+            for next in file_lines {
+                old_path |= next.starts_with("--- ");
+                new_path |= next.starts_with("+++ ");
+            }
+            if !(old_path && new_path) {
+                kept.push((*line).to_string());
+            }
+            continue;
+        }
+        if line.starts_with("+++ ") || line.starts_with("--- ") || line.starts_with("@@") {
             kept.push(line.to_string());
             continue;
         }
@@ -10790,6 +10809,39 @@ Successfully tagged localhost/app:latest\n";
         for number in 0..12 {
             assert!(output.contains(&format!("+changed line {number}")));
         }
+    }
+
+    #[test]
+    fn git_diff_capture_omits_redundant_file_headers_without_losing_patch_facts() {
+        let raw = include_str!("../bench/corpus/git_diff.txt");
+        let (name, output) = filter_command_output(&["git".into(), "diff".into()], raw);
+        assert_eq!(name, "diff_summary");
+        assert!(
+            !output.contains("diff --git"),
+            "duplicate path headers remain"
+        );
+        for fact in [
+            "--- a/src/billing.py",
+            "+++ b/src/billing.py",
+            "@@ -1,4 +1,4 @@",
+            "-    return subtotal + tax",
+            "+    return round(subtotal + tax, 2)",
+            "--- a/tests/test_billing.py",
+            "+++ b/tests/test_billing.py",
+            "+def test_rounding():",
+            "+    assert total([1.005]) == 1.21",
+        ] {
+            assert!(output.contains(fact), "lost {fact}");
+        }
+        assert!(first_lost_indispensable_line(raw, &output, &name).is_none());
+    }
+
+    #[test]
+    fn diff_filter_keeps_header_when_patch_has_no_file_markers() {
+        let raw =
+            "diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n";
+        let (_, output) = filter_command_output(&["git".into(), "diff".into()], raw);
+        assert!(output.contains("diff --git a/logo.png b/logo.png"));
     }
 
     #[test]
