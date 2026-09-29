@@ -40,6 +40,33 @@ if (-not $evidence.wasm_tarballs -or $evidence.wasm_tarballs.Count -eq 0) {
 if (-not $evidence.release_checks -or -not ($evidence.release_checks -contains "scripts/smoke-proxy-preview.ps1")) {
   throw "release evidence does not list proxy smoke check"
 }
+$plugin = Get-Content (Join-Path $root ".claude-plugin\plugin.json") -Raw | ConvertFrom-Json
+$marketplace = Get-Content (Join-Path $root ".claude-plugin\marketplace.json") -Raw | ConvertFrom-Json
+$lmEntry = $marketplace.plugins | Where-Object { $_.name -eq "lm-resizer" } | Select-Object -First 1
+if (-not $lmEntry -or $plugin.version -ne $packageJson.version -or $lmEntry.version -ne $packageJson.version) {
+  throw "plugin, marketplace and npm package versions do not match"
+}
+if ($evidence.version -ne $packageJson.version) { throw "release evidence version mismatch" }
+foreach ($cargoVersion in @($evidence.cargo_versions.root, $evidence.cargo_versions.core, $evidence.cargo_versions.wasm)) {
+  if ($cargoVersion -ne $packageJson.version) { throw "release evidence Cargo versions do not match npm package" }
+}
+if (-not $evidence.binary_archives -or $evidence.binary_archives.Count -eq 0) {
+  throw "release evidence does not list a platform binary archive"
+}
+$sumsPath = Join-Path $root "dist\SHA256SUMS"
+if (-not (Test-Path $sumsPath)) { throw "missing dist/SHA256SUMS" }
+$sums = @{}
+foreach ($line in Get-Content $sumsPath) {
+  if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "invalid checksum line: $line" }
+  $sums[$Matches[2]] = $Matches[1]
+}
+foreach ($artifact in @($evidence.wasm_tarballs) + @($evidence.binary_archives)) {
+  if (-not $artifact.Contains($packageJson.version)) { throw "stale artifact version: $artifact" }
+  $file = Join-Path $root "dist\$artifact"
+  if (-not (Test-Path $file)) { throw "missing release artifact: $artifact" }
+  $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($sums[$artifact] -ne $hash) { throw "missing or invalid SHA-256 for $artifact" }
+}
 
 $trustedPublishingConfigured = $env:NPM_TRUSTED_PUBLISHING -eq "1"
 $tokenConfigured = -not [string]::IsNullOrWhiteSpace($env:NPM_TOKEN)

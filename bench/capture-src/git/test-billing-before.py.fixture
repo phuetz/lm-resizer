@@ -1,0 +1,3 @@
+from src.billing import total
+def test_total():
+    assert total([5]) == 6

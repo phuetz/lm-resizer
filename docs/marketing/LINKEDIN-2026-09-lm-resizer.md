@@ -1,6 +1,6 @@
-# LinkedIn — lm-resizer 0.2.1 (brouillons, à publier par Patrice / page Agile Up)
+# LinkedIn — lm-resizer 0.2.1 (brouillons, à publier sur le profil et la page Agile Up)
 
-Faits vérifiés le 09/09/2026 : README `master` (hero : un `cargo test` à travers lm-resizer = 398 commandes, 1,23 Mo → 372 Ko, 222 247 tokens économisés, sortie complète récupérable) ; fumigène du paquet npm : 3 161 → 1 222 octets ; publié sur npm par trusted publishing avec provenance ; validé devant Mistral, Ollama, DeepSeek, OpenRouter, xAI (23/06). Ne pas ajouter de chiffre absent d'ici.
+Le chiffre ancien « 398 commandes, 222 247 jetons » a été retiré faute de sortie brute et de méthode versionnées. Pour les mesures publiables, utiliser uniquement `bench/README.md`, `bench/resultats.json` et le rapport du banc, avec leurs limites explicites. Ne pas présenter une économie de sortie comme une économie facturée.
 
 Visuel conseillé : `docs/lm-resizer-hero.png`. Liens : https://www.npmjs.com/package/@phuetz/lm-resizer · https://github.com/phuetz/lm-resizer · https://phuetz.github.io/lm-resizer/
 
@@ -10,7 +10,7 @@ Visuel conseillé : `docs/lm-resizer-hero.png`. Liens : https://www.npmjs.com/pa
 
 Un agent de code passe une part énorme de sa fenêtre de contexte à lire du bruit : sorties de tests, logs de npm, diffs, listings. Ça coûte des tokens, ça ralentit, et ça cache l'erreur qui compte.
 
-lm-resizer se met entre la commande et le modèle et ne garde que le signal. Une seule exécution de `cargo test` à travers lui : 398 commandes, 1,23 Mo → 372 Ko, 222 247 tokens économisés. Les erreurs, les chemins de fichiers et le résumé restent visibles, et la sortie complète reste récupérable si l'agent en a besoin.
+lm-resizer se met entre la commande et le modèle pour réduire le bruit. Le banc reproductible compare 22 sorties synthétiques à RTK et Headroom, avec des oracles de conservation ; consulter ses résultats avant de citer un gain. La sortie brute reste récupérable localement.
 
 C'est en Rust, ça marche en enveloppe de commande, en proxy HTTP, en serveur MCP, et en hook pour Claude Code et Codex. Compression « consciente de la question » : quand il faut couper, il garde ce qui répond à ce que vous demandez.
 
@@ -28,7 +28,7 @@ Les grandes fenêtres de contexte ne rendent pas le bruit gratuit. Elles le rend
 
 Plus la fenêtre de contexte est grande, plus le bruit coûte cher.
 
-lm-resizer, notre outil open source en Rust, filtre la sortie des commandes avant qu'elle n'atteigne l'agent de code : un `cargo test` complet passe de 1,23 Mo à 372 Ko, 222 247 tokens économisés, sans perdre une erreur ni un chemin de fichier.
+lm-resizer, notre outil open source en Rust, filtre la sortie des commandes avant qu'elle n'atteigne l'agent de code. Un banc reproductible compare 22 sorties synthétiques à RTK et Headroom et contrôle la présence des faits attendus.
 
 Il s'installe en hook dans Claude Code et Codex, en proxy devant n'importe quelle API compatible OpenAI ou Anthropic, ou en serveur MCP. Le module WebAssembly vient d'arriver sur npm.
 
@@ -44,7 +44,7 @@ github.com/phuetz/lm-resizer
 
 Your coding agent burns most of its context on noise: test output, package manager logs, diffs. lm-resizer sits between the command and the model and keeps the signal.
 
-One `cargo test` through it: 398 commands, 1.23 MB → 372 KB, 222,247 tokens saved. Errors, file paths and summaries stay; the full output stays recoverable.
+The reproducible benchmark compares 22 synthetic command outputs with RTK and Headroom, checking declared facts in each result. Full raw output remains locally recoverable.
 
 Rust. CLI wrapper, HTTP proxy, MCP server, Claude Code / Codex hooks. Query-aware compression. The WebAssembly module is now on npm with a bundled loader.
 
@@ -54,4 +54,4 @@ npm install @phuetz/lm-resizer
 
 ---
 
-Checklist avant de poster : l'image hero est lisible sur mobile ; le chiffre 222 247 correspond au README ; ne pas promettre la compression de texte dans le paquet npm (elle est dans le binaire).
+Checklist avant de poster : l'image hero est lisible sur mobile ; les chiffres cités viennent du banc versionné ; ne pas promettre la compression de texte dans le paquet npm (elle est dans le binaire).

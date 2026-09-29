@@ -12,8 +12,7 @@ cargo build --release
 "$root/scripts/smoke-proxy-preview.sh"
 "$root/scripts/check-wasm-package.sh"
 "$root/scripts/publish-wasm.sh" --dry-run
-"$root/scripts/release-evidence.sh"
-"$root/scripts/generate-checksums.sh"
+"$root/scripts/package-release.sh"
 "$root/scripts/check-publish-readiness.sh" >/dev/null
 "$root/scripts/test-install-grok-skill.sh"
 

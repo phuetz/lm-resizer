@@ -28,11 +28,8 @@ Invoke-Checked "check-wasm-package.ps1" {
 Invoke-Checked "publish-wasm.ps1 -DryRun" {
   powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "publish-wasm.ps1") -DryRun
 }
-Invoke-Checked "release-evidence.ps1" {
-  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "release-evidence.ps1")
-}
-Invoke-Checked "generate-checksums.ps1" {
-  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "generate-checksums.ps1")
+Invoke-Checked "package-release.ps1" {
+  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "package-release.ps1")
 }
 Invoke-Checked "check-publish-readiness.ps1" {
   powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "check-publish-readiness.ps1")

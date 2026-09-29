@@ -2,6 +2,8 @@ $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $pkg = Join-Path $root "packages\wasm"
+$env:npm_config_cache = Join-Path $root "target\banc\npm-cache"
+New-Item -ItemType Directory -Force -Path $env:npm_config_cache | Out-Null
 
 node --check (Join-Path $pkg "index.js")
 if ($LASTEXITCODE -ne 0) { throw "node --check failed" }
@@ -23,6 +25,7 @@ $required = @(
   "index.js",
   "index.d.ts",
   "README.md",
+  "LICENSE",
   "lm_resizer_wasm.wasm"
 )
 foreach ($path in $required) {

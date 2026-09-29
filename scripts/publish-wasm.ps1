@@ -5,6 +5,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$env:npm_config_cache = Join-Path $root "target\banc\npm-cache"
+New-Item -ItemType Directory -Force -Path $env:npm_config_cache | Out-Null
 powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "package-wasm.ps1")
 if ($LASTEXITCODE -ne 0) { throw "package-wasm.ps1 failed" }
 

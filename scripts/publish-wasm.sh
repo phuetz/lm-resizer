@@ -2,6 +2,8 @@
 set -eu
 
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+export npm_config_cache="$root/target/banc/npm-cache"
+mkdir -p "$npm_config_cache"
 dry_run=0
 for arg in "$@"; do
   case "$arg" in

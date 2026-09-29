@@ -51,6 +51,7 @@ use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
 #[command(name = "lm-resizer")]
 #[command(version)]
 #[command(about = "Rust-native context compression for LLM agents")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -1904,6 +1905,19 @@ fn compress_text_with_pipeline_gate(
     token_budget: Option<usize>,
     reinject: bool,
 ) -> Result<CompressReport> {
+    if let Some(output) = compact_json_rows(content) {
+        let key = lm_resizer_core::ccr::compute_key(content.as_bytes());
+        store.put(&key, content);
+        return Ok(CompressReport {
+            content_type: "json".to_string(),
+            original_bytes: content.len(),
+            compressed_bytes: output.len(),
+            bytes_saved: content.len() - output.len(),
+            steps_applied: vec!["json_table".to_string()],
+            cache_keys: vec![key],
+            output,
+        });
+    }
     let detection = detect_content_type(content);
     let ctx = CompressionContext {
         query: query.to_string(),
@@ -1955,6 +1969,37 @@ fn compress_text_with_pipeline_gate(
         cache_keys: result.cache_keys,
         output,
     })
+}
+
+/// A homogeneous JSON object array can share its keys once. `columns` and
+/// positional `rows` retain every value, including nested values and nulls.
+fn compact_json_rows(content: &str) -> Option<String> {
+    let mut document: Value = serde_json::from_str(content).ok()?;
+    let object = document.as_object_mut()?;
+    if object.contains_key("columns") {
+        return None;
+    }
+    let rows = object.get("rows")?.as_array()?;
+    let first = rows.first()?.as_object()?;
+    let columns: Vec<String> = first.keys().cloned().collect();
+    if columns.is_empty()
+        || rows.iter().any(|row| match row.as_object() {
+            Some(item) => {
+                item.len() != columns.len() || columns.iter().any(|key| !item.contains_key(key))
+            }
+            None => true,
+        })
+    {
+        return None;
+    }
+    let table: Vec<Value> = rows
+        .iter()
+        .map(|row| Value::Array(columns.iter().map(|key| row[key].clone()).collect()))
+        .collect();
+    object.insert("columns".to_string(), serde_json::to_value(columns).ok()?);
+    object.insert("rows".to_string(), Value::Array(table));
+    let output = serde_json::to_string(&document).ok()?;
+    (output.len() < content.len()).then_some(output)
 }
 
 /// `compress`, with structural advice when the caller asked for it.
@@ -2062,7 +2107,7 @@ fn run_exec_command(
 
     let mut compressed = if matches!(
         filter.as_str(),
-        "json-passthrough" | "aws-json" | "aws" | "file-read"
+        "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
     ) {
         CompressReport {
             content_type: if matches!(filter.as_str(), "json-passthrough" | "aws-json") {
@@ -2100,7 +2145,7 @@ fn run_exec_command(
             .push("diagnostic_gate:kept_filtered".to_string());
         compressed.cache_keys.clear();
     }
-    let tee_hint = tee_raw_output_if_useful(command, &raw, &filtered, exit_code)?;
+    let tee_hint = tee_raw_output_if_useful(&raw, &filtered)?;
     let mut final_output = compressed.output;
     if let Some(hint) = &tee_hint {
         if !final_output.ends_with('\n') && !final_output.is_empty() {
@@ -2145,7 +2190,7 @@ fn process_captured_output(
         (raw.to_string(), Vec::new(), Vec::new())
     } else if matches!(
         filter.as_str(),
-        "json-passthrough" | "aws-json" | "aws" | "file-read"
+        "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
     ) {
         (filtered.clone(), Vec::new(), Vec::new())
     } else {
@@ -2500,6 +2545,46 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     }
     if command_requests_json(command) && serde_json::from_str::<Value>(raw).is_ok() {
         return ("json-passthrough".to_string(), raw.to_string());
+    }
+    if command
+        .first()
+        .is_some_and(|program| command_basename(program) == "journalctl")
+    {
+        return ("journalctl".to_string(), filter_journal(raw));
+    }
+    if command
+        .first()
+        .is_some_and(|program| command_basename(program) == "psql")
+    {
+        return ("psql".to_string(), filter_psql(raw));
+    }
+    let cargo_test = command
+        .first()
+        .is_some_and(|program| command_basename(program) == "cargo")
+        && command.get(1).is_some_and(|verb| verb == "test");
+    if cargo_test
+        && raw.lines().any(|line| {
+            let trimmed = line.trim_start().to_ascii_lowercase();
+            trimmed.starts_with("warning:") || trimmed.starts_with("error:")
+        })
+    {
+        return ("cargo_test_diagnostics".to_string(), raw.to_string());
+    }
+    if cargo_test
+        && raw.lines().any(|line| line.starts_with("test result: ok."))
+        && !raw
+            .lines()
+            .any(|line| line.starts_with("test result: FAILED."))
+    {
+        let summaries: Vec<_> = raw
+            .lines()
+            .filter(|line| line.starts_with("test result: ok."))
+            .collect();
+        if summaries.len() == 1 {
+            let summary = summaries[0].trim_start_matches("test result: ok. ");
+            let counts = summary.split(';').take(3).collect::<Vec<_>>().join(";");
+            return ("cargo_test".to_string(), format!("{counts}\n"));
+        }
     }
     if command
         .first()
@@ -3344,6 +3429,9 @@ fn first_lost_failure_line<'a>(before: &'a str, after: &str) -> Option<&'a str> 
             if trimmed.starts_with("% Total    % Received") {
                 return false;
             }
+            if trimmed.starts_with("test result: ok.") {
+                return false;
+            }
             // A highlighted source line is context for the real error
             // directly above it; comments in that frame can say "error".
             !(l.contains(" | ") && l.contains("//"))
@@ -3489,7 +3577,6 @@ fn filter_diff_summary(raw: &str) -> String {
         return raw.to_string();
     }
     let mut kept = Vec::new();
-    let mut skipped = 0usize;
 
     for line in raw.lines() {
         if line.starts_with("diff --git")
@@ -3508,11 +3595,41 @@ fn filter_diff_summary(raw: &str) -> String {
             kept.push(line.to_string());
             continue;
         }
-
-        skipped += 1;
     }
 
-    append_omitted(kept, skipped)
+    append_omitted(kept, 0)
+}
+
+fn filter_journal(raw: &str) -> String {
+    let mut info = 0;
+    let mut kept = Vec::new();
+    for line in raw.lines() {
+        if line.split_whitespace().nth(1) == Some("INFO") && !FAILURE_SIGNAL.is_match(line) {
+            info += 1;
+        } else {
+            kept.push(line.to_string());
+        }
+    }
+    if info > 0 {
+        kept.push(format!("{info} INFO lines; raw: tee list"));
+    }
+    append_omitted(kept, 0)
+}
+
+fn filter_psql(raw: &str) -> String {
+    let mut inserts = 0;
+    let mut kept = Vec::new();
+    for line in raw.lines() {
+        if line.starts_with("INSERT 0 ") {
+            inserts += 1;
+        } else {
+            kept.push(line.to_string());
+        }
+    }
+    if inserts > 0 {
+        kept.insert(0, format!("{inserts} INSERT results"));
+    }
+    append_omitted(kept, 0)
 }
 
 fn filter_git_show(raw: &str) -> String {
@@ -3915,6 +4032,7 @@ fn filter_pytest(raw: &str) -> String {
     for line in raw.lines() {
         let trimmed = line.trim();
         let important = trimmed.starts_with("FAILED ")
+            || trimmed.ends_with(" FAILED")
             || trimmed.starts_with("ERROR ")
             || trimmed.starts_with("====")
             || trimmed.contains(" failed")
@@ -4120,45 +4238,17 @@ fn append_omitted(mut lines: Vec<String>, skipped: usize) -> String {
     }
 }
 
-fn tee_raw_output_if_useful(
-    command: &[String],
-    raw: &str,
-    filtered: &str,
-    exit_code: i32,
-) -> Result<Option<String>> {
-    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") || raw.len() < 500 {
-        return Ok(None);
-    }
-    let materially_filtered = filtered.len().saturating_mul(2) < raw.len();
-    if exit_code == 0 && !materially_filtered {
+fn tee_raw_output_if_useful(raw: &str, filtered: &str) -> Result<Option<String>> {
+    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") || raw == filtered {
         return Ok(None);
     }
 
     let tee_dir = default_state_dir()?.join("tee");
     std::fs::create_dir_all(&tee_dir)?;
-    let path = tee_dir.join(format!(
-        "{}_{}.log",
-        unix_timestamp(),
-        sanitize_slug(&command.join("_"))
-    ));
+    let digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
+    let path = tee_dir.join(format!("{digest}.log"));
     std::fs::write(&path, raw)?;
-    cleanup_tee_files(&tee_dir, 20)?;
-    Ok(Some(format!("[full output: {}]", path.display())))
-}
-
-fn cleanup_tee_files(dir: &Path, max_files: usize) -> Result<()> {
-    let mut entries = std::fs::read_dir(dir)?
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "log"))
-        .collect::<Vec<_>>();
-    if entries.len() <= max_files {
-        return Ok(());
-    }
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries.iter().take(entries.len() - max_files) {
-        let _ = std::fs::remove_file(entry.path());
-    }
-    Ok(())
+    Ok(Some(format!("[raw: {}]", &digest[..12])))
 }
 
 fn run_tee_command(command: TeeCommand) -> Result<()> {
@@ -4223,7 +4313,17 @@ fn list_tee_files() -> Result<TeeListReport> {
 fn resolve_tee_file(file: &str) -> Result<PathBuf> {
     let dir = tee_dir()?;
     let candidate = PathBuf::from(file);
-    let path = if candidate.components().count() == 1 {
+    let path = if candidate.components().count() == 1 && !dir.join(&candidate).exists() {
+        let matches: Vec<_> = list_tee_files()?
+            .files
+            .into_iter()
+            .filter(|entry| entry.name.starts_with(file))
+            .collect();
+        if matches.len() != 1 {
+            anyhow::bail!("tee reference {file} matched {} files", matches.len());
+        }
+        PathBuf::from(&matches[0].path)
+    } else if candidate.components().count() == 1 {
         dir.join(candidate)
     } else {
         candidate
@@ -4262,25 +4362,6 @@ fn purge_tee_files(all: bool, file: Option<&str>) -> Result<TeePurgeReport> {
         deleted: deleted_files.len(),
         files: deleted_files,
     })
-}
-
-fn sanitize_slug(value: &str) -> String {
-    let mut slug = value
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    slug.truncate(48);
-    if slug.is_empty() {
-        "command".to_string()
-    } else {
-        slug
-    }
 }
 
 fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
@@ -6503,6 +6584,8 @@ keep_lines_matching = [
   "Passed!",
   "Failed!",
   "Total tests:",
+  "Test Run Successful",
+  "^\\s*Passed:\\s*[0-9]+",
   "Build FAILED",
   "Build succeeded",
 ]
@@ -6908,6 +6991,7 @@ fn run_doctor(json_output: bool, store: Option<PathBuf>) -> Result<()> {
         store_ok,
         mcp_tools: vec![
             "lm_resizer_compress".to_string(),
+            "lm_resizer_tool_output".to_string(),
             "lm_resizer_retrieve".to_string(),
             "lm_resizer_stats".to_string(),
         ],
@@ -7068,6 +7152,21 @@ fn mcp_tools() -> Value {
             }
         },
         {
+            "name": "lm_resizer_tool_output",
+            "description": "Compress already captured output using the named command's filter; never execute that command.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "content": { "type": "string" },
+                    "command": { "type": "string" },
+                    "exit_code": { "type": "integer", "default": 0 },
+                    "raw_on_failure": { "type": "boolean", "default": true },
+                    "query": { "type": "string" }
+                },
+                "required": ["content", "command"]
+            }
+        },
+        {
             "name": "lm_resizer_retrieve",
             "description": "Retrieve original content by CCR hash.",
             "inputSchema": {
@@ -7096,6 +7195,37 @@ fn handle_mcp_tool_call(id: Value, params: Value, store_path: &Path) -> Value {
             let query = args.get("query").and_then(Value::as_str).unwrap_or("");
             let store = open_store(Some(store_path.to_path_buf()))?;
             let report = compress_text(content, query, store.as_ref())?;
+            Ok(json!(report))
+        }
+        "lm_resizer_tool_output" => {
+            let content = args
+                .get("content")
+                .and_then(Value::as_str)
+                .context("missing content")?;
+            let command = args
+                .get("command")
+                .and_then(Value::as_str)
+                .context("missing command")?;
+            let parts = split_shell_words(command).context("invalid command quoting")?;
+            if parts.is_empty() {
+                anyhow::bail!("empty command");
+            }
+            let exit_code = args.get("exit_code").and_then(Value::as_i64).unwrap_or(0);
+            let exit_code = i32::try_from(exit_code).context("exit_code out of range")?;
+            let raw_on_failure = args
+                .get("raw_on_failure")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let query = args.get("query").and_then(Value::as_str).unwrap_or("");
+            let store = open_store(Some(store_path.to_path_buf()))?;
+            let report = process_captured_output(
+                &parts,
+                content,
+                exit_code,
+                raw_on_failure,
+                query,
+                store.as_ref(),
+            )?;
             Ok(json!(report))
         }
         "lm_resizer_retrieve" => {
@@ -9246,6 +9376,44 @@ command = "node"
     }
 
     #[test]
+    fn mcp_tool_output_is_listed_and_filters_without_executing() {
+        let tools = mcp_tools();
+        let names: Vec<&str> = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert!(names.contains(&"lm_resizer_tool_output"));
+
+        let temp = tempfile::tempdir().unwrap();
+        let response = handle_mcp_tool_call(
+            json!(1),
+            json!({"name":"lm_resizer_tool_output","arguments":{
+                "command":"cargo test","content":"test result: ok. 2 passed; 0 failed; 0 ignored; finished in 0.01s\n"
+            }}),
+            &temp.path().join("ccr.sqlite"),
+        );
+        assert!(response.get("error").is_none(), "{response}");
+        let payload: Value =
+            serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(payload["command"], "cargo test");
+        assert!(payload["output"].as_str().unwrap().contains("2 passed"));
+
+        let failed = handle_mcp_tool_call(
+            json!(2),
+            json!({"name":"lm_resizer_tool_output","arguments":{
+                "command":"cargo test","content":"error: compilation failed\n","exit_code":1
+            }}),
+            &temp.path().join("ccr.sqlite"),
+        );
+        let failure: Value =
+            serde_json::from_str(failed["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(failure["output"], "error: compilation failed\n");
+    }
+
+    #[test]
     fn image_reencoding_preserves_dimensions_and_high_contrast_marks() {
         use image::GenericImageView;
         let nonce = SystemTime::now()
@@ -10926,11 +11094,6 @@ Successfully tagged localhost/app:latest\n";
     }
 
     #[test]
-    fn sanitize_slug_limits_unsafe_filename_chars() {
-        assert_eq!(sanitize_slug("git status > out"), "git_status___out");
-    }
-
-    #[test]
     fn hook_templates_call_rewrite_without_execution() {
         let sh = hook_rewrite_sh("lm-resizer");
         assert!(sh.contains("rewrite --"));
@@ -11499,6 +11662,68 @@ key = value
         let token = google_adc_access_token(&Client::new()).await.unwrap();
         std::env::remove_var("LM_RESIZER_GOOGLE_ACCESS_TOKEN");
         assert_eq!(token.as_deref(), Some("vertex-token"));
+    }
+
+    #[test]
+    fn json_table_preserves_every_nested_value() {
+        let rows: Vec<Value> = (0..20).map(|id| json!({
+            "id": id, "amount": id * 3,
+            "meta": {"region": "test", "reason": if id == 7 { "limit_exceeded" } else { "none" }},
+            "state": if id == 7 { "rejected" } else { "ok" }
+        })).collect();
+        let raw =
+            serde_json::to_string_pretty(&json!({"schema":"orders-v3", "rows":rows})).unwrap();
+        let compact: Value = serde_json::from_str(&compact_json_rows(&raw).unwrap()).unwrap();
+        let columns: Vec<&str> = compact["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        let restored: Vec<Value> = compact["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                Value::Object(
+                    columns
+                        .iter()
+                        .zip(row.as_array().unwrap())
+                        .map(|(key, cell)| ((*key).to_string(), cell.clone()))
+                        .collect(),
+                )
+            })
+            .collect();
+        let original: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(restored, original["rows"].as_array().unwrap().clone());
+    }
+
+    #[test]
+    fn command_filters_keep_failure_facts_and_collapse_repeated_success() {
+        let pytest = include_str!("../bench/corpus/pytest_fail.txt");
+        let (_, filtered) = filter_command_output(&["pytest".into()], pytest);
+        assert!(filtered.contains("test_reject_zero"));
+        assert!(filtered.contains("status=422"));
+        assert!(filtered.contains("status=200"));
+        assert!(filtered.contains("1 failed"));
+        assert!(!filtered.contains("test_case 010"));
+
+        let cargo = include_str!("../bench/corpus/cargo_ok.txt");
+        let (_, filtered) = filter_command_output(&["cargo".into(), "test".into()], cargo);
+        assert!(filtered.contains("80 passed; 0 failed"));
+        assert!(filtered.contains("0 ignored"));
+        assert!(!filtered.contains("parse::case 000"));
+
+        let with_warning = "warning: unused variable at src/lib.rs:7\n\
+test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
+        let (_, filtered) = filter_command_output(&["cargo".into(), "test".into()], with_warning);
+        assert!(filtered.contains("warning: unused variable"));
+        assert!(filtered.contains("0 ignored"));
+        let (_, filtered) = filter_command_output(
+            &["cargo".into(), "test".into(), "--workspace".into()],
+            with_warning,
+        );
+        assert!(filtered.contains("warning: unused variable"));
     }
 
     #[test]

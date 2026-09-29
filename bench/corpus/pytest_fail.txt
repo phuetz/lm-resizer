@@ -1,0 +1,77 @@
+============================= test session starts =============================
+collected 70 items
+tests/test_orders.py::test_case 000 ........................................ ok
+tests/test_orders.py::test_case 001 ........................................ ok
+tests/test_orders.py::test_case 002 ........................................ ok
+tests/test_orders.py::test_case 003 ........................................ ok
+tests/test_orders.py::test_case 004 ........................................ ok
+tests/test_orders.py::test_case 005 ........................................ ok
+tests/test_orders.py::test_case 006 ........................................ ok
+tests/test_orders.py::test_case 007 ........................................ ok
+tests/test_orders.py::test_case 008 ........................................ ok
+tests/test_orders.py::test_case 009 ........................................ ok
+tests/test_orders.py::test_case 010 ........................................ ok
+tests/test_orders.py::test_case 011 ........................................ ok
+tests/test_orders.py::test_case 012 ........................................ ok
+tests/test_orders.py::test_case 013 ........................................ ok
+tests/test_orders.py::test_case 014 ........................................ ok
+tests/test_orders.py::test_case 015 ........................................ ok
+tests/test_orders.py::test_case 016 ........................................ ok
+tests/test_orders.py::test_case 017 ........................................ ok
+tests/test_orders.py::test_case 018 ........................................ ok
+tests/test_orders.py::test_case 019 ........................................ ok
+tests/test_orders.py::test_case 020 ........................................ ok
+tests/test_orders.py::test_case 021 ........................................ ok
+tests/test_orders.py::test_case 022 ........................................ ok
+tests/test_orders.py::test_case 023 ........................................ ok
+tests/test_orders.py::test_case 024 ........................................ ok
+tests/test_orders.py::test_case 025 ........................................ ok
+tests/test_orders.py::test_case 026 ........................................ ok
+tests/test_orders.py::test_case 027 ........................................ ok
+tests/test_orders.py::test_case 028 ........................................ ok
+tests/test_orders.py::test_case 029 ........................................ ok
+tests/test_orders.py::test_case 030 ........................................ ok
+tests/test_orders.py::test_case 031 ........................................ ok
+tests/test_orders.py::test_case 032 ........................................ ok
+tests/test_orders.py::test_case 033 ........................................ ok
+tests/test_orders.py::test_case 034 ........................................ ok
+tests/test_orders.py::test_case 035 ........................................ ok
+tests/test_orders.py::test_case 036 ........................................ ok
+tests/test_orders.py::test_case 037 ........................................ ok
+tests/test_orders.py::test_case 038 ........................................ ok
+tests/test_orders.py::test_case 039 ........................................ ok
+tests/test_orders.py::test_case 040 ........................................ ok
+tests/test_orders.py::test_case 041 ........................................ ok
+tests/test_orders.py::test_case 042 ........................................ ok
+tests/test_orders.py::test_case 043 ........................................ ok
+tests/test_orders.py::test_case 044 ........................................ ok
+tests/test_orders.py::test_case 045 ........................................ ok
+tests/test_orders.py::test_case 046 ........................................ ok
+tests/test_orders.py::test_case 047 ........................................ ok
+tests/test_orders.py::test_case 048 ........................................ ok
+tests/test_orders.py::test_case 049 ........................................ ok
+tests/test_orders.py::test_case 050 ........................................ ok
+tests/test_orders.py::test_case 051 ........................................ ok
+tests/test_orders.py::test_case 052 ........................................ ok
+tests/test_orders.py::test_case 053 ........................................ ok
+tests/test_orders.py::test_case 054 ........................................ ok
+tests/test_orders.py::test_case 055 ........................................ ok
+tests/test_orders.py::test_case 056 ........................................ ok
+tests/test_orders.py::test_case 057 ........................................ ok
+tests/test_orders.py::test_case 058 ........................................ ok
+tests/test_orders.py::test_case 059 ........................................ ok
+tests/test_orders.py::test_case 060 ........................................ ok
+tests/test_orders.py::test_case 061 ........................................ ok
+tests/test_orders.py::test_case 062 ........................................ ok
+tests/test_orders.py::test_case 063 ........................................ ok
+tests/test_orders.py::test_case 064 ........................................ ok
+tests/test_orders.py::test_case 065 ........................................ ok
+tests/test_orders.py::test_case 066 ........................................ ok
+tests/test_orders.py::test_case 067 ........................................ ok
+tests/test_orders.py::test_case 068 ........................................ ok
+tests/test_orders.py::test_reject_zero FAILED
+________________________ test_reject_zero ________________________
+E       AssertionError: expected status=422, got status=200
+tests/test_orders.py:48: AssertionError
+FAILED tests/test_orders.py::test_reject_zero - AssertionError
+========================= 1 failed, 69 passed in 0.25s =========================

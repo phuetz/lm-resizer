@@ -1457,6 +1457,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lm-resizer-banc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tiktoken-rs",
+]
+
+[[package]]
 name = "lm-resizer-core"
 version = "0.2.3"
 dependencies = [

@@ -8,3 +8,6 @@
 /dist/SHA256SUMS
 /dist/release-evidence.json
 /packages/wasm/*.wasm
+/_qa/
+__pycache__/
+.pytest_cache/

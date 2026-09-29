@@ -40,8 +40,7 @@ doit abandonner quelque chose.
 **Agnostique au provider, validé en réel.** lm-resizer se place devant n'importe
 quelle API compatible OpenAI/Anthropic. Vérifié end-to-end (2026-06-23) devant
 **Mistral, Ollama (local, `$0`), DeepSeek, OpenRouter et xAI/Grok** — vraies clés :
-la requête est compressée par le proxy et le modèle amont répond à travers lui
-(pour Mistral, une sortie d'outil bruyante a fondu ~5,8 Ko→2,8 Ko puis le modèle a répondu).
+la requête est compressée par le proxy et le modèle amont répond à travers lui.
 Tout autre provider compatible OpenAI/Anthropic passe par le même chemin.
 
 ## Pourquoi j’ai créé ce projet
