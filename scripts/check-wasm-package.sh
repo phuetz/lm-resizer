@@ -3,6 +3,8 @@ set -eu
 
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 pkg="$root/packages/wasm"
+export npm_config_cache="$root/target/banc/npm-cache"
+mkdir -p "$npm_config_cache"
 
 node --check "$pkg/index.js"
 "$root/scripts/package-wasm.sh"
@@ -21,7 +23,7 @@ PACK_JSON="$json" node -e '
   const entry = Array.isArray(pack) ? pack[0] : (pack && Array.isArray(pack.files) ? pack : Object.values(pack || {})[0]);
   if (!entry || !Array.isArray(entry.files)) { console.error("npm pack --json has no files list:", raw.slice(0, 400)); process.exit(1); }
   const files = new Set(entry.files.map((file) => file.path));
-  for (const path of ["index.js", "index.d.ts", "README.md", "lm_resizer_wasm.wasm"]) {
+  for (const path of ["index.js", "index.d.ts", "README.md", "LICENSE", "lm_resizer_wasm.wasm"]) {
     if (!files.has(path)) {
       console.error(`npm package missing required file: ${path}`);
       process.exit(1);

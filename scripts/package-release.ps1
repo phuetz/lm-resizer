@@ -23,6 +23,7 @@ Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
 Copy-Item $target (Join-Path $stage "lm-resizer.exe")
+Copy-Item (Join-Path $root "LICENSE") $stage
 Copy-Item (Join-Path $root "README.md") $stage
 Copy-Item (Join-Path $root "CONTRIBUTING.md") $stage
 Copy-Item (Join-Path $root "SECURITY.md") $stage

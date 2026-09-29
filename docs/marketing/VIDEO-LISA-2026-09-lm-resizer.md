@@ -1,4 +1,4 @@
-# VIDEO — lm-resizer 0.2.1
+# VIDEO — lm-resizer 0.2.2 (brouillon à revalider avant publication)
 
 Chaîne **Lisa IA** · publication 09/09/2026 · voix ElevenLabs · avatar Lisa  
 Durée cible voix : 10 à 12 min · débit visé ~160 mots/min · **le texte à l'écran = le script, mot pour mot**  
@@ -8,8 +8,8 @@ Les 5 cases
 
 | Case | Valeur |
 | --- | --- |
-| STAR | lm-resizer [LINKEDIN-2026-09-lm-resizer.md:1] 0.2.1 |
-| CHIFFRE | [README.md:8] 398 commandes, [README.md:8] 1,23 Mo → [README.md:8] 372 Ko, [README.md:8] 222 247 tokens |
+| STAR | lm-resizer 0.2.2, version des manifestes du checkout |
+| CHIFFRE | Fixture synthétique `logs` : 2 009 → 74 jetons LM Resizer ; RTK 99, Headroom 169. Source : `bench/resultats.json`. Trois autres cas du banc sont perdus face à RTK. |
 | ENNEMI | le bruit de commande qui noie l'erreur |
 | MÉTAPHORE | un filtre entre la commande et le modèle — le signal reste, le brut se range |
 | TWIST (~70 %) | le paquet npm ne compresse pas les logs : seulement du JSON ; le reste est dans le binaire Rust |
@@ -18,31 +18,31 @@ Les 5 cases
 
 ## 1) Titre
 
-**Titre retenu (51 caractères)**
+**Titre proposé**
 
 ```
-lm-resizer vient de couper 222 247 tokens d'un test
+Un journal synthétique : 2 009 → 74 jetons
 ```
 
-**Repli 1 (41 caractères)**
+**Repli 1**
 
 ```
-Un cargo test : 1,23 Mo deviennent 372 Ko
+Trois cas où RTK compresse mieux : on les montre
 ```
 
-**Repli 2 (40 caractères)**
+**Repli 2**
 
 ```
-lm-resizer 0.2.1 vient d'arriver sur npm
+Le banc comparatif a été corrigé
 ```
 
 ---
 
 ## 2) Miniature
 
-**Texte (4 mots)** : `222 247 TOKENS`
+**Texte** : `2 009 → 74 JETONS`
 
-**Description visuelle.** Fond noir charbon. À gauche, capitales jaunes outline noir : `222 247 TOKENS` ; sous-ligne blanche plus petite : `1,23 Mo → 372 Ko`. À droite, Lisa détourée, regard caméra, une main ouverte vers le chiffre. En bas, petit mot `lm-resizer`. Contraste fort, lisible à 320 px. Pas de prix, pas de visage d'auteur, pas de logo GitHub dominant.
+**Description visuelle.** Fond noir charbon. À gauche, capitales jaunes outline noir : `2 009 → 74 JETONS` ; sous-ligne blanche plus petite : `fixture synthétique de journal`. À droite, Lisa détourée, regard caméra, une main ouverte vers le chiffre. En bas, petit mot `lm-resizer`. Contraste fort, lisible à 320 px. Pas de prix, pas de visage d'auteur, pas de logo GitHub dominant.
 
 ---
 
@@ -53,7 +53,7 @@ Contenu synthétique : présentatrice générée par IA. Lisa parle pour le stud
 
 Un agent de code passe une part énorme de sa fenêtre à lire du bruit : tests, logs npm, diffs, listings. lm-resizer se met entre la commande et le modèle et ne garde que le signal.
 
-Un cargo test à travers lui : 398 commandes, 1,23 Mo → 372 Ko, 222 247 tokens économisés. Les erreurs, les chemins et le résumé restent. La sortie complète reste récupérable.
+Sur la fixture synthétique `logs` du banc, 2 009 jetons en entrée deviennent 74 avec LM Resizer, 99 avec RTK et 169 avec Headroom (`bench/resultats.json`). Les erreurs restent visibles et le brut est récupérable. Le même banc publie trois cas où RTK compresse mieux.
 
 Rust. Enveloppe de commande, proxy HTTP, serveur MCP, hooks Claude Code et Codex. Compression consciente de la question. Le module WebAssembly est sur npm : trois lignes pour compresser un JSON depuis Node. Ce paquet-là ne compresse pas les logs — ça, c'est le binaire.
 
@@ -77,16 +77,16 @@ Horloge cumulée en tête de plan. Total visé **~11:10**.
 ### Acte 0 — Hook et promesse (0:00–0:20)
 
 #### Plan 1 · 0:00–0:04 · 4 s · 🎥 Lisa #1
-- **Dit :** Un `cargo test` à travers lm-resizer [README.md:8].
+- **Dit :** Voici la sortie de journal synthétique du banc comparatif (`bench/corpus/logs.txt`).
 - **Écran :** Lisa regard caméra + PNG `docs/lm-resizer-hero.png`. Karaoké identique.
 
 #### Plan 2 · 0:04–0:08 · 4 s
-- **Dit :** [README.md:8] 398 commandes. [README.md:8] 1,23 Mo deviennent [README.md:8] 372 Ko.
-- **Écran :** `1,23 Mo → 372 Ko` en gros. Carton `398`.
+- **Dit :** Sur la fixture synthétique `logs` du banc, deux mille neuf jetons deviennent soixante-quatorze avec lm-resizer.
+- **Écran :** `2 009 → 74 jetons`. Source `bench/resultats.json · logs` et mention `fixture synthétique`.
 
 #### Plan 3 · 0:08–0:12 · 4 s
-- **Dit :** [README.md:8] 222 247 tokens économisés.
-- **Écran :** `222 247` plein cadre. Source `README · L8`.
+- **Dit :** RTK en garde quatre-vingt-dix-neuf ; Headroom, cent soixante-neuf, sur les mêmes octets.
+- **Écran :** `RTK 99 · Headroom 169`. Source `bench/resultats.json · logs`.
 
 #### Plan 4 · 0:12–0:16 · 4 s
 - **Dit :** Le signal reste. Le bruit tombe. La sortie complète reste récupérable [README.md:9].
@@ -137,8 +137,8 @@ Horloge cumulée en tête de plan. Total visé **~11:10**.
 - **Écran :** cinq noms, date `2026-06-23`.
 
 #### Plan 15 · 1:22–1:30 · 8 s
-- **Dit :** Devant Mistral, une charge d'outil bruyante est passée d'environ [README.md:43] 5,8 Ko à [README.md:43] 2,8 Ko, puis le modèle a répondu [README.md:43].
-- **Écran :** `~5,8 Ko → 2,8 Ko` puis bulle de réponse.
+- **Dit :** Le proxy a été essayé manuellement devant Mistral ; cet essai n'est pas une mesure du banc comparatif.
+- **Écran :** Schéma du proxy puis bulle de réponse, sans chiffre de performance.
 
 #### Plan 16 · 1:30–1:38 · 8 s
 - **Dit :** Toute autre API compatible OpenAI ou Anthropic passe par le même chemin [README.md:44].
@@ -169,11 +169,11 @@ Horloge cumulée en tête de plan. Total visé **~11:10**.
 ### Acte 2 — La preuve : exec, le filtre, la récupération (2:20–4:50)
 
 #### Plan 22 · 2:20–2:26 · 6 s
-- **Dit :** Revenons au chiffre. Une exécution de `cargo test` à travers lm-resizer [README.md:8].
+- **Dit :** Revenons au chiffre de la fixture `logs`, mesurée sur les mêmes octets par les trois outils (`bench/resultats.json`).
 - **Écran :** `docs/lm-resizer-hero.png`.
 
 #### Plan 23 · 2:26–2:32 · 6 s
-- **Dit :** [README.md:8] 398 commandes. [README.md:8] 1,23 Mo. [README.md:8] 372 Ko. [README.md:8] 222 247 tokens.
+- **Dit :** Sur les vingt-deux fixtures, lm-resizer perd aussi trois cas face à RTK : une erreur de compilation, un diff Git et un test .NET réussi.
 - **Écran :** quatre nombres, un par cut.
 
 #### Plan 24 · 2:32–2:38 · 6 s
@@ -261,7 +261,7 @@ Horloge cumulée en tête de plan. Total visé **~11:10**.
 - **Écran :** commandes d'install MCP.
 
 #### Plan 44 · 5:04–5:12 · 8 s
-- **Dit :** Quatre outils exposés : `lm_resizer_compress`, `lm_resizer_tool_output`, `lm_resizer_retrieve`, `lm_resizer_stats` [README.md:360].
+- **Dit :** Quatre outils MCP exposés : `lm_resizer_compress`, `lm_resizer_tool_output`, `lm_resizer_retrieve`, `lm_resizer_stats` (`src/main.rs`, liste MCP vérifiée).
 - **Écran :** liste des 4 tools, `tool_output` annoté `never executes`.
 
 #### Plan 45 · 5:12–5:20 · 8 s
@@ -437,7 +437,7 @@ Horloge cumulée en tête de plan. Total visé **~11:10**.
 - **Écran :** les trois URLs.
 
 #### Plan 85 · 10:36–10:44 · 8 s
-- **Dit :** Si tu n'emportes qu'une phrase : un `cargo test` a fait [README.md:8] 1,23 Mo. lm-resizer en a rendu [README.md:8] 372 Ko. [README.md:8] 222 247 tokens. Rien n'est perdu.
+- **Dit :** Si tu n'emportes qu'une phrase : le banc montre des gains sur certaines sorties, trois pertes face à RTK et des originaux récupérables ; chaque chiffre appartient à une fixture précise.
 - **Écran :** répétition du chiffre-choc.
 
 #### Plan 86 · 10:44–10:52 · 8 s · 🎥 Lisa #5
@@ -479,14 +479,14 @@ Racine produit (lecture seule) : `~/DEV/lm-resizer-master-wt/`
 | C11 | `11-ml-status.mp4` | `lm-resizer ml-status --json` | même | Magika inactif par défaut |
 | C12 | `12-serve-health.mp4` | `lm-resizer serve --bind 127.0.0.1:8787` puis `curl -sS http://127.0.0.1:8787/health` | même | `/health` répond ; arrêter le serveur après |
 
-Ne pas filmer un `cargo test` complet du dépôt comme « la » preuve des [README.md:8] 222 247 tokens : ce chiffre est celui du README (hero). Si on rejoue un `cargo test` à travers `exec`, afficher les octets de CETTE run, sans les relabeler 222 247.
+Ne pas filmer un `cargo test` complet du dépôt comme preuve du cas `logs` : ce cas est une fixture synthétique. Si on rejoue une commande réelle à travers `exec`, afficher les octets et jetons de CETTE exécution, ainsi que l'oracle retenu.
 
 ---
 
 ## 6) Cinq chapitres YouTube
 
 ```
-00:00 222 247 tokens sur un cargo test
+00:00 2 009 → 74 jetons sur la fixture synthétique `logs`
 00:20 Le bruit remplit la fenêtre
 02:20 exec, le filtre, la récupération
 04:50 Hooks, MCP, proxy

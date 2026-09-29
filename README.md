@@ -5,15 +5,21 @@ and more useful context.
 
 ![lm-resizer in action](docs/lm-resizer-hero.png)
 
-> One `cargo test` run through `lm-resizer`: **398 commands, 1.23 MB → 372 KB,
-> 222,247 tokens saved** — signal kept, noise dropped, nothing lost (full output
-> stays recoverable).
+> LM Resizer reduces command output while keeping failures and summaries visible.
+> The full output remains locally recoverable. See the [reproducible side-by-side
+> benchmark](bench/README.md) for measured token counts and retention checks.
 
 ![lm-resizer: from noisy tool output (tests, logs, diffs, JSON, provider traffic) through detection, filtering, compression and CCR offload, to a lean context for the agent; CLI, exec wrapper, MCP, HTTP and proxy modes](docs/infographic-lm-resizer.webp)
 
 Website: <https://phuetz.github.io/lm-resizer/>
 
 French README: [README.fr.md](README.fr.md)
+
+The benchmark covers the commands and fixtures listed in
+[`bench/cases.json`](bench/cases.json). It does not establish parity with RTK's
+`sqlfluff`, `pulumi`, `sbt`, `mvnd`, `phpt`, `deno`, or OpenShift commands; these
+are outside the measured command coverage. Output token savings are not a
+measurement of provider billing or agent task success.
 
 `lm-resizer` is designed for a practical agent problem: Claude Code, Codex, and
 MCP agents spend a surprising amount of their context window on raw tool output.
@@ -41,8 +47,7 @@ drop anything.
 **Provider-agnostic, validated live.** lm-resizer sits in front of any
 OpenAI/Anthropic-compatible API. Verified end-to-end (2026-06-23) in front of
 **Mistral, Ollama (local, `$0`), DeepSeek, OpenRouter and xAI/Grok** — real keys:
-a request is compressed by the proxy and the upstream model answers through it
-(for Mistral, a noisy tool payload shrank ~5.8KB→2.8KB then the model replied).
+a request is compressed by the proxy and the upstream model answers through it.
 Any other OpenAI/Anthropic-compatible provider works via the same path.
 
 ## Why this exists
@@ -139,7 +144,13 @@ ONNX path falls back to deterministic detection. ONNX detection is native-only
 
 ```bash
 cargo build
+cargo install --path . --locked
 ```
+
+`cargo build` leaves the development binary at `target/debug/lm-resizer`.
+`cargo install --path . --locked` installs the CLI in Cargo's bin directory
+(usually `~/.cargo/bin`); ensure that directory is on your `PATH` before
+installing the Claude Code plugin.
 
 Release checks and local packaging:
 
@@ -181,7 +192,13 @@ filters, and Dependabot is configured for Cargo, npm, and GitHub Actions.
 
 ## CLI
 
+Use `exec` when LM Resizer runs the command, or `tool-output --command` for
+output already captured from a named command. `compress --input` handles file
+content without knowing which command produced it, so command-specific
+filters such as `docker build` do not apply there.
+
 ```bash
+lm-resizer tool-output --command "docker build" --input docker.txt --json
 lm-resizer compress --input tool-output.txt --json
 lm-resizer compress --input src/Service.cs --json  # indexed Code Explorer symbols when available
 lm-resizer smart src/Service.cs --json  # source summary with the same indexed symbols
@@ -373,7 +390,7 @@ overwriting an existing file. This metadata is not OCR or scene recognition.
 Voice removes common transcript filler tokens, and `ml-status` reports whether
 optional Magika / ONNX classification is enabled.
 
-## Install as a Claude Code plugin (one command)
+## Install as a Claude Code plugin
 
 The repository is its own plugin marketplace. With the `lm-resizer` binary on
 your `PATH`, this installs the skill **and** the MCP server:

@@ -1,0 +1,38 @@
+# Recovery procedure
+The ledger is read only during reconciliation. An operator must inspect mismatch code E_LEDGER_MISMATCH before retrying.
+Never retry more than three times; escalate to the on call owner after the third attempt.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.
+The status page is updated only after the repair has passed the invoice checksum validation.

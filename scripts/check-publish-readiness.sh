@@ -23,6 +23,40 @@ tarballs="$(node -e "console.log((require('$evidence').wasm_tarballs || []).join
 }
 [ -n "$tarballs" ] || { printf >&2 '%s\n' "release evidence does not list a WASM tarball"; exit 1; }
 
+ROOT="$root" node - <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const root = process.env.ROOT;
+const read = (name) => JSON.parse(fs.readFileSync(path.join(root, name), 'utf8'));
+const pkg = read('packages/wasm/package.json');
+const plugin = read('.claude-plugin/plugin.json');
+const marketplace = read('.claude-plugin/marketplace.json');
+const evidence = read('dist/release-evidence.json');
+const fail = (message) => { console.error(message); process.exit(1); };
+const lm = marketplace.plugins.find((item) => item.name === 'lm-resizer');
+if (!lm || plugin.version !== pkg.version || lm.version !== pkg.version)
+  fail('plugin, marketplace and npm package versions do not match');
+if (evidence.version !== pkg.version || Object.values(evidence.cargo_versions || {}).some((version) => version !== pkg.version))
+  fail('release evidence Cargo versions do not match npm package');
+const artifacts = [...(evidence.wasm_tarballs || []), ...(evidence.binary_archives || [])];
+if (!evidence.binary_archives?.length) fail('release evidence does not list a platform binary archive');
+const sumsPath = path.join(root, 'dist/SHA256SUMS');
+if (!fs.existsSync(sumsPath)) fail('missing dist/SHA256SUMS');
+const sums = new Map(fs.readFileSync(sumsPath, 'utf8').trim().split('\n').filter(Boolean).map((line) => {
+  const match = /^([0-9a-f]{64})  (.+)$/.exec(line);
+  if (!match) fail(`invalid checksum line: ${line}`);
+  return [match[2], match[1]];
+}));
+for (const name of artifacts) {
+  if (!name.includes(pkg.version)) fail(`stale artifact version: ${name}`);
+  const file = path.join(root, 'dist', name);
+  if (!fs.existsSync(file)) fail(`missing release artifact: ${name}`);
+  const digest = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  if (sums.get(name) !== digest) fail(`missing or invalid SHA-256 for ${name}`);
+}
+NODE
+
 for required in \
   "environment: npm-production" \
   "id-token: write" \
