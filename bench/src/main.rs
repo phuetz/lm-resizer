@@ -618,7 +618,12 @@ fn row_for<'a>(rows: &'a [Row], case: &str, tool: &str) -> &'a Row {
 }
 
 fn corpus_description(total: usize, reelles: usize) -> String {
-    format!("ces {} fixtures ({} captures réelles, {} synthétiques)", total, reelles, total - reelles)
+    format!(
+        "ces {} fixtures ({} captures réelles, {} synthétiques)",
+        total,
+        reelles,
+        total - reelles
+    )
 }
 
 const REAL_CAPTURES: &[&str] = &["compile_error", "git_diff", "dotnet_ok"];
