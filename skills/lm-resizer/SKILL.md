@@ -63,7 +63,7 @@ When you finish a task that used lm-resizer, add one line to your report: how ma
 ## Automatic mode (optional, reversible)
 
 - `lm-resizer install-hooks --client claude --project-dir .` adds a marked, reversible guidance block to `CLAUDE.md`.
-- `lm-resizer init-native-hooks --client claude --project-dir .` installs a PreToolUse hook that routes supported commands through `exec` automatically. Remove with `uninstall-hooks`.
+- `lm-resizer init-native-hooks --client claude --project-dir .` generates experimental native hook config. Automatic activation in the agent is unverified. Back up existing config before using `--force`; it overwrites the whole file. `uninstall-hooks` removes guidance blocks only: remove native hook entries manually or restore the backup.
 
 ## Pair it with Code Explorer
 

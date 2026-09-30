@@ -15,6 +15,7 @@ test-runner filters) lives in the Rust binary: see the
 ## Install
 
 ```bash
+npm init -y                     # only for a new, empty project
 npm install @phuetz/lm-resizer
 ```
 
@@ -27,6 +28,9 @@ import { initLmResizerWasmFromPackage } from "@phuetz/lm-resizer";
 
 const lm = await initLmResizerWasmFromPackage();
 
+const bigJsonString = JSON.stringify(Array.from({ length: 100 }, (_, id) => ({
+  id, name: `item-${id}`, status: "ok",
+})));
 const report = lm.compressJson(bigJsonString);          // generic pipeline
 const focused = lm.compressJson(bigJsonString, "error"); // keep what relates to "error"
 

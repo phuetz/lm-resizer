@@ -4,12 +4,12 @@ description: Compress large command or file output with the local `lm-resizer` C
 metadata:
   author: Grok
   short-description: Local lossless-first context compression
-  compatibility: Requires lm-resizer on PATH. CLI has no --version flag
+  compatibility: Requires lm-resizer on PATH. CLI supports --version and -V
 ---
 
 # LM Resizer (local CLI)
 
-Binary: `lm-resizer` on PATH. `lm-resizer --help` lists commands. There is no `--version` / `-V` / `version` subcommand. Do not install a duplicate when the binary is already present.
+Binary: `lm-resizer` on PATH. `lm-resizer --help` lists commands. Use `lm-resizer --version` or `lm-resizer -V` to check the installed version (there is no `version` subcommand). Do not install a duplicate when the binary is already present.
 
 Use when shrinking a large transcript helps this turn. Do not wrap every shell call.
 

@@ -99,7 +99,7 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="brand"><span class="mark">&gt;_</span> lm-resizer <span class="version">0.1.0</span></div>
+    <div class="brand"><span class="mark">&gt;_</span> lm-resizer <span class="version">0.2.3</span></div>
     <nav>
       <a href="#why">Why</a>
       <a href="#together">Together</a>
@@ -213,10 +213,10 @@
 
     <section id="agents">
       <h2>Connect Claude Code, Codex and MCP agents</h2>
-      <p class="lead">Install project instructions or native hook configs, then route noisy tool output through a consistent local compression layer.</p>
+      <p class="lead">Install MCP configuration or project instructions. Experimental native hook files require validation with your agent version.</p>
       <div class="grid2">
-        <pre><span class="c"># Native hook configs for Claude Code and Codex</span>
-<span class="k">lm-resizer</span> init-native-hooks --client all --project-dir . --force
+        <pre><span class="c"># Experimental native configs; agent activation unverified</span>
+<span class="k">lm-resizer</span> init-native-hooks --client all --project-dir .
 
 <span class="c"># Reversible agent guidance blocks</span>
 <span class="k">lm-resizer</span> install-hooks --client codex --project-dir . --force
@@ -249,9 +249,11 @@
         <pre><span class="c"># Build the local binary</span>
 git clone https://github.com/phuetz/lm-resizer
 cd lm-resizer
-cargo build --release
+cargo install --quiet --path . --locked --root "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
 
-<span class="c"># Compress a file or command output</span>
+<span class="c"># Create a sample, then compress it</span>
+printf '{"status":"ok"}\n' &gt; tool-output.txt
 <span class="k">lm-resizer</span> compress --input tool-output.txt --json
 <span class="k">lm-resizer</span> exec --stream -- cargo test</pre>
         <pre><span class="c"># Run the local proxy</span>
@@ -259,7 +261,8 @@ cargo build --release
 
 <span class="c"># Evaluate real Claude/Codex session logs</span>
 <span class="k">lm-resizer</span> discover-sessions --agent all --markdown
-<span class="k">lm-resizer</span> eval fixtures/sessions --recursive --markdown</pre>
+<span class="k">lm-resizer</span> eval ~/.codex/sessions --recursive --markdown
+<span class="c"># eval requires existing session logs; skip on a new install</span></pre>
       </div>
     </section>
 
