@@ -13,7 +13,7 @@ if ! diff -q skills/lm-resizer/SKILL.md .claude/skills/lm-resizer/SKILL.md >/dev
 fi
 # Ignore the client-specific frontmatter, not the user-facing instructions.
 skill_body() {
-  awk 'NR == 1 && /^---$/ { front = 1; next } front && /^---$/ { front = 0; next } !front { print }' "$1"
+  awk '{ sub(/\r$/, "") } NR == 1 && /^---$/ { front = 1; next } front && /^---$/ { front = 0; next } !front { print }' "$1"
 }
 expected_codex_body() {
   skill_body skills/lm-resizer/SKILL.md | sed \
