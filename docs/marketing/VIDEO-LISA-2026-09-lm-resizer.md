@@ -253,11 +253,11 @@ Horloge cumulée en tête de plan. Total visé **~11:10**.
 ### Acte 3 — Hooks, MCP, proxy (4:50–7:10)
 
 #### Plan 42 · 4:50–4:56 · 6 s
-- **Dit :** Quatre façons de l'utiliser. Enveloppe de commande. Proxy HTTP. Serveur MCP. Hooks pour Claude Code et Codex [LINKEDIN-2026-09-lm-resizer.md:15].
+- **Dit :** Quatre façons de l'utiliser. Enveloppe de commande. Proxy HTTP. Serveur MCP. Configuration expérimentale de hooks pour Claude Code et Codex [docs/CLAUDE_CODEX.md, Add Native Hook Config].
 - **Écran :** quatre portes.
 
 #### Plan 43 · 4:56–5:04 · 8 s
-- **Dit :** `lm-resizer mcp`. `lm-resizer install --client claude --scope project`. Pareil pour Codex, ou `all` [README.md:349].
+- **Dit :** `lm-resizer mcp`. `lm-resizer install --client claude --scope project`. Pour Codex : `lm-resizer install --client codex --scope global`. Avec `all --scope project`, Codex reste configuré pour l'utilisateur [docs/CLAUDE_CODEX.md, Install].
 - **Écran :** commandes d'install MCP.
 
 #### Plan 44 · 5:04–5:12 · 8 s
@@ -265,11 +265,11 @@ Horloge cumulée en tête de plan. Total visé **~11:10**.
 - **Écran :** liste des 4 tools, `tool_output` annoté `never executes`.
 
 #### Plan 45 · 5:12–5:20 · 8 s
-- **Dit :** `init-native-hooks` écrit la vraie config Claude Code / Codex : un PreToolUse qui substitue une commande Bash supportée par `lm-resizer exec --`, et un PostToolUse qui enregistre les économies [README.md:311].
-- **Écran :** PreToolUse rewrite · PostToolUse telemetry.
+- **Dit :** `init-native-hooks` génère une configuration native **expérimentale** pour Claude Code et Codex. Le gestionnaire PreToolUse et PostToolUse est testé hors ligne ; son activation et la substitution de commandes dans une vraie session agent restent **non vérifiées** [docs/CLAUDE_CODEX.md, Add Native Hook Config].
+- **Écran :** Config expérimentale · gestionnaire testé hors ligne · activation agent non vérifiée.
 
 #### Plan 46 · 5:20–5:28 · 8 s
-- **Dit :** Le rewrite ne bloque jamais. Une commande non supportée ou illisible ne dit rien et tourne brute. Le crochet refuse de se ré-envelopper lui-même [README.md:316].
+- **Dit :** Dans les essais hors ligne du gestionnaire, une commande non supportée ou illisible ne produit aucune réécriture. Le gestionnaire refuse de ré-envelopper un appel à `lm-resizer exec` [docs/CLAUDE_CODEX.md, Add Native Hook Config].
 - **Écran :** unsupported → raw.
 
 #### Plan 47 · 5:28–5:36 · 8 s
