@@ -56,12 +56,12 @@ When you finish a task that used lm-resizer, add one line to your report: how ma
 
 ## MCP tools (if the server is installed)
 
-`lm_resizer_compress`, `lm_resizer_tool_output` (post-execution reduction of output you already have; never runs commands), `lm_resizer_retrieve`, `lm_resizer_stats`. Install once per project: `lm-resizer install --client codex --scope project`.
+`lm_resizer_compress`, `lm_resizer_tool_output` (post-execution reduction of output you already have; never runs commands), `lm_resizer_retrieve`, `lm_resizer_stats`. Install for the user: `lm-resizer install --client codex --scope global`.
 
 ## Automatic mode (optional, reversible)
 
 - `lm-resizer install-hooks --client codex --project-dir .` adds a marked, reversible guidance block to `AGENTS.md`.
-- `lm-resizer init-native-hooks --client codex --project-dir .` installs a native Codex hook that routes supported commands through `exec` automatically. Remove with `uninstall-hooks`.
+- `lm-resizer init-native-hooks --client codex --project-dir .` generates experimental native hook config. Automatic activation in the agent is unverified. Back up existing config before using `--force`; it overwrites the whole file. `uninstall-hooks` removes guidance blocks only: remove native hook entries manually or restore the backup.
 
 ## Pair it with Code Explorer
 
