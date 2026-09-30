@@ -4,7 +4,7 @@
 
 ![Example of LM Resizer processing command output](docs/lm-resizer-hero.png)
 
-[Français](README.fr.md) · [Website](https://phuetz.github.io/lm-resizer/) · [Benchmark method and all 22 cases](bench/README.md) · [FAQ](docs/FAQ.md) · [Known misses](docs/KNOWN-MISSES.md)
+[Français](README.fr.md) · [Website](https://phuetz.github.io/lm-resizer/) · [Benchmark method and all 23 cases](bench/README.md) · [FAQ](docs/FAQ.md) · [Known misses](docs/KNOWN-MISSES.md)
 
 ## Install and try it
 
@@ -53,16 +53,32 @@ cargo uninstall --root "$HOME/.local" lm-resizer
 
 The CLI also offers `compress` for files or standard input, `tool-output` for already captured command output, and opt-in MCP, HTTP and agent hook integrations. See [the agent integration guide](docs/CLAUDE_CODEX.md) and [the release guide](docs/RELEASE.md) for those workflows.
 
+## Savings with a denominator
+
+`lm-resizer gain` shows commands, filters and “X tokens saved out of Y”. `stats --markdown`, `discover`, `discover-sessions`, `eval` and `learn` reports also identify the counting method. The default counter is the **`o200k_base` BPE**, shared with the benchmark; override it with `--tokenizer cl100k_base` or `LM_RESIZER_TOKENIZER=cl100k_base`. Model names without an exact tokenizer use the core estimator and are labelled **estimate**.
+
+New history records count raw text and the final output, including recovery markers. Older records containing only byte sizes remain explicitly estimated (`legacy_bytes_div_4`). Select the counter when collecting `exec` or `discover` data; `stats` reads the recorded counter. Different tokenizers and estimates are reported separately; token expansion remains negative. Historical JSON fields, including `estimated_tokens_saved = bytes_saved / 4`, are retained and deprecated: use `token_savings` for counts and denominators.
+
+The scope is the **final command-output text**, excluding the JSON envelope, CLI stderr and raw forwarding in `--stream`, rather than billing or total session usage. `discover` measures potential filter savings on captured outputs, without executing commands or simulating retrievals. `doctor` explains empty history, disabled tracking and recorded commands with zero savings.
+
+```bash
+lm-resizer exec -- git log -40 --stat
+lm-resizer gain
+lm-resizer --tokenizer cl100k_base exec -- git diff
+```
+
+The `git_log_stat` route preserves full hashes, authors, dates, subjects, files, totals and Git histograms. Message bodies are omitted with a recovery notice; `graph:+N/-N`, used only when smaller, counts displayed bars rather than exact per-file additions/deletions. On a frozen real 40-commit log: **978 tokens saved out of 6,110 (16.0%)**, 19,861 → 14,895 bytes. On the benchmark fixture, consisting almost entirely of facts: **57 out of 7,728 (0.7%)**, complete oracle; RTK and Headroom save zero. Token counting adds overhead: this release replay has **207 ms** median CLI latency versus RTK’s 12 ms and Headroom’s 769 ms. The preceding replay measured 89 ms / 9 ms / 338 ms on the same outputs; host load and cache make these timings variable. [Limitations](docs/KNOWN-MISSES.md).
+
 ## Measured against RTK and Headroom
 
-**Replayed 2026-09-30** from merge commit `df30334`, on Linux x86_64, 24 logical CPU cores and 93 GiB RAM. The comparison uses RTK 0.50.0, Headroom 0.39.1 with ONNX Runtime 1.24.4, and the same 22 input fixtures. `o200k_base` counts output tokens. A saving counts only when every fact in the case's stated oracle survives; otherwise its *qualified saving* is zero. Three fixtures are captured from real tools; the others are synthetic. [Method, fixtures and full results](bench/README.md).
+**Replayed 2026-09-30** from implementation commit `83e9b25` (release profile), on Linux x86_64, 24 logical CPU cores and 93 GiB RAM. The comparison uses RTK 0.50.0, Headroom 0.39.1 with ONNX Runtime 1.24.4, and the same 23 input fixtures. `o200k_base` counts output tokens. A saving counts only when every fact in the case's stated oracle survives; otherwise its *qualified saving* is zero. Four fixtures are captured from real tools, including Git output from a reproducible fictitious repository; the others are synthetic. [Method, fixtures and full results](bench/README.md).
 
-| Result across 22 cases | LM Resizer | RTK | Headroom |
+| Result across 23 cases | LM Resizer | RTK | Headroom |
 |---|---:|---:|---:|
-| Sole wins on qualified saving | 13 | 2 | 0 |
+| Sole wins on qualified saving | 14 | 2 | 0 |
 | Shared win | 1 with RTK | 1 with LM Resizer | 0 |
-| Median qualified saving across cases | 74.7% | 0.0% | 0.0% |
-| Complete stated oracle | 22/22 | 15/22 | 22/22 |
+| Median qualified saving across cases | 65.0% | 0.0% | 0.0% |
+| Complete stated oracle | 23/23 | 16/23 | 23/23 |
 
 Six further cases have **no qualified gain from any tool**. Examples below use the measured input token count and qualified saving; zero can mean unchanged output or an incomplete oracle.
 
@@ -72,6 +88,7 @@ Six further cases have **no qualified gain from any tool**. Examples below use t
 | `logs` | 2,009 | 96% | 95% | 92% | All three retain the stated oracle. |
 | `dotnet_ok` | 111 | 50% | **81%** | 0% | RTK saves more. |
 | `git_diff` | 195 | **47%** (103 tokens) | 36% (125 tokens) | 0% | LM Resizer saves more. |
+| `git_log_stat` | 7,728 | **0.7%** (57 / 7,728 tokens saved) | 0% | 0% | Complete hashes, dates and file statistics. |
 | `compile_error` | 106 | 0% | **26%** | 0% | RTK saves more. |
 | Six source-code cases | 379–481 each | 0% | 0% | 0% | No measured saving. |
 

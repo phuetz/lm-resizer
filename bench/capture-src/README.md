@@ -21,3 +21,9 @@ SHA-256 de `bench/corpus/git_diff.txt` : `4c381aa1327117f4fc05717928a1a669d87f38
 Copier `dotnet/` dans un répertoire temporaire, exécuter `dotnet restore Atlas.Tests.csproj`, puis `dotnet test Atlas.Tests.csproj --no-restore`. Les 65 données du test xUnit réussissent et la sortie standard contient la ligne `Passed!  - Failed: 0, Passed: 65` avec les espaces du CLI. La capture a été faite sous `/tmp/lmr-dotnet-real` ; aucun chemin personnel n'est présent. Le temps affiché (`41 ms`) est celui de cette exécution, pas une garantie de performance.
 
 SHA-256 de `bench/corpus/dotnet_ok.txt` : `883e9bd15055bdd72c46e7d2b63b898e72aa98b6aef00898396dcff316eeb052`.
+
+## Historique Git avec statistiques
+
+Exécuter `git-log/capture.sh` depuis n’importe quel répertoire et rediriger stdout. Le script crée un dépôt temporaire, 40 commits, huit fichiers et une identité fictive ; il supprime uniquement son dépôt temporaire à la fin. La capture versionnée a été produite par Git 2.43.0. Les sources sont générées et le journal est une vraie sortie `git log -40 --stat`, sans sortie terminal fabriquée. Les hashes, auteurs, dates, titres et statistiques de fichiers sont tous associés à leur commit dans l’oracle.
+
+SHA-256 de `bench/corpus/git_log_stat.txt` : `4e5594e913d52b56382546598218849de1e6dd57ef5c2d133293681a48725702`.

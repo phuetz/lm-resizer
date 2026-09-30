@@ -1,5 +1,8 @@
 # LM Resizer : Foire Aux Questions
 
+### Que mesurent les jetons économisés et les pourcentages ?
+Ils comparent le texte brut de la commande à la sortie finale, marqueurs de récupération compris, avec `o200k_base` par défaut. `--tokenizer` ou `LM_RESIZER_TOKENIZER` permettent de choisir un autre encodage BPE pris en charge ou un nom de modèle. Les modèles sans tokenizer exact et les anciens historiques en octets restent explicitement estimés ; les compteurs différents restent séparés. Enveloppes JSON, stderr du CLI, flux bruts, récupérations ultérieures, raisonnement, cache fournisseur et facture sont hors de ce dénominateur. `discover` mesure une économie potentielle du filtre sans lancer les commandes. Les champs JSON historiques en octets ÷ 4 restent présents et dépréciés ; utiliser `token_savings`. `gain` donne le résumé lisible et `doctor` explique les économies nulles.
+
 Cette page fournit des réponses factuelles concernant l'intégration, la sécurité et les performances de LM Resizer, basées sur les données et la documentation du dépôt.
 
 ### La sécurité des hooks qui réécrivent le shell : sont-ils opt-in ? Que se passe-t-il si l'analyse échoue ?
@@ -21,7 +24,7 @@ LM Resizer est distribué sous licence **Apache-2.0**. L'outil optionnel [Code E
 Bien que les deux outils compressent le contexte des agents, LM Resizer préserve un oracle beaucoup plus complet dans de nombreux cas. Par exemple, sur `git_log`, LM Resizer conserve 100 % de l'oracle contre 4 % pour RTK ; sur `json_large`, 100 % contre 33 %. Il gagne aussi sur des outils comme `docker` et `psql` où RTK n'a aucun filtre (`bench/resultats.json`). Sur `git_diff`, le rejeu actuel économise 47 % contre 36 % pour RTK, avec les deux oracles déclarés complets. LM Resizer reste derrière RTK sur `dotnet_ok` et `compile_error`.
 
 ### Headroom annonce 60–95 % d'économie. Pourquoi choisir LM Resizer ?
-Sur notre corpus de 22 fixtures synthétiques et réelles, Headroom a obtenu une économie qualifiée médiane de 0,0 %, avec une latence médiane de 361 ms (contre 15 ms pour LM Resizer). De plus, Headroom n'a eu recours à son détecteur Python que 0 fois sur 22 (`bench/RAPPORT.md`). Ces durées dépendent de la machine et du cache.
+Sur notre corpus de 23 fixtures synthétiques et réelles, Headroom a obtenu une économie qualifiée médiane de 0,0 %, avec une latence médiane de 769 ms (contre 207 ms pour LM Resizer). De plus, Headroom n'a eu recours à son détecteur Python que 0 fois sur 23 (`bench/RAPPORT.md`). Ces durées dépendent de la machine et du cache.
 
 ### La modification du prompt casse-t-elle le cache du fournisseur (prompt caching) ?
 Pour les requêtes Anthropic, `steer_verbosity` contrôle `frozen_count` et n'injecte rien si le dernier message utilisateur est gelé ; le message système n'est pas modifié. Le dépôt contient des tests hors ligne du cache-control et de la zone active. Le taux réel de succès du cache fournisseur n'a pas été vérifié ici.

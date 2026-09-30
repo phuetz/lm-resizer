@@ -1,5 +1,8 @@
 # LM Resizer: Frequently Asked Questions
 
+### What do the saved tokens and percentages measure?
+They compare raw command-output text with the final output payload, recovery markers included, using `o200k_base` by default. Set `--tokenizer` or `LM_RESIZER_TOKENIZER` to another supported BPE encoding or model name. Fallback models and legacy byte-only history are explicitly estimated; different counters stay separate. JSON envelopes, CLI stderr, raw streaming, follow-up retrievals, reasoning, provider caching and billing are outside this denominator. `discover` measures potential filter savings; it does not run commands. The legacy JSON byte-density fields are retained and deprecated; new consumers should use `token_savings`. Use `gain` for a readable summary and `doctor` when no savings are recorded.
+
 This page provides factual answers about LM Resizer's integration, safety, and benchmarks, based on the repository's data and documentation.
 
 ### Is it safe to use shell-rewriting hooks? Are they opt-in? What if parsing fails?
@@ -21,7 +24,7 @@ LM Resizer is licensed under **Apache-2.0**. The optional [Code Explorer](https:
 While both tools compress agent context, LM Resizer preserves a much more complete oracle in many cases. For example, on `git_log`, LM Resizer retains 100% of the oracle compared to RTK's 4%; on `json_large`, 100% vs 33%; and wins outright on commands like `docker` and `psql` where RTK has no filter (`bench/resultats.json`). On `git_diff`, the current replay saves 47% versus RTK's 36%, with both stated oracles complete. LM Resizer remains behind RTK on `dotnet_ok` and `compile_error`.
 
 ### Headroom claims 60–95% savings. Why use LM Resizer?
-On our suite of 22 real and synthetic fixtures, Headroom achieved a median qualified saving of 0.0% while exhibiting a median latency of 361 ms, compared to LM Resizer's 15 ms. Furthermore, Headroom fell back to its Python detector 0 times out of 22 (`bench/RAPPORT.md`). These timings depend on the machine and cache.
+On our suite of 23 real and synthetic fixtures, Headroom achieved a median qualified saving of 0.0% while exhibiting a median latency of 769 ms, compared to LM Resizer's 207 ms. Furthermore, Headroom fell back to its Python detector 0 times out of 23 (`bench/RAPPORT.md`). These timings depend on the machine and cache.
 
 ### Will modifying the prompt break provider prompt caching?
 For Anthropic requests, `steer_verbosity` checks `frozen_count` and skips injection when the latest user message is frozen; it does not edit the system message. The repository has offline cache-control and live-zone tests. Provider cache-hit rates have not been verified here.

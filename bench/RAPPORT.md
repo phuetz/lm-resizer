@@ -1,19 +1,20 @@
 # Banc comparatif LM Resizer / RTK / Headroom
 
-Sur ces 22 fixtures, LM Resizer est derrière sur 2 cas : dotnet_ok, compile_error. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée. Une économie ne compte que si l'oracle est intégralement conservé.
+Sur ces 23 fixtures, LM Resizer est derrière sur 2 cas : dotnet_ok, compile_error. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée. Une économie ne compte que si l'oracle est intégralement conservé.
 
 ## Versions et méthode
 
-- Checkout `df303349e22e07c368a8dd39259ae75fcbb0084a` ; SHA-256 du binaire LM Resizer `54a27db03c14aabad680d134a45ac9f412a82ab361af9f9c65d846d997a838d7`.
+- Profil du binaire : `release`.
+- Checkout `83e9b25250b82c81a862044acfaae4d53560dcf8` ; SHA-256 du binaire LM Resizer `82507b72d8b434b1d0ac6fb6ca88a1a5124978eb1ab975f0f8fc58dd5761ee39`.
 - RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.
 - Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.
-- `compile_error`, `git_diff` et `dotnet_ok` sont des captures réelles dont les sources figurent dans `bench/capture-src/`. Les autres fixtures sont synthétiques.
+- `compile_error`, `git_diff` et `dotnet_ok` sont des captures réelles dont les sources figurent dans `bench/capture-src/`. `git_log_stat` est une sortie réelle de Git sur un dépôt fictif reproductible ; son oracle associe chaque auteur, date, titre, fichier et histogramme à son commit. Les autres fixtures sont synthétiques.
 - RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.
 - Les chemins HOME/checkout sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.
 - Le classement n'évalue pas la fidélité du code de sortie de RTK `pipe` ; les codes observés figurent dans `resultats.json`.
 - Latence : processus complet, démarrage Python de Headroom compris ; elle dépend de la machine et du cache.
 - Preuve HOME : 24 contre 24 jetons bruts, 24 contre 24 normalisés, empreintes égales : true.
-- Replis Headroom vers la détection Python : 0/22. Détails des 66 mesures : `bench/resultats.json`.
+- Replis Headroom vers la détection Python : 0/23. Détails des 69 mesures : `bench/resultats.json`.
 
 ## Résultats par catégorie
 
@@ -21,6 +22,7 @@ Sur ces 22 fixtures, LM Resizer est derrière sur 2 cas : dotnet_ok, compile_err
 |---|---:|---:|---:|---:|
 | build | 1 | 0.0 % / 100.0 % | 26.4 % / 100.0 % | 0.0 % / 100.0 % |
 | code | 6 | 0.0 % / 100.0 % | 0.0 % / 100.0 % | 0.0 % / 100.0 % |
+| command | 1 | 0.7 % / 100.0 % | 0.0 % / 100.0 % | 0.0 % / 100.0 % |
 | database | 1 | 93.2 % / 100.0 % | 0.0 % / 100.0 % | 0.0 % / 100.0 % |
 | git | 2 | 42.6 % / 100.0 % | 17.9 % / 52.1 % | 0.0 % / 100.0 % |
 | infra | 1 | 90.0 % / 100.0 % | 0.0 % / 100.0 % | 0.0 % / 100.0 % |
@@ -28,15 +30,15 @@ Sur ces 22 fixtures, LM Resizer est derrière sur 2 cas : dotnet_ok, compile_err
 | logs | 1 | 96.3 % / 100.0 % | 95.1 % / 100.0 % | 91.6 % / 100.0 % |
 | prose | 1 | 84.5 % / 100.0 % | 0.0 % / 100.0 % | 0.0 % / 100.0 % |
 | tests | 8 | 90.3 % / 100.0 % | 0.0 % / 64.0 % | 0.0 % / 100.0 % |
-| GLOBAL | 22 | 74.7 % / 100.0 % | 0.0 % / 79.5 % | 0.0 % / 100.0 % |
+| GLOBAL | 23 | 65.0 % / 100.0 % | 0.0 % / 80.4 % | 0.0 % / 100.0 % |
 
 ## Latence et échecs
 
 | Outil | Médiane | Maximum | Échecs techniques |
 |---|---:|---:|---:|
-| LM Resizer | 15 ms | 127 ms | 0 |
-| RTK | 9 ms | 123 ms | 0 |
-| Headroom | 361 ms | 563 ms | 0 |
+| LM Resizer | 207 ms | 313 ms | 0 |
+| RTK | 12 ms | 31 ms | 0 |
+| Headroom | 769 ms | 1216 ms | 0 |
 
 ## Gagnants et pertes par cas
 
@@ -54,6 +56,7 @@ Chaque cellule indique économie qualifiée / économie brute / conservation de 
 | pytest_fail | LM Resizer | 87 % qual. / 87 % brut / 100 % oracle | 0 % qual. / 99 % brut / 20 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
 | git_diff | LM Resizer | 47 % qual. / 47 % brut / 100 % oracle | 36 % qual. / 36 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
 | git_log | LM Resizer | 38 % qual. / 38 % brut / 100 % oracle | 0 % qual. / 98 % brut / 4 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
+| git_log_stat | LM Resizer | 1 % qual. / 1 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
 | docker | LM Resizer | 90 % qual. / 90 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
 | psql | LM Resizer | 93 % qual. / 93 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
 | logs | LM Resizer | 96 % qual. / 96 % brut / 100 % oracle | 95 % qual. / 95 % brut / 100 % oracle | 92 % qual. / 92 % brut / 100 % oracle |
@@ -89,6 +92,6 @@ Chaque cellule indique économie qualifiée / économie brute / conservation de 
 
 ## Ce que je n'ai pas pu vérifier
 
-- Réparation d'un test par agent : le sandbox du Codex imbriqué bloque l'essai avant modification.
+- Réparation d'un test par agent : non évaluée dans ce rejeu.
 - Coûts facturés, cache fournisseur et intégrations proxy/CCR en production.
-- Informations utiles au-delà des oracles déclarés et généralisation à des sorties réelles non présentes dans ces 22 fixtures synthétiques.
+- Informations utiles au-delà des oracles déclarés et généralisation à des sorties réelles non présentes dans ce corpus de captures et de fixtures synthétiques.
