@@ -1,5 +1,25 @@
 # Banc comparatif LM Resizer / RTK / Headroom
 
+## Rejeu local du 30 septembre 2026 — avant lancement du 08/10
+
+Les deux pertes restantes sont réduites, avec 100 % de chaque oracle déclaré. Le rejeu reprend les routes, fixtures, contrôles d'oracle, normalisation et tokenizer `o200k_base` du harnais existant ; seules les mesures LM Resizer sont répétées. Les références brutes sont incluses dans les comptes. RTK et Headroom restent les références du banc historique ci-dessous.
+
+| Cas | Entrée | Sortie LM avant | Sortie LM après | Économie après | RTK historique | Oracle LM après |
+|---|---:|---:|---:|---:|---:|---:|
+| compile_error | 106 | 106 | 93 | 12,26 % | 78 | 100 % (3/3) |
+| dotnet_ok | 111 | 55 | 40 | 63,96 % | 21 | 100 % (1/1) |
+| git_diff (PR #28 déjà présente) | 195 | 103 | 103 | 47,18 % | 125 | 100 % (8/8) |
+
+Après la correction `compile_error` seule, les 21 autres empreintes de sortie sont identiques. Après les deux corrections, les 20 autres le sont, dont `git_diff` à 103 jetons. Les 22 sorties finales du binaire release sont identiques aux sorties debug finales. Les deux cas corrigés restent derrière RTK ; aucune perte n'est retirée artificiellement du classement.
+
+Les chiffres détaillés avant/après et les SHA-256 sont dans [`resultats-pertes-2026-09-30.json`](resultats-pertes-2026-09-30.json). Causes, corrections, tests observés en échec avant puis réussis après et limites : [`KNOWN-MISSES.fr.md`](../docs/KNOWN-MISSES.fr.md) / [`KNOWN-MISSES.md`](../docs/KNOWN-MISSES.md). `cargo test --workspace` et `scripts/check-release.sh` ont réussi (code 0), Cargo sous `nice -n 19 ionice -c3`. Aucune tâche de fond et aucun push.
+
+Ce rejeu ne répète pas les exécutions RTK/Headroom, ne valide pas toutes les variantes rustc/.NET et ne mesure pas les coûts en production. Le rapport complet demandé, les empreintes des autres cas et « Ce que je n'ai pas pu vérifier » sont livrés dans `Partage/20260930-lmr-pertes-suite/sol61/RAPPORT.md`.
+
+## Banc historique à trois outils du 29 septembre 2026
+
+Les tableaux et `resultats.json` ci-dessous restent ceux du banc initial ; ils ne sont pas une nouvelle mesure des trois outils.
+
 Sur ces 22 fixtures, LM Resizer est derrière sur 3 cas : dotnet_ok, git_diff, compile_error. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée. Une économie ne compte que si l'oracle est intégralement conservé.
 
 ## Versions et méthode

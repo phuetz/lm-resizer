@@ -2595,6 +2595,15 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     if let Some((name, summary)) = parity_filters::summarize_for_command(command, raw) {
         return (format!("structured:{name}"), summary);
     }
+    if command
+        .first()
+        .is_some_and(|program| command_basename(program) == "dotnet")
+        && command.get(1).is_some_and(|verb| verb == "test")
+    {
+        if let Some(summary) = filter_dotnet_success(raw) {
+            return ("dotnet_test_summary".to_string(), summary);
+        }
+    }
     if rtk_filters::is_prisma_migrate(command) {
         let (name, filtered) = rtk_filters::filter(command, raw).expect("prisma migrate route");
         return (name.to_string(), filtered);
@@ -2639,9 +2648,10 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
         ("git", "show") => ("git_show".to_string(), filter_git_show(raw)),
         ("diff", _) => ("diff_summary".to_string(), filter_diff_summary(raw)),
         ("cargo", "test") => ("cargo_test".to_string(), filter_cargo_test(raw)),
-        ("cargo", "check" | "build" | "clippy") => {
-            ("cargo_diagnostics".to_string(), filter_diagnostics(raw))
-        }
+        ("cargo", "check" | "build" | "clippy") => (
+            "cargo_diagnostics".to_string(),
+            filter_cargo_diagnostics(raw),
+        ),
         ("tsc", _) => ("tsc".to_string(), filter_tsc(raw)),
         ("pytest", _) => ("pytest".to_string(), filter_pytest(raw)),
         ("npm" | "pnpm" | "yarn", "test" | "run") => {
@@ -3436,6 +3446,18 @@ fn first_lost_failure_line<'a>(before: &'a str, after: &str) -> Option<&'a str> 
             if trimmed.starts_with("test result: ok.") {
                 return false;
             }
+            // rustc's standard help link repeats a code still shown in the
+            // diagnostic. Unknown help text and missing codes stay guarded.
+            if rustc_explain_hint_is_redundant(trimmed, after) {
+                return false;
+            }
+            // The console success verdict contains "Failed: 0". Accept its
+            // rewrite only when all counts, scope and duration remain shown.
+            if compact_dotnet_success_line(trimmed)
+                .is_some_and(|summary| after.lines().any(|line| line == summary))
+            {
+                return false;
+            }
             // A highlighted source line is context for the real error
             // directly above it; comments in that frame can say "error".
             !(l.contains(" | ") && l.contains("//"))
@@ -3660,6 +3682,78 @@ fn filter_git_show(raw: &str) -> String {
     let mut output = prelude.to_string();
     output.push_str(&filtered);
     output
+}
+
+fn compact_dotnet_success_line(line: &str) -> Option<String> {
+    static VERDICT: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(
+            r"^Passed!\s+-\s+Failed:\s*(\d+),\s*Passed:\s*(\d+),\s*Skipped:\s*(\d+),\s*Total:\s*(\d+),\s*Duration:\s*([0-9]+(?:[.,][0-9]+)?\s*(?:ms|s|m|h))\s+-\s+(.+\.dll)\s+\(([^()]+)\)$",
+        )
+        .expect("valid .NET success verdict")
+    });
+    let captures = VERDICT.captures(line.trim())?;
+    let failed: u64 = captures[1].parse().ok()?;
+    let passed: u64 = captures[2].parse().ok()?;
+    let skipped: u64 = captures[3].parse().ok()?;
+    let total: u64 = captures[4].parse().ok()?;
+    if failed != 0 || passed.checked_add(skipped)? != total {
+        return None;
+    }
+    Some(format!(
+        "{} ({}): {passed} passed, {failed} failed, {skipped} skipped, {total} total; {}",
+        &captures[6], &captures[7], &captures[5],
+    ))
+}
+
+fn filter_dotnet_success(raw: &str) -> Option<String> {
+    let mut summaries = Vec::new();
+    for line in raw.lines() {
+        if let Some(summary) = compact_dotnet_success_line(line) {
+            summaries.push(summary);
+        } else if FAILURE_SIGNAL.is_match(line) || line.to_ascii_lowercase().contains("warning") {
+            // Mixed success/failure runs and unknown verdict variants keep
+            // the existing filter, including failure blocks and locations.
+            return None;
+        }
+    }
+    (!summaries.is_empty()).then(|| summaries.join("\n") + "\n")
+}
+
+fn rustc_explain_hint_is_redundant(line: &str, diagnostics: &str) -> bool {
+    let Some(code) = line
+        .strip_prefix("For more information about this error, try `rustc --explain ")
+        .and_then(|rest| rest.strip_suffix("`."))
+    else {
+        return false;
+    };
+    code.len() == 5
+        && code.starts_with('E')
+        && code[1..].bytes().all(|byte| byte.is_ascii_digit())
+        && diagnostics
+            .lines()
+            .any(|line| line.trim_start().starts_with(&format!("error[{code}]:")))
+}
+
+fn filter_cargo_diagnostics(raw: &str) -> String {
+    static RUSTC_ERROR: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"^\s*error\[E[0-9]{4}\]:").expect("valid rustc error header")
+    });
+    if !raw.lines().any(|line| RUSTC_ERROR.is_match(line)) {
+        return filter_diagnostics(raw);
+    }
+    // A fixed three-line window cuts rustc's source frame and subsequent
+    // notes. Keep every nonempty line, including unknown diagnostics, and
+    // remove only empty gutters and a help link to an error code still here.
+    let lines: Vec<_> = raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && *line != "|")
+        .filter(|line| !rustc_explain_hint_is_redundant(line, raw))
+        .collect();
+    if lines.is_empty() {
+        return raw.to_string();
+    }
+    lines.join("\n") + "\n"
 }
 
 fn filter_diagnostics(raw: &str) -> String {
@@ -10808,6 +10902,100 @@ Successfully tagged localhost/app:latest\n";
         assert_eq!(name, "diff_summary");
         for number in 0..12 {
             assert!(output.contains(&format!("+changed line {number}")));
+        }
+    }
+
+    #[test]
+    fn compile_error_capture_keeps_complete_diagnostic_without_boilerplate() {
+        let raw = include_str!("../bench/corpus/compile_error.txt");
+        let (name, output) = filter_command_output(&["cargo".into(), "build".into()], raw);
+        assert_eq!(name, "cargo_diagnostics");
+        assert!(!output.contains("For more information about this error"));
+        assert!(!output.lines().any(|line| line.trim() == "|"));
+        for fact in [
+            "src/main.rs:2:22",
+            "error[E0308]",
+            "expected `i64`, found `String`",
+            "let total: i64 = String::from(\"1\");",
+            "expected due to this",
+            "could not compile `atlas-ledger`",
+        ] {
+            assert!(output.contains(fact), "lost {fact}");
+        }
+        assert!(output.len() < raw.len());
+        assert!(first_lost_indispensable_line(raw, &output, &name).is_none());
+    }
+
+    #[test]
+    fn cargo_diagnostics_keep_multiple_frames_notes_and_unknown_help() {
+        let raw = "error[E0308]: mismatched types\n --> src/a.rs:2:3\n  |\n2 | let a = b;\n  |         ^ expected i64\n  |         |\n  |         expected due to this\n  = note: first note\n  = help: use a conversion\nerror[E0507]: cannot move\n --> src/b.rs:8:5\n8 | move(value);\n  = note: second note\nFor more information about this error, try `rustc --explain E9999`.\ncustom error: preserve this\n";
+        let (name, output) = filter_command_output(&["cargo".into(), "check".into()], raw);
+        assert_eq!(name, "cargo_diagnostics");
+        for line in raw.lines().filter(|line| line.trim() != "|") {
+            assert!(output.contains(line.trim()), "lost {line}");
+        }
+    }
+
+    #[test]
+    fn rustc_help_guard_requires_exact_hint_and_retained_code() {
+        let hint = "For more information about this error, try `rustc --explain E0308`.";
+        assert!(first_lost_failure_line(hint, "error[E0308]: mismatched types").is_none());
+        assert_eq!(
+            first_lost_failure_line(hint, "error[E0507]: cannot move"),
+            Some(hint)
+        );
+        let custom = format!("{hint} Additional error details");
+        assert!(first_lost_failure_line(&custom, "error[E0308]: mismatched types").is_some());
+    }
+
+    #[test]
+    fn dotnet_success_capture_compacts_counts_scope_and_duration() {
+        let raw = include_str!("../bench/corpus/dotnet_ok.txt");
+        let (name, output) = filter_command_output(&["dotnet".into(), "test".into()], raw);
+        assert_eq!(name, "dotnet_test_summary");
+        assert!(!output.contains("Passed!"));
+        for fact in [
+            "65 passed",
+            "0 failed",
+            "0 skipped",
+            "65 total",
+            "Atlas.Tests.dll",
+            "net8.0",
+            "41 ms",
+        ] {
+            assert!(output.contains(fact), "lost {fact}");
+        }
+        assert!(output.len() < raw.len());
+        assert!(first_lost_indispensable_line(raw, &output, &name).is_none());
+    }
+
+    #[test]
+    fn dotnet_success_keeps_each_assembly_and_skipped_counts() {
+        let raw = "Passed! - Failed: 0, Passed: 65, Skipped: 0, Total: 65, Duration: 41 ms - Atlas.Tests.dll (net8.0)\nPassed! - Failed: 0, Passed: 3, Skipped: 2, Total: 5, Duration: 1,2 s - Other.Tests.dll (net9.0)\n";
+        let (name, output) = filter_command_output(&["dotnet".into(), "test".into()], raw);
+        assert_eq!(name, "dotnet_test_summary");
+        assert_eq!(output, "Atlas.Tests.dll (net8.0): 65 passed, 0 failed, 0 skipped, 65 total; 41 ms\nOther.Tests.dll (net9.0): 3 passed, 0 failed, 2 skipped, 5 total; 1,2 s\n");
+        assert!(first_lost_failure_line(raw, &output).is_none());
+        assert!(first_lost_failure_line(raw, "65 passed").is_some());
+        assert!(first_lost_failure_line(raw, output.lines().next().unwrap()).is_some());
+    }
+
+    #[test]
+    fn dotnet_success_declines_failures_warnings_and_unknown_verdicts() {
+        let success = include_str!("../bench/corpus/dotnet_ok.txt");
+        for raw in [
+            success.replace("Failed:     0", "Failed:     1"),
+            success.replace("Total:    65", "Total:    66"),
+            success.replace("Passed:    65", "Passed:    18446744073709551616"),
+            success.replace("Duration: 41 ms", "Duration: < 1 ms"),
+            format!("{success}warning NU1903: vulnerable package\n"),
+            format!("{success}error: test host crashed\n"),
+            format!("{success}Failed Unknown.Tests.dll: details\n"),
+            include_str!("../bench/corpus/dotnet_fail.txt").to_string(),
+        ] {
+            assert!(filter_dotnet_success(&raw).is_none(), "accepted {raw}");
+            let (name, _) = filter_command_output(&["dotnet".into(), "test".into()], &raw);
+            assert_ne!(name, "dotnet_test_summary");
         }
     }
 
