@@ -23,17 +23,18 @@ Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
 Copy-Item $target (Join-Path $stage "lm-resizer.exe")
-Copy-Item (Join-Path $root "LICENSE") $stage
-Copy-Item (Join-Path $root "README.md") $stage
-Copy-Item (Join-Path $root "CONTRIBUTING.md") $stage
-Copy-Item (Join-Path $root "SECURITY.md") $stage
-Copy-Item (Join-Path $root ".github") (Join-Path $stage ".github") -Recurse
-Copy-Item (Join-Path $root "docs") (Join-Path $stage "docs") -Recurse
-Copy-Item (Join-Path $root "examples") (Join-Path $stage "examples") -Recurse
-Copy-Item (Join-Path $root "fixtures") (Join-Path $stage "fixtures") -Recurse
-Copy-Item (Join-Path $root "include") (Join-Path $stage "include") -Recurse
-Copy-Item (Join-Path $root "scripts") (Join-Path $stage "scripts") -Recurse
-Copy-Item (Join-Path $root "packages\wasm") (Join-Path $stage "packages\wasm") -Recurse
+# Only what an end user needs: the binary, its documentation and the agent skills.
+# Development material (workflows, fixtures, examples, build scripts, WASM package) stays in the repository.
+foreach ($f in @("LICENSE", "README.md", "README.fr.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md")) {
+  Copy-Item (Join-Path $root $f) $stage
+}
+New-Item -ItemType Directory -Force -Path (Join-Path $stage "docs") | Out-Null
+foreach ($f in @("FAQ.md", "FAQ.fr.md", "KNOWN-MISSES.md", "KNOWN-MISSES.fr.md", "CLAUDE_CODEX.md", "PROXY-MCP.md", "lm-resizer-hero.png")) {
+  Copy-Item (Join-Path $root "docs\$f") (Join-Path $stage "docs")
+}
+Copy-Item (Join-Path $root "skills") (Join-Path $stage "skills") -Recurse
+New-Item -ItemType Directory -Force -Path (Join-Path $stage "scripts") | Out-Null
+Copy-Item (Join-Path $root "scripts\install-grok-skill.sh") (Join-Path $stage "scripts")
 Copy-Item (Join-Path $root "dist\release-evidence.json") $stage
 
 $zip = "$stage.zip"
