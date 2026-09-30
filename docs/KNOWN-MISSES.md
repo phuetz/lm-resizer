@@ -1,6 +1,6 @@
-# Known misses in the Sol 6.1 comparison (29 September 2026)
+# Known misses in the Sol comparison (30 September 2026)
 
-Scope: the 22 versioned fixtures in `bench/cases.json`. A saving counts only when the declared oracle is fully retained. Three cases lost to RTK; none had a technical execution error, and Headroom won none of these cases. The six code fixtures with zero saving were ties, not losses. These figures describe this corpus, not general performance. The original benchmark was run at `142a9ef0aa71b6b1892c4f31617e00e354c16eba` (`bench/RAPPORT.md:7`); the measurements below are from `bench/resultats.json`. `bench/resultats-avant.json` uses an older corpus and is not comparable for these three captures (`bench/README.md:22`).
+Scope: the 22 versioned fixtures in `bench/cases.json`. A saving counts only when the declared oracle is fully retained. Two cases lose to RTK; none had a technical execution error, and Headroom won none of these cases. The six code fixtures with zero saving were ties, not losses. These figures describe this corpus, not general performance. The current three-tool replay was run from merge commit `df30334`; its measurements are in `bench/resultats.json` and `bench/RAPPORT.md`. `bench/resultats-avant.json` uses an older corpus and is not comparable for these captures (`bench/README.md:22`).
 
 ## `dotnet_ok` — success summary remains verbose
 
@@ -9,12 +9,12 @@ Scope: the 22 versioned fixtures in `bench/cases.json`. A saving counts only whe
 - **Likely cause:** The structured .NET route handles TRX or binlog files, then returns `None` when neither is available (`src/parity_filters.rs:103-121`). The console route selects the TOML filter (`src/main.rs:2609-2612`), whose `Passed!` rule retains the original line (`src/main.rs:6577-6614`); `apply_toml_filter` joins retained lines without turning the counts into a compact summary (`src/main.rs:3395-3415`).
 - **Possible fix:** Parse the successful console verdict into a short summary that preserves passed, failed, skipped, total and test scope. Keep the existing failure blocks and source locations. Test against actual .NET output variants before enabling the rewrite.
 
-## `git_diff` — duplicate file paths (**fixed in this branch**)
+## `git_diff` — former miss, fixed
 
 - **What happened:** On the real two-file patch (`bench/corpus/git_diff.txt:1-20`), the filter retained each `diff --git` header as well as the `---` and `+++` path markers. The patch changes and all eight declared oracle facts (`bench/cases.json:100-114`) survived, but the duplicate headers cost tokens.
-- **Exact measurement:** `bench/resultats.json:450-484`: 195 input tokens, LM Resizer 133 output tokens (31.79% saving), RTK 125 (35.90%); both retain 100% of the oracle. Headroom retains 195 (`bench/resultats.json:487-502`). The rounded comparison is at `bench/RAPPORT.md:55`.
+- **Earlier measurement (revision `9e73489`):** 195 input tokens, LM Resizer 133 output tokens (31.79% saving), RTK 125 (35.90%); both retained the full stated oracle.
 - **Cause and fix:** `filter_diff_summary` kept all three path headers (`src/main.rs:3574-3622`). The generic failure regex also sees the word `diff` in `diff --git` as a diagnostic (`crates/lm-resizer-core/src/transforms/diagnostic_gate.rs:18-23`), so simply removing that line triggered the diagnostic fallback (`src/main.rs:3418-3443`). The filter now omits `diff --git` only when both `---` and `+++` exist in that file block, and the diagnostic guard excludes this structural line. A binary or truncated diff keeps its Git header (`src/main.rs:3585-3603`).
-- **Measured after the fix:** The same fixture and `o200k_base` tokenizer yield 195 → 103 tokens (47.18% saving), with all declared facts present. This is a focused local replay; the full three-tool benchmark was not rerun. The regression test was observed failing before the change and passing afterward (`src/main.rs`, test `git_diff_capture_omits_redundant_file_headers_without_losing_patch_facts`).
+- **Current full three-tool replay:** The same fixture and `o200k_base` tokenizer yield 195 → 103 tokens (47.18% saving) for LM Resizer, versus 125 tokens (35.90%) for RTK, with the full stated oracle retained by both (`bench/resultats.json`, `bench/RAPPORT.md`). The regression test is `git_diff_capture_omits_redundant_file_headers_without_losing_patch_facts` in `src/main.rs`.
 
 ## `compile_error` — the diagnostic guard restores all text
 

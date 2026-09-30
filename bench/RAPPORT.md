@@ -1,10 +1,10 @@
 # Banc comparatif LM Resizer / RTK / Headroom
 
-Sur ces 22 fixtures, LM Resizer est derrière sur 3 cas : dotnet_ok, git_diff, compile_error. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée. Une économie ne compte que si l'oracle est intégralement conservé.
+Sur ces 22 fixtures, LM Resizer est derrière sur 2 cas : dotnet_ok, compile_error. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée. Une économie ne compte que si l'oracle est intégralement conservé.
 
 ## Versions et méthode
 
-- Checkout `142a9ef0aa71b6b1892c4f31617e00e354c16eba` ; SHA-256 du binaire LM Resizer `3336ada76584df5c7ce714e0ccc6c1c404793b8b1f61e4770fe24994335e3f01`.
+- Checkout `df303349e22e07c368a8dd39259ae75fcbb0084a` ; SHA-256 du binaire LM Resizer `54a27db03c14aabad680d134a45ac9f412a82ab361af9f9c65d846d997a838d7`.
 - RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.
 - Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.
 - `compile_error`, `git_diff` et `dotnet_ok` sont des captures réelles dont les sources figurent dans `bench/capture-src/`. Les autres fixtures sont synthétiques.
@@ -22,7 +22,7 @@ Sur ces 22 fixtures, LM Resizer est derrière sur 3 cas : dotnet_ok, git_diff, c
 | build | 1 | 0.0 % / 100.0 % | 26.4 % / 100.0 % | 0.0 % / 100.0 % |
 | code | 6 | 0.0 % / 100.0 % | 0.0 % / 100.0 % | 0.0 % / 100.0 % |
 | database | 1 | 93.2 % / 100.0 % | 0.0 % / 100.0 % | 0.0 % / 100.0 % |
-| git | 2 | 34.9 % / 100.0 % | 17.9 % / 52.1 % | 0.0 % / 100.0 % |
+| git | 2 | 42.6 % / 100.0 % | 17.9 % / 52.1 % | 0.0 % / 100.0 % |
 | infra | 1 | 90.0 % / 100.0 % | 0.0 % / 100.0 % | 0.0 % / 100.0 % |
 | json | 1 | 65.0 % / 100.0 % | 0.0 % / 33.3 % | 51.9 % / 100.0 % |
 | logs | 1 | 96.3 % / 100.0 % | 95.1 % / 100.0 % | 91.6 % / 100.0 % |
@@ -34,9 +34,9 @@ Sur ces 22 fixtures, LM Resizer est derrière sur 3 cas : dotnet_ok, git_diff, c
 
 | Outil | Médiane | Maximum | Échecs techniques |
 |---|---:|---:|---:|
-| LM Resizer | 17 ms | 28 ms | 0 |
-| RTK | 10 ms | 45 ms | 0 |
-| Headroom | 430 ms | 582 ms | 0 |
+| LM Resizer | 15 ms | 127 ms | 0 |
+| RTK | 9 ms | 123 ms | 0 |
+| Headroom | 361 ms | 563 ms | 0 |
 
 ## Gagnants et pertes par cas
 
@@ -52,7 +52,7 @@ Chaque cellule indique économie qualifiée / économie brute / conservation de 
 | npm_fail | LM Resizer | 92 % qual. / 92 % brut / 100 % oracle | 0 % qual. / 97 % brut / 25 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
 | pytest_ok | LM Resizer | 94 % qual. / 94 % brut / 100 % oracle | 0 % qual. / 99 % brut / 67 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
 | pytest_fail | LM Resizer | 87 % qual. / 87 % brut / 100 % oracle | 0 % qual. / 99 % brut / 20 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
-| git_diff | RTK | 32 % qual. / 32 % brut / 100 % oracle | 36 % qual. / 36 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
+| git_diff | LM Resizer | 47 % qual. / 47 % brut / 100 % oracle | 36 % qual. / 36 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
 | git_log | LM Resizer | 38 % qual. / 38 % brut / 100 % oracle | 0 % qual. / 98 % brut / 4 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
 | docker | LM Resizer | 90 % qual. / 90 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
 | psql | LM Resizer | 93 % qual. / 93 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle | 0 % qual. / 0 % brut / 100 % oracle |
@@ -80,7 +80,6 @@ Chaque cellule indique économie qualifiée / économie brute / conservation de 
 ## Cas encore derrière un concurrent
 
 - `dotnet_ok` : dépasser RTK (81.1 %), avec oracle complet.
-- `git_diff` : dépasser RTK (35.9 %), avec oracle complet.
 - `compile_error` : dépasser RTK (26.4 %), avec oracle complet.
 
 ## Sources officielles
