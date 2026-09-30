@@ -40,7 +40,82 @@ jobs:
             dist/release-evidence.json
             dist/*.tgz
             dist/*.tar.gz
+            dist/*.tar.gz.sha256
           if-no-files-found: error
+
+  install-smoke-linux:
+    name: install prebuilt binary without Rust (ubuntu-latest)
+    needs: release-check-linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Linux release archive
+        uses: actions/download-artifact@v4
+        with:
+          name: release-evidence-ubuntu-latest
+          path: dist
+
+      - name: Install and verify without a compiler
+        shell: bash
+        run: bash scripts/test-install-binary.sh dist
+
+  release-check-macos:
+    name: release check (${{ matrix.runner }})
+    strategy:
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Release check and package
+        shell: bash
+        run: |
+          bash scripts/check-release.sh
+          bash scripts/package-release.sh
+
+      - name: Upload macOS release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ matrix.runner }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+
+  install-smoke-macos:
+    name: install prebuilt binary (${{ matrix.runner }})
+    needs: release-check-macos
+    strategy:
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download macOS release archive
+        uses: actions/download-artifact@v4
+        with:
+          name: release-evidence-${{ matrix.runner }}
+          path: dist
+
+      - name: Install and verify without a compiler
+        shell: bash
+        run: bash scripts/test-install-binary.sh dist
 
   release-check-windows:
     name: release check (windows-latest)
@@ -67,6 +142,10 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1
 
+      - name: Grok skill installer smoke under Git Bash
+        shell: bash
+        run: bash scripts/test-install-grok-skill.sh
+
       - name: Upload release evidence
         uses: actions/upload-artifact@v4
         with:
@@ -75,4 +154,23 @@ jobs:
             dist/release-evidence.json
             dist/*.tgz
             dist/*.zip
+            dist/*.zip.sha256
           if-no-files-found: error
+
+  install-smoke-windows:
+    name: install prebuilt binary (windows-latest)
+    needs: release-check-windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Windows release archive
+        uses: actions/download-artifact@v4
+        with:
+          name: release-evidence-windows-latest
+          path: dist
+
+      - name: Install and verify
+        shell: pwsh
+        run: ./scripts/test-install-binary.ps1 -ArchiveDir dist
