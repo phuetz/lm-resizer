@@ -231,7 +231,7 @@ enum Commands {
     Image {
         /// Image file to inspect.
         input: PathBuf,
-        /// Write a smaller PNG or JPEG if encoding saves bytes. Never overwrites.
+        /// Write a smaller image in the input format (PNG or JPEG). Never overwrites.
         #[arg(long)]
         output: Option<PathBuf>,
         /// Optional maximum width or height for explicit downscaling.
@@ -1959,13 +1959,23 @@ fn compress_text_with_pipeline_gate(
     } else {
         result.bytes_saved
     };
+    // Les clés des offloads désignent parfois une étape déjà minifiée.
+    // La première clé du CLI doit toujours retrouver l'entrée exacte, même
+    // quand seul un reformat (notamment source_compressor) a été appliqué.
+    let mut cache_keys = result.cache_keys;
+    if output != content {
+        let original_key = lm_resizer_core::ccr::compute_key(content.as_bytes());
+        store.put(&original_key, content);
+        cache_keys.retain(|key| key != &original_key);
+        cache_keys.insert(0, original_key);
+    }
     Ok(CompressReport {
         content_type: detection.content_type.as_str().to_string(),
         original_bytes: content.len(),
         compressed_bytes: output.len(),
         bytes_saved,
         steps_applied,
-        cache_keys: result.cache_keys,
+        cache_keys,
         output,
     })
 }
@@ -5565,6 +5575,13 @@ fn format_learn_markdown(
     out
 }
 
+#[cfg(unix)]
+fn make_script_executable(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
+    Ok(())
+}
+
 fn init_hook_helpers(project_dir: Option<PathBuf>, force: bool) -> Result<InitHooksReport> {
     let project_dir = project_dir.unwrap_or(std::env::current_dir()?);
     let hook_dir = project_dir.join(".lm-resizer").join("hooks");
@@ -5590,6 +5607,10 @@ fn init_hook_helpers(project_dir: Option<PathBuf>, force: bool) -> Result<InitHo
             );
         }
         std::fs::write(&path, content)?;
+        #[cfg(unix)]
+        if name.ends_with(".sh") {
+            make_script_executable(&path)?;
+        }
         written.push(path.display().to_string());
     }
 
@@ -5770,6 +5791,8 @@ fn init_command_shims(project_dir: Option<PathBuf>, force: bool) -> Result<ShimR
             command_shim_sh(&exe_path, &original)
         };
         std::fs::write(&path, content)?;
+        #[cfg(unix)]
+        make_script_executable(&path)?;
         files.push(path.display().to_string());
     }
 
@@ -6093,7 +6116,8 @@ fn collect_discover_files(paths: &[PathBuf], recursive: bool) -> Result<Vec<Path
             files.push(path.clone());
         } else if path.is_dir() {
             if recursive {
-                for entry in WalkDir::new(path).into_iter().filter_map(Result::ok) {
+                for entry in WalkDir::new(path) {
+                    let entry = entry?;
                     if entry.file_type().is_file() && discover_file_allowed(entry.path()) {
                         files.push(entry.path().to_path_buf());
                     }
@@ -6107,6 +6131,11 @@ fn collect_discover_files(paths: &[PathBuf], recursive: bool) -> Result<Vec<Path
                     }
                 }
             }
+        } else {
+            anyhow::bail!(
+                "session/log path does not exist or is not a file/directory: {}",
+                path.display()
+            );
         }
     }
     Ok(files)
@@ -11050,6 +11079,42 @@ Successfully tagged localhost/app:latest\n";
     }
 
     #[test]
+    fn discover_refuses_missing_explicit_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let valid = root.path().join("session.jsonl");
+        std::fs::write(&valid, "{}\n").unwrap();
+        let missing = root.path().join("missing");
+        assert!(collect_discover_files(&[missing.clone()], true).is_err());
+        assert!(collect_discover_files(&[valid, missing], true).is_err());
+    }
+
+    #[test]
+    fn compress_json_recovers_exact_input_before_minification() {
+        let input = serde_json::to_string_pretty(
+            &(0..150)
+                .map(|id| json!({"id": id, "status": "ok", "score": 100}))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let store = InMemoryCcrStore::default();
+        let report = compress_text(&input, "", &store).unwrap();
+        assert!(report.bytes_saved > 0);
+        let key = report.cache_keys.first().expect("original recovery key");
+        assert_eq!(store.get(key).as_deref(), Some(input.as_str()));
+    }
+
+    #[test]
+    fn compress_source_persists_the_original_advertised_by_its_banner() {
+        let input = include_str!("main.rs").to_string();
+        let store = InMemoryCcrStore::default();
+        let report = compress_text(&input, "", &store).unwrap();
+        assert!(report.bytes_saved > 0);
+        let key = lm_resizer_core::ccr::compute_key(input.as_bytes());
+        assert!(report.cache_keys.contains(&key));
+        assert_eq!(store.get(&key).as_deref(), Some(input.as_str()));
+    }
+
+    #[test]
     fn eval_report_summarizes_discover_fixture() {
         let root = std::env::temp_dir().join(format!("lm-resizer-eval-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
@@ -11203,6 +11268,39 @@ Successfully tagged localhost/app:latest\n";
             extract_hook_output(&claude).as_deref(),
             Some("On branch main\nnothing to commit\n")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generated_hook_helper_is_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        init_hook_helpers(Some(root.path().to_path_buf()), false).unwrap();
+        let script = root.path().join(".lm-resizer/hooks/rewrite.sh");
+        assert_ne!(
+            std::fs::metadata(script).unwrap().permissions().mode() & 0o111,
+            0
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generated_command_shims_are_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let report = init_command_shims(Some(root.path().to_path_buf()), false).unwrap();
+        assert!(
+            !report.files.is_empty(),
+            "test requires a supported command on PATH"
+        );
+        for path in report.files {
+            let permissions = std::fs::metadata(&path).unwrap().permissions();
+            assert_ne!(
+                permissions.mode() & 0o111,
+                0,
+                "shim must be executable: {path}"
+            );
+        }
     }
 
     #[test]
@@ -11788,10 +11886,12 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
             "poetry.lock",
         ];
         let mut forbidden = Vec::new();
-        for entry in WalkDir::new(&root)
-            .into_iter()
-            .filter_entry(|entry| entry.file_name() != "target")
-        {
+        for entry in WalkDir::new(&root).into_iter().filter_entry(|entry| {
+            !matches!(
+                entry.file_name().to_str(),
+                Some("target" | "_qa" | "node_modules" | ".git")
+            )
+        }) {
             let entry = entry.expect("repo walk should succeed");
             if !entry.file_type().is_file() {
                 continue;
