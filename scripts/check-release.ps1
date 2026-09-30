@@ -15,7 +15,8 @@ function Invoke-Checked {
 }
 
 Invoke-Checked "cargo fmt --check" { cargo fmt --check }
-Invoke-Checked "cargo test --release" { cargo test --release }
+# `--workspace` is required to test all members since the root Cargo.toml doesn't define `default-members`.
+Invoke-Checked "cargo test --workspace --release" { cargo test --workspace --release }
 Invoke-Checked "cargo check --release" { cargo check --release }
 Invoke-Checked "cargo check --release --examples" { cargo check --release --examples }
 Invoke-Checked "cargo build --release" { cargo build --release }
