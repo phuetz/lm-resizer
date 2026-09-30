@@ -53,6 +53,14 @@ cargo uninstall --root "$HOME/.local" lm-resizer
 
 Le CLI propose aussi `compress` pour les fichiers ou l'entrée standard, `tool-output` pour une sortie déjà capturée, et des intégrations MCP, HTTP et hooks d'agents activées sur demande. Voir le [guide des intégrations agents](docs/CLAUDE_CODEX.md) et le [guide de release](docs/RELEASE.md) pour ces usages.
 
+## Statistiques de jetons reproductibles
+
+`lm-resizer stats --markdown` affiche les comptes exacts du texte avec le tokenizer existant **tiktoken-rs / o200k_base** (famille GPT-4o). Les JSON `exec`, `tool-output` et `compress` exposent `original_tokens`, `compressed_tokens`, le gain signé `tokens_saved`, `tokenizer` et `token_count_method: "exact"`. Le compte inclut les marqueurs de récupération finaux ; un gain négatif signifie davantage de jetons en sortie. Cet encodage de référence ne mesure ni le tokenizer de Claude/Llama ni une facture fournisseur.
+
+Les nouvelles entrées d’historique conservent les deux comptes. Les statistiques gardent les champs JSON existants d’octets et ajoutent les totaux mesurés et `measured_commands` / `unmeasured_commands`. Les anciennes entrées ne contiennent pas le texte à recompter : leur `estimated_tokens_saved` reste explicitement une **estimation historique octets / 4**, séparée des mesures. `discover`, `discover-sessions`, `eval` et `learn` comptent le texte original et filtré disponible : il s’agit de gains potentiels du filtre. Pour la compatibilité JSON, leur champ `estimated_tokens_saved` est un alias du gain potentiel réellement compté `tokens_saved`.
+
+[Méthode, compatibilité et reproduction](docs/TOKEN-STATISTICS.md). Le banc ci-dessous utilisait déjà `o200k_base` ; ses résultats historiques sur fixtures sont conservés.
+
 ## Mesures face à RTK et Headroom
 
 **Rejeu du 30/09/2026** depuis le commit de fusion `df30334`, sur Linux x86_64, 24 cœurs logiques et 93 Gio de RAM. La comparaison utilise RTK 0.50.0, Headroom 0.39.1 avec ONNX Runtime 1.24.4, et les mêmes 22 fixtures. `o200k_base` compte les jetons de sortie. Une économie n'est retenue que si tous les faits de l'oracle déclaré pour le cas sont conservés ; sinon, l'*économie qualifiée* vaut zéro. Trois fixtures viennent de vrais outils ; les autres sont synthétiques. [Méthode, fixtures et résultats détaillés](bench/README.md).

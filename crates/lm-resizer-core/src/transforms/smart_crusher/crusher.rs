@@ -1000,8 +1000,8 @@ fn estimate_array_bytes(item_strings: &[String]) -> usize {
     payload + separators + 2
 }
 
-/// Coarse bytes-per-token estimate (matches the project's `bytes / 4` token
-/// accounting elsewhere). Used to convert a token budget to a byte budget
+/// Coarse bytes-per-token estimate for budget planning only, not measured
+/// token statistics. Used to convert a token budget to a byte budget
 /// without pulling a tokenizer into the (wasm-safe) hot path.
 const BYTES_PER_TOKEN: usize = 4;
 
