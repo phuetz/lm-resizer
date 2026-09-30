@@ -617,6 +617,12 @@ fn row_for<'a>(rows: &'a [Row], case: &str, tool: &str) -> &'a Row {
         .expect("complete result matrix")
 }
 
+fn corpus_description(total: usize, reelles: usize) -> String {
+    format!("ces {} fixtures ({} captures réelles, {} synthétiques)", total, reelles, total - reelles)
+}
+
+const REAL_CAPTURES: &[&str] = &["compile_error", "git_diff", "dotnet_ok"];
+
 fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Result<String> {
     let commit = Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -634,12 +640,13 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
                 .then_some(case.id.as_str())
         })
         .collect();
+    let corpus_desc = corpus_description(cases.len(), REAL_CAPTURES.len());
     let verdict = if lost_cases.is_empty() {
-        "Sur ces 22 fixtures, LM Resizer est devant ou à égalité sur chaque économie qualifiée. La généralisation hors de ce corpus n'est pas démontrée.".to_string()
+        format!("Sur {}, LM Resizer est devant ou à égalité sur chaque économie qualifiée. La généralisation hors de ce corpus n'est pas démontrée.", corpus_desc)
     } else {
-        format!("Sur ces 22 fixtures, LM Resizer est derrière sur {} cas : {}. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée.", lost_cases.len(), lost_cases.join(", "))
+        format!("Sur {}, LM Resizer est derrière sur {} cas : {}. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée.", corpus_desc, lost_cases.len(), lost_cases.join(", "))
     };
-    let mut report = format!("# Banc comparatif LM Resizer / RTK / Headroom\n\n{verdict} Une économie ne compte que si l'oracle est intégralement conservé.\n\n## Versions et méthode\n\n- Checkout `{commit}` ; SHA-256 du binaire LM Resizer `{binary_hash}`.\n- RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.\n- Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.\n- `compile_error`, `git_diff` et `dotnet_ok` sont des captures réelles dont les sources figurent dans `bench/capture-src/`. Les autres fixtures sont synthétiques.\n- RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.\n- Les chemins HOME/checkout sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.\n- Le classement n'évalue pas la fidélité du code de sortie de RTK `pipe` ; les codes observés figurent dans `resultats.json`.\n- Latence : processus complet, démarrage Python de Headroom compris ; elle dépend de la machine et du cache.\n");
+    let mut report = format!("# Banc comparatif LM Resizer / RTK / Headroom\n\n{verdict} Une économie ne compte que si l'oracle est intégralement conservé.\n\n## Versions et méthode\n\n- Checkout `{commit}` ; SHA-256 du binaire LM Resizer `{binary_hash}`.\n- RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.\n- Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.\n- `{}` sont des captures réelles dont les sources figurent dans `bench/capture-src/`. Les autres fixtures sont synthétiques.\n- RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.\n- Les chemins HOME/checkout sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.\n- Le classement n'évalue pas la fidélité du code de sortie de RTK `pipe` ; les codes observés figurent dans `resultats.json`.\n- Latence : processus complet, démarrage Python de Headroom compris ; elle dépend de la machine et du cache.\n", REAL_CAPTURES.join("`, `").replace("`, `dotnet_ok", "` et `dotnet_ok"));
     if let Ok(proof) =
         serde_json::from_str::<Value>(&fs::read_to_string(qa.join("preuve_home.json"))?)
     {
@@ -652,7 +659,7 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
         .iter()
         .filter(|row| row.tool == "Headroom" && row.detector_fallback)
         .count();
-    report.push_str(&format!("- Replis Headroom vers la détection Python : {fallback}/22. Détails des 66 mesures : `bench/resultats.json`.\n"));
+    report.push_str(&format!("- Replis Headroom vers la détection Python : {fallback}/{}. Détails des {} mesures : `bench/resultats.json`.\n", cases.len(), rows.len()));
     report.push_str("\n## Résultats par catégorie\n\n| Catégorie | Cas | LM Resizer : médiane / oracle | RTK : médiane / oracle | Headroom : médiane / oracle |\n|---|---:|---:|---:|---:|\n");
     let categories: BTreeSet<&str> = cases.iter().map(|case| case.category.as_str()).collect();
     for category in categories.iter().copied().chain(std::iter::once("GLOBAL")) {
@@ -720,7 +727,7 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
     }
     report.push_str("\n## Cas encore derrière un concurrent\n\n");
     if lost_cases.is_empty() {
-        report.push_str("Aucun sur les 22 fixtures de ce banc.\n");
+        report.push_str(&format!("Aucun sur {} de ce banc.\n", corpus_desc));
     }
     for case in cases {
         let lm = row_for(rows, &case.id, "LM Resizer");
@@ -753,7 +760,7 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
             ));
         }
     }
-    report.push_str("\n## Sources officielles\n\n- [RTK 0.50.0](https://github.com/rtk-ai/rtk/releases/tag/v0.50.0).\n- [Headroom, installation et API](https://github.com/headroomlabs-ai/headroom/blob/main/README.md).\n\n## Ce que je n'ai pas pu vérifier\n\n- Réparation d'un test par agent : le sandbox du Codex imbriqué bloque l'essai avant modification.\n- Coûts facturés, cache fournisseur et intégrations proxy/CCR en production.\n- Informations utiles au-delà des oracles déclarés et généralisation à des sorties réelles non présentes dans ces 22 fixtures synthétiques.\n");
+    report.push_str(&format!("\n## Sources officielles\n\n- [RTK 0.50.0](https://github.com/rtk-ai/rtk/releases/tag/v0.50.0).\n- [Headroom, installation et API](https://github.com/headroomlabs-ai/headroom/blob/main/README.md).\n\n## Ce que je n'ai pas pu vérifier\n\n- Réparation d'un test par agent : le sandbox du Codex imbriqué bloque l'essai avant modification.\n- Coûts facturés, cache fournisseur et intégrations proxy/CCR en production.\n- Informations utiles au-delà des oracles déclarés et généralisation à des sorties réelles non présentes dans {}.\n", corpus_desc));
     let _ = qa;
     Ok(report)
 }
@@ -972,6 +979,14 @@ mod tests {
             pytest_ok_missing(pytest, "Pytest: 70 passed"),
             vec![pytest.oracle[1].clone()]
         );
+    }
+
+    #[test]
+    fn corpus_description_formats_correctly() {
+        let desc = corpus_description(22, 3);
+        assert!(desc.contains("3 captures réelles"));
+        assert!(desc.contains("19 synthétiques"));
+        assert!(!desc.contains("22 fixtures synthétiques"));
     }
 
     #[test]
