@@ -63,6 +63,15 @@ expect_rejected() {
 folder="lm-resizer-$version-$platform"
 mkdir -p "$tmp/repacked"
 tar -xzf "$tmp/bad/$archive" -C "$tmp/repacked"
+# Exercise the skill installer shipped in the archive, not the checkout copy.
+# A release missing skills/grok/lm-resizer must fail before publication.
+for target in grok codex; do
+  env -i HOME="$tmp/home" PATH=/usr/bin:/bin bash \
+    "$tmp/repacked/$folder/scripts/install-grok-skill.sh" \
+    --target "$target" --dest "$tmp/skill-$target"
+  cmp "$tmp/repacked/$folder/skills/grok/lm-resizer/SKILL.md" \
+    "$tmp/skill-$target/SKILL.md"
+done
 printf 'tampered\n' > "$tmp/repacked/$folder/TAMPERED"
 tar -C "$tmp/repacked" -czf "$tmp/bad/$archive" "$folder"
 expect_rejected 'a tampered archive' "$tmp/bad" 'SHA-256 mismatch'
