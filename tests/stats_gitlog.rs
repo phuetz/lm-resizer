@@ -121,7 +121,7 @@ fn git_log_stat_preserves_dates_and_all_facts() {
 #[test]
 fn git_log_stat_keeps_merge_binary_rename_and_unicode_facts() {
     let home = TempDir::new().unwrap();
-    let raw = format!("commit abcdef123456\nMerge: 1111111 2222222\nAuthor: Fixture <fixture@example.invalid>\nDate: Wed Sep 30 12:00:00 2026 +0000\n\n    Corriger été 東京\n\n{}\n image.png | Bin 0 -> 2048 bytes\n src/{{old => new}}.rs | 12 ++++++++++--\n \"src/\\303\\251t\\303\\251.rs\" | 3 ++-\n 3 files changed, 12 insertions(+), 3 deletions(-)\n", "    Additional recoverable message detail.\n".repeat(20));
+    let raw = format!("commit abcdef123456\nMerge: 1111111 2222222\nAuthor: Fixture <fixture@example.invalid>\nDate: Wed Sep 30 12:00:00 2026 +0000\n\n    Corriger été 東京 | 12 ++++++++++--\n\n{}\n image.png | Bin 0 -> 2048 bytes\n src/{{old => new}}.rs | 12 ++++++++++--\n \"src/\\303\\251t\\303\\251.rs\" | 3 ++-\n 3 files changed, 12 insertions(+), 3 deletions(-)\n", "    Additional recoverable message detail.\n".repeat(20));
     let path = home.path().join("capture.txt");
     std::fs::write(&path, &raw).unwrap();
     let report = json_output(run(
@@ -140,7 +140,7 @@ fn git_log_stat_keeps_merge_binary_rename_and_unicode_facts() {
         "Merge: 1111111 2222222",
         "Fixture <fixture@example.invalid>",
         "Wed Sep 30 12:00:00 2026 +0000",
-        "Corriger été 東京",
+        "Corriger été 東京 | 12 ++++++++++--",
         "image.png: Bin 0 -> 2048 bytes",
         "src/{old => new}.rs:",
         "3 files changed, 12 insertions(+), 3 deletions(-)",

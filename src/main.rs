@@ -4086,7 +4086,10 @@ fn filter_git_log_stat(raw: &str) -> String {
         } else if (line.starts_with("Author:") || line.starts_with("Date:")) && !header.is_empty() {
             header.push_str(" | ");
             header.push_str(trimmed);
-        } else if in_commit && line.starts_with("    ") && !trimmed.contains(" | ") {
+        } else if in_commit
+            && line.starts_with("    ")
+            && (!subject_seen || !trimmed.contains(" | "))
+        {
             if subject_seen {
                 omitted_body_lines += 1;
             } else {
