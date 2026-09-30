@@ -21,18 +21,17 @@ stage="$dist/lm-resizer-$version-$(uname -s | tr '[:upper:]' '[:lower:]')-$(unam
 rm -rf "$stage"
 mkdir -p "$stage"
 cp "$bin" "$stage/lm-resizer"
-cp "$root/LICENSE" "$stage/"
-cp "$root/README.md" "$stage/"
-cp "$root/CONTRIBUTING.md" "$stage/"
-cp "$root/SECURITY.md" "$stage/"
-cp -R "$root/.github" "$stage/"
-cp -R "$root/docs" "$stage/"
-cp -R "$root/examples" "$stage/"
-cp -R "$root/fixtures" "$stage/"
-cp -R "$root/include" "$stage/"
-cp -R "$root/scripts" "$stage/"
-mkdir -p "$stage/packages"
-cp -R "$root/packages/wasm" "$stage/packages/"
+# Only what an end user needs: the binary, its documentation and the agent skills.
+# Development material (workflows, fixtures, examples, build scripts, WASM package) stays in the repository.
+for f in LICENSE README.md README.fr.md CHANGELOG.md CONTRIBUTING.md SECURITY.md; do
+  cp "$root/$f" "$stage/"
+done
+mkdir -p "$stage/docs" "$stage/scripts"
+for f in FAQ.md FAQ.fr.md KNOWN-MISSES.md KNOWN-MISSES.fr.md CLAUDE_CODEX.md PROXY-MCP.md lm-resizer-hero.png; do
+  cp "$root/docs/$f" "$stage/docs/"
+done
+cp -R "$root/skills" "$stage/"
+cp "$root/scripts/install-grok-skill.sh" "$stage/scripts/"
 cp "$root/dist/release-evidence.json" "$stage/"
 
 tarball="$stage.tar.gz"
