@@ -224,10 +224,12 @@ pub fn compress_tool_call_result(
             let compressed_bytes = candidate.len();
             let bytes_saved = original_bytes.saturating_sub(compressed_bytes);
 
+            let token_savings = crate::token_accounting::measure(text, &candidate);
             *text_val = Value::String(candidate);
             modified = true;
 
             let exec_report = ExecReport {
+                token_savings,
                 command: format!("mcp:{tool_name}"),
                 exit_code: 0,
                 filter: "mcp_proxy".to_string(),

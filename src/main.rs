@@ -44,6 +44,9 @@ mod parity_filters;
 mod provider_usage;
 mod rtk_filters;
 mod shared_context;
+mod token_accounting;
+
+use token_accounting::TokenSavings;
 
 use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
 
@@ -52,6 +55,14 @@ use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
 #[command(about = "Rust-native context compression for LLM agents")]
 #[command(version)]
 struct Cli {
+    /// Token counter for savings: BPE encoding or model name (other models may estimate).
+    #[arg(
+        long,
+        global = true,
+        env = "LM_RESIZER_TOKENIZER",
+        default_value = "o200k_base"
+    )]
+    tokenizer: String,
     #[command(subcommand)]
     command: Commands,
 }
@@ -226,6 +237,13 @@ enum Commands {
         /// Emit a Markdown stats summary.
         #[arg(long)]
         markdown: bool,
+    },
+    /// Show human-readable command-output savings (never provider billing).
+    Gain {
+        #[arg(long)]
+        store: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
     },
     /// Inspect image payload size and dimensions for context-budget decisions.
     Image {
@@ -680,6 +698,7 @@ struct BatchItemReport {
 
 #[derive(Debug, Serialize)]
 struct ExecReport {
+    token_savings: TokenSavings,
     command: String,
     exit_code: i32,
     filter: String,
@@ -719,6 +738,7 @@ struct RewriteShellSegment {
 
 #[derive(Debug, Serialize)]
 struct ExecHistoryRecord {
+    token_savings: TokenSavings,
     timestamp_unix: u64,
     command: String,
     exit_code: i32,
@@ -822,6 +842,7 @@ struct FilterTestOutcome {
 
 #[derive(Debug, Serialize, Default)]
 struct DiscoverReport {
+    token_savings: Vec<TokenSavings>,
     files_scanned: usize,
     command_outputs: usize,
     rewritable_commands: usize,
@@ -834,6 +855,7 @@ struct DiscoverReport {
 
 #[derive(Debug, Serialize)]
 struct DiscoverCandidate {
+    token_savings: TokenSavings,
     command: String,
     filter: String,
     original_bytes: usize,
@@ -884,6 +906,7 @@ struct MlStatusReport {
 
 #[derive(Debug, Serialize)]
 struct EvalReport {
+    token_savings: Vec<TokenSavings>,
     files_scanned: usize,
     command_outputs: usize,
     candidates: usize,
@@ -1065,6 +1088,7 @@ struct DoctorReport {
     store_ok: bool,
     mcp_tools: Vec<String>,
     clients: Vec<ClientCheck>,
+    savings_diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1133,6 +1157,7 @@ fn provider_label(provider: ProviderKind) -> &'static str {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    token_accounting::configure(&cli.tokenizer);
     match cli.command {
         Commands::Compress {
             input,
@@ -1379,6 +1404,35 @@ async fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::Gain { store, json } => {
+            let store = open_store(store)?;
+            let history = summarize_exec_history()?;
+            let report = json!({"entries": store.len(), "exec_history": history});
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "{} commands; {} bytes saved",
+                    history["commands"], history["bytes_saved"]
+                );
+                println!(
+                    "{}",
+                    token_accounting::describe_json(&history["token_savings"])
+                );
+                println!("Scope: command output, not total session usage or billing.");
+                if let Some(rows) = history["by_filter"].as_array() {
+                    for row in rows.iter().take(5) {
+                        println!(
+                            "  {}: {}",
+                            row["name"].as_str().unwrap_or("unknown"),
+                            markdown_escape(&token_accounting::describe_json(
+                                &row["token_savings"]
+                            ))
+                        );
+                    }
+                }
+            }
+        }
         Commands::Image {
             input,
             output,
@@ -1581,11 +1635,11 @@ async fn main() -> Result<()> {
                 print!("{}", format_discover_markdown(&report));
             } else {
                 println!(
-                    "Scanned {} files, found {} command outputs, estimated {} bytes / {} tokens saved",
+                    "Scanned {} files, found {} command outputs, potential {} bytes saved; {}",
                     report.files_scanned,
                     report.command_outputs,
                     report.estimated_bytes_saved,
-                    report.estimated_tokens_saved
+                    token_accounting::describe(&report.token_savings)
                 );
                 for candidate in report.candidates.iter().take(20) {
                     println!(
@@ -1619,10 +1673,10 @@ async fn main() -> Result<()> {
                     println!("Missing known paths: {}", report.missing.len());
                 }
                 println!(
-                    "Found {} command outputs, estimated {} bytes / {} tokens saved",
+                    "Found {} command outputs, potential {} bytes saved; {}",
                     report.discover.command_outputs,
                     report.discover.estimated_bytes_saved,
-                    report.discover.estimated_tokens_saved
+                    token_accounting::describe(&report.discover.token_savings)
                 );
             }
         }
@@ -1639,12 +1693,12 @@ async fn main() -> Result<()> {
                 print!("{}", format_eval_markdown(&report));
             } else {
                 println!(
-                    "Eval {}: {} files, {} command outputs, {} candidates, {} est. tokens saved",
+                    "Eval {}: {} files, {} command outputs, {} candidates; {}",
                     if report.pass { "pass" } else { "warn" },
                     report.files_scanned,
                     report.command_outputs,
                     report.candidates,
-                    report.estimated_tokens_saved
+                    token_accounting::describe(&report.token_savings)
                 );
                 for note in report.notes {
                     println!("  - {note}");
@@ -2106,7 +2160,12 @@ fn run_exec_command(
 
     let mut compressed = if matches!(
         filter.as_str(),
-        "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
+        "json-passthrough"
+            | "aws-json"
+            | "aws"
+            | "file-read"
+            | "cargo_test_diagnostics"
+            | "git_log_stat"
     ) {
         CompressReport {
             content_type: if matches!(filter.as_str(), "json-passthrough" | "aws-json") {
@@ -2155,6 +2214,7 @@ fn run_exec_command(
     }
 
     let report = ExecReport {
+        token_savings: token_accounting::measure(&raw, &final_output),
         command: command.join(" "),
         exit_code,
         filter,
@@ -2189,7 +2249,12 @@ fn process_captured_output(
         (raw.to_string(), Vec::new(), Vec::new())
     } else if matches!(
         filter.as_str(),
-        "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
+        "json-passthrough"
+            | "aws-json"
+            | "aws"
+            | "file-read"
+            | "cargo_test_diagnostics"
+            | "git_log_stat"
     ) {
         (filtered.clone(), Vec::new(), Vec::new())
     } else {
@@ -2219,6 +2284,7 @@ fn process_captured_output(
         keys.push(key);
     }
     Ok(ExecReport {
+        token_savings: token_accounting::measure(raw, &output),
         command: command.join(" "),
         exit_code,
         filter,
@@ -2635,6 +2701,13 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     match (program.as_str(), sub) {
         ("git", "status") => ("git_status".to_string(), filter_git_status(raw)),
         ("git", "diff") => ("diff_summary".to_string(), filter_diff_summary(raw)),
+        ("git", "log")
+            if command
+                .iter()
+                .any(|arg| arg == "--stat" || arg.starts_with("--stat=")) =>
+        {
+            ("git_log_stat".to_string(), filter_git_log_stat(raw))
+        }
         ("git", "log") => ("git_log".to_string(), filter_git_log(raw)),
         ("git", "show") => ("git_show".to_string(), filter_git_show(raw)),
         ("diff", _) => ("diff_summary".to_string(), filter_diff_summary(raw)),
@@ -3990,6 +4063,82 @@ fn filter_docker_build(raw: &str) -> String {
     }
 }
 
+/// Compact padding and histograms without inventing per-file line counts.
+/// Git scales its graph: `graph:+N/-N` counts displayed bars, not changed lines.
+fn filter_git_log_stat(raw: &str) -> String {
+    let mut out = Vec::<String>::new();
+    let mut header = String::new();
+    let mut in_commit = false;
+    let mut subject_seen = false;
+    let mut omitted_body_lines = 0usize;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if line.starts_with("commit ") {
+            if !header.is_empty() {
+                out.push(std::mem::take(&mut header));
+            }
+            header = trimmed.to_string();
+            in_commit = true;
+            subject_seen = false;
+        } else if (line.starts_with("Author:") || line.starts_with("Date:")) && !header.is_empty() {
+            header.push_str(" | ");
+            header.push_str(trimmed);
+        } else if in_commit && line.starts_with("    ") && !trimmed.contains(" | ") {
+            if subject_seen {
+                omitted_body_lines += 1;
+            } else {
+                if !header.is_empty() {
+                    out.push(std::mem::take(&mut header));
+                }
+                out.push(trimmed.to_string());
+                subject_seen = true;
+            }
+        } else {
+            if !header.is_empty() {
+                out.push(std::mem::take(&mut header));
+            }
+            if let Some((path, stat)) = trimmed.rsplit_once(" | ") {
+                // Keep exact paths, total changed lines, and Git's scaled graph.
+                let stat = stat.split_whitespace().collect::<Vec<_>>().join(" ");
+                let original = format!("{}: {stat}", path.trim_end());
+                let parts = stat.split_whitespace().collect::<Vec<_>>();
+                if parts.len() == 2
+                    && parts[0].parse::<usize>().is_ok()
+                    && parts[1].len() > 8
+                    && parts[1].chars().all(|c| c == '+' || c == '-')
+                {
+                    let plus = parts[1].bytes().filter(|b| *b == b'+').count();
+                    let minus = parts[1].len() - plus;
+                    let candidate =
+                        format!("{}: {} graph:+{plus}/-{minus}", path.trim_end(), parts[0]);
+                    out.push(token_accounting::smaller_representation(
+                        original, candidate,
+                    ));
+                } else {
+                    out.push(original);
+                }
+            } else {
+                // Merge parents, signatures, binary/rename summaries and custom
+                // pretty formats are preserved when their structure is unknown.
+                out.push(trimmed.to_string());
+            }
+        }
+    }
+    if !header.is_empty() {
+        out.push(header);
+    }
+    if omitted_body_lines > 0 {
+        out.push(format!(
+            "[git log --stat: {omitted_body_lines} message body lines omitted; recover raw output]"
+        ));
+    }
+    let compact = out.join("\n") + "\n";
+    token_accounting::smaller_representation(raw.to_string(), compact)
+}
+
 fn filter_git_log(raw: &str) -> String {
     let mut out = Vec::new();
     let mut skipped = 0usize;
@@ -4390,6 +4539,7 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("exec-history.jsonl");
     let record = ExecHistoryRecord {
+        token_savings: report.token_savings.clone(),
         timestamp_unix: unix_timestamp(),
         command: report.command.clone(),
         exit_code: report.exit_code,
@@ -4518,6 +4668,7 @@ fn run_native_hook(client: &str, event: &str) -> NativeHookRunReport {
     match compress_text(&filtered, &format!("{client} {event} hook"), &store).and_then(
         |compressed| {
             let exec_report = ExecReport {
+                token_savings: token_accounting::measure(&output, &compressed.output),
                 command: command.clone(),
                 exit_code: extract_hook_exit_code(value.as_ref()).unwrap_or(0),
                 filter: filter.clone(),
@@ -4673,72 +4824,12 @@ fn find_string_by_key(value: &Value, keys: &[&str]) -> Option<String> {
 
 fn summarize_exec_history() -> Result<Value> {
     let path = default_state_dir()?.join("exec-history.jsonl");
-    if !path.exists() {
-        return Ok(json!({
-            "commands": 0,
-            "original_bytes": 0,
-            "compressed_bytes": 0,
-            "bytes_saved": 0,
-            "estimated_tokens_saved": 0,
-            "by_filter": [],
-            "by_command": [],
-        }));
-    }
-
-    let content = std::fs::read_to_string(path)?;
-    let mut commands = 0usize;
-    let mut original_bytes = 0usize;
-    let mut compressed_bytes = 0usize;
-    let mut bytes_saved = 0usize;
-    let mut by_filter = std::collections::BTreeMap::<String, (usize, usize)>::new();
-    let mut by_command = std::collections::BTreeMap::<String, (usize, usize)>::new();
-    for line in content.lines().filter(|line| !line.trim().is_empty()) {
-        let Ok(record) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        commands += 1;
-        original_bytes += record
-            .get("original_bytes")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
-        compressed_bytes += record
-            .get("compressed_bytes")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
-        bytes_saved += record
-            .get("bytes_saved")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
-        let saved = record
-            .get("bytes_saved")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
-        let filter = record
-            .get("filter")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_string();
-        let command = record
-            .get("command")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .split_whitespace()
-            .take(2)
-            .collect::<Vec<_>>()
-            .join(" ");
-        add_history_bucket(&mut by_filter, filter, saved);
-        add_history_bucket(&mut by_command, command, saved);
-    }
-
-    Ok(json!({
-        "commands": commands,
-        "original_bytes": original_bytes,
-        "compressed_bytes": compressed_bytes,
-        "bytes_saved": bytes_saved,
-        "estimated_tokens_saved": bytes_saved / 4,
-        "by_filter": history_bucket_json(by_filter),
-        "by_command": history_bucket_json(by_command),
-    }))
+    let content = if path.exists() {
+        std::fs::read_to_string(path)?
+    } else {
+        String::new()
+    };
+    Ok(token_accounting::summarize(&content))
 }
 
 fn record_retrieval_feedback(hash: &str, bytes: usize, source: &str) -> Result<()> {
@@ -4812,35 +4903,6 @@ fn summarize_retrieval_feedback() -> Result<Value> {
     }))
 }
 
-fn add_history_bucket(
-    buckets: &mut std::collections::BTreeMap<String, (usize, usize)>,
-    key: String,
-    saved: usize,
-) {
-    let entry = buckets.entry(key).or_insert((0, 0));
-    entry.0 += 1;
-    entry.1 += saved;
-}
-
-fn history_bucket_json(buckets: std::collections::BTreeMap<String, (usize, usize)>) -> Vec<Value> {
-    let mut rows = buckets
-        .into_iter()
-        .map(|(name, (commands, bytes_saved))| {
-            json!({
-                "name": name,
-                "commands": commands,
-                "bytes_saved": bytes_saved,
-                "estimated_tokens_saved": bytes_saved / 4,
-            })
-        })
-        .collect::<Vec<_>>();
-    rows.sort_by_key(|row| {
-        std::cmp::Reverse(row.get("bytes_saved").and_then(Value::as_u64).unwrap_or(0))
-    });
-    rows.truncate(20);
-    rows
-}
-
 fn format_stats_markdown(report: &Value) -> String {
     let history = report.get("exec_history").unwrap_or(&Value::Null);
     let retrieval_feedback = report.get("retrieval_feedback").unwrap_or(&Value::Null);
@@ -4862,11 +4924,8 @@ fn format_stats_markdown(report: &Value) -> String {
             .unwrap_or(0)
     ));
     out.push_str(&format!(
-        "- Estimated tokens saved: {}\n\n",
-        history
-            .get("estimated_tokens_saved")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
+        "- {}\n- Scope: command output, not total session usage or billing.\n\n",
+        token_accounting::describe_json(&history["token_savings"])
     ));
     out.push_str(&format!(
         "- CCR retrievals: {}\n",
@@ -4885,7 +4944,7 @@ fn format_stats_markdown(report: &Value) -> String {
 
     if let Some(filters) = history.get("by_filter").and_then(Value::as_array) {
         out.push_str("## Top Filters\n\n");
-        out.push_str("| Filter | Commands | Bytes saved | Est. tokens saved |\n");
+        out.push_str("| Filter | Commands | Bytes saved | Tokens saved / denominator (method) |\n");
         out.push_str("| --- | ---: | ---: | ---: |\n");
         for row in filters.iter().take(10) {
             out.push_str(&format!(
@@ -4893,9 +4952,7 @@ fn format_stats_markdown(report: &Value) -> String {
                 markdown_escape(row.get("name").and_then(Value::as_str).unwrap_or("")),
                 row.get("commands").and_then(Value::as_u64).unwrap_or(0),
                 row.get("bytes_saved").and_then(Value::as_u64).unwrap_or(0),
-                row.get("estimated_tokens_saved")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0)
+                token_accounting::describe_json(&row["token_savings"])
             ));
         }
         out.push('\n');
@@ -5171,6 +5228,9 @@ fn discover_exec_savings(paths: &[PathBuf], recursive: bool) -> Result<DiscoverR
         report.rewritable_commands += file_report.rewritable_commands;
         report.original_bytes += file_report.original_bytes;
         report.filtered_bytes += file_report.filtered_bytes;
+        for tokens in file_report.token_savings {
+            token_accounting::merge(&mut report.token_savings, tokens);
+        }
         report.candidates.append(&mut file_report.candidates);
     }
 
@@ -5199,11 +5259,15 @@ fn format_discover_markdown(report: &DiscoverReport) -> String {
         "- Estimated bytes saved: {}\n",
         report.estimated_bytes_saved
     ));
-    out.push_str(&format!(
-        "- Estimated tokens saved: {}\n\n",
-        report.estimated_tokens_saved
-    ));
+    if report.token_savings.is_empty() && report.estimated_tokens_saved > 0 {
+        out.push_str(&format!(
+            "- Estimated tokens saved: {} out of {} (legacy bytes / 4)\n\n",
+            report.estimated_tokens_saved,
+            report.original_bytes / 4
+        ));
+    }
 
+    out.push_str(&format!("- {}\n- Scope: potential command-filter savings on captured output; excludes subsequent compression, retrieval and provider billing.\n\n", token_accounting::describe(&report.token_savings)));
     if report.candidates.is_empty() {
         out.push_str("No rewrite candidates found.\n");
         return out;
@@ -5331,14 +5395,15 @@ fn run_eval(paths: &[PathBuf], recursive: bool) -> Result<EvalReport> {
     }
     if discover.estimated_tokens_saved > 0 {
         notes.push(format!(
-            "estimated {} tokens saved by command-output filtering",
-            discover.estimated_tokens_saved
+            "potential command-output savings: {}",
+            token_accounting::describe(&discover.token_savings)
         ));
     }
     Ok(EvalReport {
         files_scanned: discover.files_scanned,
         command_outputs: discover.command_outputs,
         candidates: discover.candidates.len(),
+        token_savings: discover.token_savings.clone(),
         estimated_bytes_saved: discover.estimated_bytes_saved,
         estimated_tokens_saved: discover.estimated_tokens_saved,
         pass: discover.files_scanned > 0,
@@ -5357,10 +5422,8 @@ fn format_eval_markdown(report: &EvalReport) -> String {
         "- Estimated bytes saved: {}\n",
         report.estimated_bytes_saved
     ));
-    out.push_str(&format!(
-        "- Estimated tokens saved: {}\n\n",
-        report.estimated_tokens_saved
-    ));
+
+    out.push_str(&format!("- {}\n- Scope: potential command-filter savings on captured output; excludes subsequent compression, retrieval and provider billing.\n\n", token_accounting::describe(&report.token_savings)));
     if !report.notes.is_empty() {
         out.push_str("## Notes\n\n");
         for note in &report.notes {
@@ -5434,8 +5497,8 @@ fn build_learn_recommendations(
         recommendations.push(LearnRecommendation {
             title: "Route noisy commands through lm-resizer".to_string(),
             reason: format!(
-                "Session mining found {} rewritable command outputs with about {} tokens saved.",
-                discover.rewritable_commands, discover.estimated_tokens_saved
+                "Session mining found {} rewritable command outputs; potential {}.",
+                discover.rewritable_commands, token_accounting::describe(&discover.token_savings)
             ),
             instruction: "Before running noisy commands such as tests, builds, searches, package installs, infra CLIs, or large listings, run `lm-resizer rewrite-shell \"<command>\"`; if it returns `lm-resizer exec -- ...`, use the rewritten command.".to_string(),
             evidence: discover
@@ -5456,15 +5519,12 @@ fn build_learn_recommendations(
         .get("commands")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let history_saved = exec_history
-        .get("estimated_tokens_saved")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let history_saved = token_accounting::describe_json(&exec_history["token_savings"]);
     if commands > 0 {
         recommendations.push(LearnRecommendation {
             title: "Keep command-output savings visible".to_string(),
             reason: format!(
-                "`lm-resizer exec` history contains {commands} commands and about {history_saved} estimated tokens saved."
+                "`lm-resizer exec` history contains {commands} commands ; {history_saved}."
             ),
             instruction: "Use `lm-resizer stats --markdown` during long agent sessions to review which filters save context and which command families deserve project-specific TOML filters.".to_string(),
             evidence: learn_history_evidence(exec_history),
@@ -5538,8 +5598,8 @@ fn format_learn_markdown(
         discover.command_outputs
     ));
     out.push_str(&format!(
-        "- Estimated discover tokens saved: {}\n",
-        discover.estimated_tokens_saved
+        "- Potential discover savings: {}\n",
+        token_accounting::describe(&discover.token_savings)
     ));
     out.push_str(&format!(
         "- Exec history commands: {}\n\n",
@@ -6158,8 +6218,11 @@ fn add_discover_candidate(report: &mut DiscoverReport, command: &str, output: &s
     report.command_outputs += 1;
     report.original_bytes += output.len();
     report.filtered_bytes += filtered.len();
+    let tokens = token_accounting::measure(output, &filtered);
+    token_accounting::merge(&mut report.token_savings, tokens.clone());
     if filter != "generic" || filtered.len() < output.len() {
         report.candidates.push(DiscoverCandidate {
+            token_savings: tokens,
             command: command.to_string(),
             filter,
             original_bytes: output.len(),
@@ -7001,7 +7064,18 @@ fn compress_batch_file(
 fn run_doctor(json_output: bool, store: Option<PathBuf>) -> Result<()> {
     let store_path = store.clone().unwrap_or(default_store_path()?);
     let store_ok = open_store(store).is_ok();
+    let history = summarize_exec_history();
+    let savings_diagnostics = match history {
+        Ok(history) => token_accounting::diagnostics(
+            &history,
+            std::env::var("LM_RESIZER_TRACKING").ok().as_deref() != Some("0"),
+        ),
+        Err(err) => vec![format!(
+            "Savings history unavailable: {err}; check the state directory permissions."
+        )],
+    };
     let report = DoctorReport {
+        savings_diagnostics,
         binary: std::env::current_exe()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|_| "lm-resizer".to_string()),
@@ -7034,6 +7108,9 @@ fn run_doctor(json_output: bool, store: Option<PathBuf>) -> Result<()> {
             if report.store_ok { "ok" } else { "error" }
         );
         println!("  MCP tools: {}", report.mcp_tools.join(", "));
+        for diagnosis in &report.savings_diagnostics {
+            println!("  Savings: {diagnosis}");
+        }
         println!("  Clients:");
         for client in &report.clients {
             if client.available {
@@ -7781,10 +7858,11 @@ fn dashboard_html(entries: usize, empty: bool, exec_history: &Value) -> String {
         .get("bytes_saved")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let tokens_saved = exec_history
-        .get("estimated_tokens_saved")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let tokens_saved = token_accounting::describe_json(&exec_history["token_savings"])
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
     format!(
         r#"<!doctype html>
 <html lang="en">
@@ -7810,7 +7888,7 @@ code{{background:#eef2f7;padding:2px 5px;border-radius:4px}}
 <div class="card"><div>Store empty</div><div class="metric">{empty}</div></div>
 <div class="card"><div>Exec commands</div><div class="metric">{commands}</div></div>
 <div class="card"><div>Bytes saved</div><div class="metric">{bytes_saved}</div></div>
-<div class="card"><div>Est. tokens saved</div><div class="metric">{tokens_saved}</div></div>
+<div class="card"><div>Command-output tokens (not billing)</div><div class="metric">{tokens_saved}</div></div>
 </section>
 <p>JSON stats remain available at <code>/stats</code>.</p>
 </main>
@@ -11020,6 +11098,7 @@ Successfully tagged localhost/app:latest\n";
                 filtered_bytes: 40,
                 estimated_bytes_saved: 60,
                 estimated_tokens_saved: 15,
+                token_savings: Vec::new(),
                 candidates: Vec::new(),
             },
         };
@@ -11104,7 +11183,7 @@ Successfully tagged localhost/app:latest\n";
                 "bytes_saved": 120,
                 "estimated_tokens_saved": 30,
                 "by_filter": [
-                    {"name": "cargo_test", "commands": 2, "bytes_saved": 100, "estimated_tokens_saved": 25}
+                    {"name": "cargo_test", "commands": 2, "bytes_saved": 100, "estimated_tokens_saved": 25, "token_savings": [{"tokenizer":"legacy_bytes_div_4", "estimated":true, "commands":2, "original_tokens":50, "compressed_tokens":25, "tokens_saved":25}]}
                 ]
             },
             "retrieval_feedback": {
@@ -11114,7 +11193,7 @@ Successfully tagged localhost/app:latest\n";
         });
         let markdown = format_stats_markdown(&report);
         assert!(markdown.contains("# lm-resizer Stats"));
-        assert!(markdown.contains("| `cargo_test` | 2 | 100 | 25 |"));
+        assert!(markdown.contains("| `cargo_test` | 2 | 100 | 25 tokens saved out of 50 (50.0%; legacy_bytes_div_4, estimate; 2 commands) |"));
         assert!(markdown.contains("- CCR retrievals: 4"));
     }
 

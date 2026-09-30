@@ -223,6 +223,7 @@ fn expected_exit(case: &Case) -> i32 {
 
 fn missing_oracle(case: &Case, output: &str) -> Vec<String> {
     match case.id.as_str() {
+        "git_log_stat" => git_log_stat_missing(case, output),
         "git_log" => git_log_missing(case, output),
         "json_large" => json_missing(case, output),
         "dotnet_ok" => dotnet_ok_missing(case, output),
@@ -235,6 +236,52 @@ fn missing_oracle(case: &Case, output: &str) -> Vec<String> {
             .cloned()
             .collect(),
     }
+}
+
+/// Every fact is associated with its full commit hash, so swapping file counts
+/// between commits cannot pass the oracle. Expand only explicitly labelled bars.
+fn git_log_stat_missing(case: &Case, output: &str) -> Vec<String> {
+    let graph = Regex::new(r"graph:\+(\d+)/-(\d+)").expect("valid graph regex");
+    let expanded = graph.replace_all(output, |captures: &regex::Captures<'_>| {
+        let plus = captures[1].parse::<usize>().unwrap_or(0).min(4096);
+        let minus = captures[2].parse::<usize>().unwrap_or(0).min(4096);
+        format!("{}{}", "+".repeat(plus), "-".repeat(minus))
+    });
+    let blocks = expanded
+        .split("commit ")
+        .skip(1)
+        .filter_map(|block| {
+            let hash = block.split_whitespace().next()?;
+            let text = block
+                .lines()
+                .map(|line| {
+                    if let Some((path, stat)) = line.rsplit_once(": ") {
+                        if stat
+                            .split_whitespace()
+                            .next()
+                            .is_some_and(|word| word.parse::<usize>().is_ok() || word == "Bin")
+                        {
+                            return format!("{path} | {stat}");
+                        }
+                    }
+                    line.to_string()
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            Some((hash, text))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    case.oracle
+        .iter()
+        .filter(|fact| {
+            let Some((hash, text)) = fact.split_once(" => ") else {
+                return true;
+            };
+            !blocks.get(hash).is_some_and(|block| block.contains(text))
+        })
+        .cloned()
+        .collect()
 }
 
 fn dotnet_ok_missing(case: &Case, output: &str) -> Vec<String> {
@@ -624,6 +671,16 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
         .output()?;
     let commit = String::from_utf8_lossy(&commit.stdout).trim().to_string();
     let binary_hash = format!("{:x}", Sha256::digest(fs::read(lm_bin)?));
+    let profile = if lm_bin
+        .components()
+        .any(|part| part.as_os_str() == "release")
+    {
+        "release"
+    } else if lm_bin.components().any(|part| part.as_os_str() == "debug") {
+        "debug"
+    } else {
+        "non renseigné (binaire externe)"
+    };
     let lost_cases: Vec<&str> = cases
         .iter()
         .filter_map(|case| {
@@ -635,11 +692,11 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
         })
         .collect();
     let verdict = if lost_cases.is_empty() {
-        "Sur ces 22 fixtures, LM Resizer est devant ou à égalité sur chaque économie qualifiée. La généralisation hors de ce corpus n'est pas démontrée.".to_string()
+        format!("Sur ces {} fixtures, LM Resizer est devant ou à égalité sur chaque économie qualifiée. La généralisation hors de ce corpus n'est pas démontrée.", cases.len())
     } else {
-        format!("Sur ces 22 fixtures, LM Resizer est derrière sur {} cas : {}. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée.", lost_cases.len(), lost_cases.join(", "))
+        format!("Sur ces {} fixtures, LM Resizer est derrière sur {} cas : {}. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée.", cases.len(), lost_cases.len(), lost_cases.join(", "))
     };
-    let mut report = format!("# Banc comparatif LM Resizer / RTK / Headroom\n\n{verdict} Une économie ne compte que si l'oracle est intégralement conservé.\n\n## Versions et méthode\n\n- Checkout `{commit}` ; SHA-256 du binaire LM Resizer `{binary_hash}`.\n- RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.\n- Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.\n- `compile_error`, `git_diff` et `dotnet_ok` sont des captures réelles dont les sources figurent dans `bench/capture-src/`. Les autres fixtures sont synthétiques.\n- RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.\n- Les chemins HOME/checkout sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.\n- Le classement n'évalue pas la fidélité du code de sortie de RTK `pipe` ; les codes observés figurent dans `resultats.json`.\n- Latence : processus complet, démarrage Python de Headroom compris ; elle dépend de la machine et du cache.\n");
+    let mut report = format!("# Banc comparatif LM Resizer / RTK / Headroom\n\n{verdict} Une économie ne compte que si l'oracle est intégralement conservé.\n\n## Versions et méthode\n\n- Profil du binaire : `{profile}`.\n- Checkout `{commit}` ; SHA-256 du binaire LM Resizer `{binary_hash}`.\n- RTK `0.50.0`, Headroom `0.39.1` avec ONNX Runtime `1.24.4`.\n- Tokenizer commun : `tiktoken-rs` `o200k_base` ; mêmes octets de fixture pour tous.\n- `compile_error`, `git_diff` et `dotnet_ok` sont des captures réelles dont les sources figurent dans `bench/capture-src/`. `git_log_stat` est une sortie réelle de Git sur un dépôt fictif reproductible ; son oracle associe chaque auteur, date, titre, fichier et histogramme à son commit. Les autres fixtures sont synthétiques.\n- RTK suit la route déclarée dans `cases.json` ; LM Resizer utilise `exec` ou `compress --input` ; Headroom utilise son API `compress(messages)`.\n- Les chemins HOME/checkout sont normalisés pour le comptage ; les originaux restent sous `target/banc/results/`.\n- Le classement n'évalue pas la fidélité du code de sortie de RTK `pipe` ; les codes observés figurent dans `resultats.json`.\n- Latence : processus complet, démarrage Python de Headroom compris ; elle dépend de la machine et du cache.\n");
     if let Ok(proof) =
         serde_json::from_str::<Value>(&fs::read_to_string(qa.join("preuve_home.json"))?)
     {
@@ -652,7 +709,7 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
         .iter()
         .filter(|row| row.tool == "Headroom" && row.detector_fallback)
         .count();
-    report.push_str(&format!("- Replis Headroom vers la détection Python : {fallback}/22. Détails des 66 mesures : `bench/resultats.json`.\n"));
+    report.push_str(&format!("- Replis Headroom vers la détection Python : {fallback}/{}. Détails des {} mesures : `bench/resultats.json`.\n", cases.len(), rows.len()));
     report.push_str("\n## Résultats par catégorie\n\n| Catégorie | Cas | LM Resizer : médiane / oracle | RTK : médiane / oracle | Headroom : médiane / oracle |\n|---|---:|---:|---:|---:|\n");
     let categories: BTreeSet<&str> = cases.iter().map(|case| case.category.as_str()).collect();
     for category in categories.iter().copied().chain(std::iter::once("GLOBAL")) {
@@ -720,7 +777,10 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
     }
     report.push_str("\n## Cas encore derrière un concurrent\n\n");
     if lost_cases.is_empty() {
-        report.push_str("Aucun sur les 22 fixtures de ce banc.\n");
+        report.push_str(&format!(
+            "Aucun sur les {} fixtures de ce banc.\n",
+            cases.len()
+        ));
     }
     for case in cases {
         let lm = row_for(rows, &case.id, "LM Resizer");
@@ -753,7 +813,7 @@ fn render_report(cases: &[Case], rows: &[Row], lm_bin: &Path, qa: &Path) -> Resu
             ));
         }
     }
-    report.push_str("\n## Sources officielles\n\n- [RTK 0.50.0](https://github.com/rtk-ai/rtk/releases/tag/v0.50.0).\n- [Headroom, installation et API](https://github.com/headroomlabs-ai/headroom/blob/main/README.md).\n\n## Ce que je n'ai pas pu vérifier\n\n- Réparation d'un test par agent : le sandbox du Codex imbriqué bloque l'essai avant modification.\n- Coûts facturés, cache fournisseur et intégrations proxy/CCR en production.\n- Informations utiles au-delà des oracles déclarés et généralisation à des sorties réelles non présentes dans ces 22 fixtures synthétiques.\n");
+    report.push_str("\n## Sources officielles\n\n- [RTK 0.50.0](https://github.com/rtk-ai/rtk/releases/tag/v0.50.0).\n- [Headroom, installation et API](https://github.com/headroomlabs-ai/headroom/blob/main/README.md).\n\n## Ce que je n'ai pas pu vérifier\n\n- Réparation d'un test par agent : non évaluée dans ce rejeu.\n- Coûts facturés, cache fournisseur et intégrations proxy/CCR en production.\n- Informations utiles au-delà des oracles déclarés et généralisation à des sorties réelles non présentes dans ce corpus de captures et de fixtures synthétiques.\n");
     let _ = qa;
     Ok(report)
 }
@@ -826,6 +886,36 @@ mod tests {
             assert!(!case.oracle.is_empty(), "{}", case.id);
             assert!(missing_oracle(&case, &original).is_empty(), "{}", case.id);
         }
+    }
+
+    #[test]
+    fn git_log_stat_oracle_checks_dates_files_histograms_and_commit_association() {
+        let case = cases()
+            .into_iter()
+            .find(|case| case.id == "git_log_stat")
+            .unwrap();
+        let raw = fs::read_to_string(bench_dir().join(&case.file)).unwrap();
+        assert!(git_log_stat_missing(&case, &raw).is_empty());
+        let without_dates = raw
+            .lines()
+            .filter(|line| !line.starts_with("Date:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(git_log_stat_missing(&case, &without_dates).len(), 40);
+        let altered_file = raw.replacen("src/module-1.rs", "src/other.rs", 1);
+        assert!(!git_log_stat_missing(&case, &altered_file).is_empty());
+        let altered_total = raw.replacen("files changed", "files omitted", 1);
+        assert!(!git_log_stat_missing(&case, &altered_total).is_empty());
+        let hashes = raw
+            .lines()
+            .filter_map(|line| line.strip_prefix("commit "))
+            .take(2)
+            .collect::<Vec<_>>();
+        let swapped = raw
+            .replacen(hashes[0], "PLACEHOLDER", 1)
+            .replacen(hashes[1], hashes[0], 1)
+            .replacen("PLACEHOLDER", hashes[1], 1);
+        assert!(!git_log_stat_missing(&case, &swapped).is_empty());
     }
 
     #[test]
