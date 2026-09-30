@@ -252,24 +252,31 @@ fn git_log_stat_missing(case: &Case, output: &str) -> Vec<String> {
         .skip(1)
         .filter_map(|block| {
             let hash = block.split_whitespace().next()?;
-            let text = block
-                .lines()
-                .map(|line| {
-                    if let Some((path, stat)) = line.rsplit_once(": ") {
-                        if stat
-                            .split_whitespace()
-                            .next()
-                            .is_some_and(|word| word.parse::<usize>().is_ok() || word == "Bin")
-                        {
-                            return format!("{path} | {stat}");
-                        }
+            let mut facts = BTreeSet::new();
+            for (index, line) in block.lines().enumerate() {
+                if index == 0 {
+                    // The compact route combines metadata with the full hash.
+                    for field in line.split(" | ").skip(1) {
+                        facts.insert(field.split_whitespace().collect::<Vec<_>>().join(" "));
                     }
+                    continue;
+                }
+                let line = if let Some((path, stat)) = line.rsplit_once(": ") {
+                    if stat
+                        .split_whitespace()
+                        .next()
+                        .is_some_and(|word| word.parse::<usize>().is_ok() || word == "Bin")
+                    {
+                        format!("{path} | {stat}")
+                    } else {
+                        line.to_string()
+                    }
+                } else {
                     line.to_string()
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-            Some((hash, text))
+                };
+                facts.insert(line.split_whitespace().collect::<Vec<_>>().join(" "));
+            }
+            Some((hash, facts))
         })
         .collect::<std::collections::BTreeMap<_, _>>();
     case.oracle
@@ -278,7 +285,7 @@ fn git_log_stat_missing(case: &Case, output: &str) -> Vec<String> {
             let Some((hash, text)) = fact.split_once(" => ") else {
                 return true;
             };
-            !blocks.get(hash).is_some_and(|block| block.contains(text))
+            !blocks.get(hash).is_some_and(|facts| facts.contains(text))
         })
         .cloned()
         .collect()
@@ -906,6 +913,14 @@ mod tests {
         assert!(!git_log_stat_missing(&case, &altered_file).is_empty());
         let altered_total = raw.replacen("files changed", "files omitted", 1);
         assert!(!git_log_stat_missing(&case, &altered_total).is_empty());
+        let altered_title = raw.replacen("Maintenance batch 40", "Maintenance batch 400", 1);
+        assert!(!git_log_stat_missing(&case, &altered_title).is_empty());
+        let stat_line = raw
+            .lines()
+            .find(|line| line.contains("src/module-1.rs"))
+            .unwrap();
+        let altered_graph = raw.replacen(stat_line, &format!("{stat_line}-"), 1);
+        assert!(!git_log_stat_missing(&case, &altered_graph).is_empty());
         let hashes = raw
             .lines()
             .filter_map(|line| line.strip_prefix("commit "))
