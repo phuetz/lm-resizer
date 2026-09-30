@@ -55,7 +55,7 @@ Le CLI propose aussi `compress` pour les fichiers ou l'entrée standard, `tool-o
 
 ## Mesures face à RTK et Headroom
 
-**Rejeu du 30/09/2026** avec le code de la révision `30d563d` fusionnée dans cette branche, sur Linux x86_64, 24 cœurs logiques et 93 Gio de RAM. La comparaison utilise RTK 0.50.0, Headroom 0.39.1 avec ONNX Runtime 1.24.4, et les mêmes 22 fixtures. `o200k_base` compte les jetons de sortie. Une économie n'est retenue que si tous les faits de l'oracle déclaré pour le cas sont conservés ; sinon, l'*économie qualifiée* vaut zéro. Trois fixtures viennent de vrais outils ; les autres sont synthétiques. [Méthode, fixtures et résultats détaillés](bench/README.md).
+**Rejeu du 30/09/2026** depuis le commit de fusion `df30334`, sur Linux x86_64, 24 cœurs logiques et 93 Gio de RAM. La comparaison utilise RTK 0.50.0, Headroom 0.39.1 avec ONNX Runtime 1.24.4, et les mêmes 22 fixtures. `o200k_base` compte les jetons de sortie. Une économie n'est retenue que si tous les faits de l'oracle déclaré pour le cas sont conservés ; sinon, l'*économie qualifiée* vaut zéro. Trois fixtures viennent de vrais outils ; les autres sont synthétiques. [Méthode, fixtures et résultats détaillés](bench/README.md).
 
 | Résultat sur 22 cas | LM Resizer | RTK | Headroom |
 |---|---:|---:|---:|

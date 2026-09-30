@@ -55,7 +55,7 @@ The CLI also offers `compress` for files or standard input, `tool-output` for al
 
 ## Measured against RTK and Headroom
 
-**Replayed 2026-09-30** with source from revision `30d563d` merged into this branch, on Linux x86_64, 24 logical CPU cores and 93 GiB RAM. The comparison uses RTK 0.50.0, Headroom 0.39.1 with ONNX Runtime 1.24.4, and the same 22 input fixtures. `o200k_base` counts output tokens. A saving counts only when every fact in the case's stated oracle survives; otherwise its *qualified saving* is zero. Three fixtures are captured from real tools; the others are synthetic. [Method, fixtures and full results](bench/README.md).
+**Replayed 2026-09-30** from merge commit `df30334`, on Linux x86_64, 24 logical CPU cores and 93 GiB RAM. The comparison uses RTK 0.50.0, Headroom 0.39.1 with ONNX Runtime 1.24.4, and the same 22 input fixtures. `o200k_base` counts output tokens. A saving counts only when every fact in the case's stated oracle survives; otherwise its *qualified saving* is zero. Three fixtures are captured from real tools; the others are synthetic. [Method, fixtures and full results](bench/README.md).
 
 | Result across 22 cases | LM Resizer | RTK | Headroom |
 |---|---:|---:|---:|

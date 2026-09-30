@@ -1,6 +1,6 @@
-# Pertes connues dans le banc Sol 6.1 (29 septembre 2026)
+# Pertes connues dans le banc Sol (30 septembre 2026)
 
-Périmètre : les 22 fixtures versionnées dans `bench/cases.json`. Une économie ne compte que si l'oracle déclaré est entièrement conservé. Trois cas sont derrière RTK ; aucun n'a d'échec technique d'exécution, et Headroom ne gagne aucun de ces cas. Les six cas de code à économie nulle sont des égalités. Ces chiffres décrivent ce corpus, pas une performance générale. Le banc initial utilise le commit `142a9ef0aa71b6b1892c4f31617e00e354c16eba` (`bench/RAPPORT.md:7`) ; les mesures ci-dessous viennent de `bench/resultats.json`. L'ancien corpus de `bench/resultats-avant.json` ne permet pas de comparer ces trois captures (`bench/README.md:22`).
+Périmètre : les 22 fixtures versionnées dans `bench/cases.json`. Une économie ne compte que si l'oracle déclaré est entièrement conservé. Deux cas sont derrière RTK ; aucun n'a d'échec technique d'exécution, et Headroom ne gagne aucun de ces cas. Les six cas de code à économie nulle sont des égalités. Ces chiffres décrivent ce corpus, pas une performance générale. Le rejeu complet courant utilise le commit de fusion `df30334` ; ses mesures sont dans `bench/resultats.json` et `bench/RAPPORT.md`. L'ancien corpus de `bench/resultats-avant.json` ne permet pas de comparer ces captures (`bench/README.md:22`).
 
 ## `dotnet_ok` — synthèse de réussite encore longue
 
@@ -9,12 +9,12 @@ Périmètre : les 22 fixtures versionnées dans `bench/cases.json`. Une économi
 - **Cause probable :** la route .NET structurée traite les fichiers TRX ou binlog, puis renvoie `None` si aucun n'est disponible (`src/parity_filters.rs:103-121`). La route console choisit le filtre TOML (`src/main.rs:2609-2612`), dont la règle `Passed!` conserve la ligne d'origine (`src/main.rs:6577-6614`) ; `apply_toml_filter` rassemble les lignes retenues sans condenser les comptes (`src/main.rs:3395-3415`).
 - **Piste :** analyser le verdict console de réussite et émettre une synthèse courte qui garde les nombres de tests réussis, échoués, ignorés, le total et la portée exécutée. Conserver les blocs d'échec et les emplacements source actuels ; tester plusieurs sorties .NET réelles.
 
-## `git_diff` — chemins de fichiers répétés (**corrigé dans cette branche**)
+## `git_diff` — ancienne perte, corrigée
 
 - **Constat initial :** sur le vrai patch de deux fichiers (`bench/corpus/git_diff.txt:1-20`), le filtre gardait chaque en-tête `diff --git` ainsi que les chemins `---` et `+++`. Les changements et les huit faits de l'oracle (`bench/cases.json:100-114`) étaient présents, mais ces doublons consommaient des jetons.
-- **Mesure exacte :** `bench/resultats.json:450-484` : 195 jetons en entrée, 133 en sortie pour LM Resizer (31,79 % d'économie), 125 pour RTK (35,90 %) ; oracle conservé à 100 % par les deux. Headroom garde 195 jetons (`bench/resultats.json:487-502`). Comparaison arrondie dans `bench/RAPPORT.md:55`.
+- **Mesure antérieure (révision `9e73489`) :** 195 jetons en entrée, 133 en sortie pour LM Resizer (31,79 % d'économie), 125 pour RTK (35,90 %) ; les deux conservaient l'oracle déclaré.
 - **Cause et correction :** `filter_diff_summary` gardait les trois en-têtes de chemin (`src/main.rs:3574-3622`). La regex générique d'échec interprète aussi le mot `diff` de `diff --git` comme un diagnostic (`crates/lm-resizer-core/src/transforms/diagnostic_gate.rs:18-23`) : retirer seulement cette ligne déclenchait le repli sur la sortie brute (`src/main.rs:3418-3443`). Le filtre omet désormais `diff --git` seulement quand le bloc contient `---` et `+++`, et la garde ignore cet en-tête structurel. Un diff binaire ou tronqué conserve son en-tête Git (`src/main.rs:3585-3603`).
-- **Après correction :** même fixture et même tokenizer `o200k_base` : 195 → 103 jetons (47,18 % d'économie), avec tous les faits déclarés. C'est un rejeu local ciblé ; le banc complet à trois outils n'a pas été rejoué. Le test de régression a échoué avant la correction puis réussi après (`src/main.rs`, test `git_diff_capture_omits_redundant_file_headers_without_losing_patch_facts`).
+- **Rejeu complet actuel à trois outils :** même fixture et même tokenizer `o200k_base` : 195 → 103 jetons (47,18 % d'économie) pour LM Resizer, contre 125 jetons (35,90 %) pour RTK, avec l'oracle déclaré complet pour les deux (`bench/resultats.json`, `bench/RAPPORT.md`). Le test de régression est `git_diff_capture_omits_redundant_file_headers_without_losing_patch_facts` dans `src/main.rs`.
 
 ## `compile_error` — la garde des diagnostics rétablit toute la sortie
 
