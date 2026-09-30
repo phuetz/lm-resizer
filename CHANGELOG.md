@@ -3,6 +3,7 @@
 ## [0.2.3] - à publier
 
 ### Added
+- Mesure A/B des jetons de session via `measure-session`, fondée sur les compteurs fournisseur (entrée, sortie et cache), avec rejeu Bash séparé et refus des journaux incomplets.
 - Installateurs binaires en une commande pour Linux, macOS et Windows, avec vérification SHA-256 des archives de release.
 - Test CI de l'installation Linux sur un runner neuf sans Rust et préparation d'une release avec archives.
 

@@ -40,10 +40,13 @@ use walkdir::WalkDir;
 
 mod advice_cli;
 mod mcp_proxy;
+mod measure_session;
 mod parity_filters;
 mod provider_usage;
 mod rtk_filters;
 mod shared_context;
+
+use measure_session::{format_measure_session_report, run_measure_session};
 
 use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
 
@@ -375,10 +378,13 @@ enum Commands {
         #[arg(long)]
         markdown: bool,
     },
-    /// Replay a recorded agent session to measure honest token savings.
+    /// Count provider tokens in a Claude session and compare two captured runs.
     MeasureSession {
-        /// JSONL session file to measure (e.g., Claude Code log).
+        /// Baseline Claude Code JSONL session with provider usage counters.
         input: PathBuf,
+        /// Optimized session for an exact provider-token comparison.
+        #[arg(long)]
+        optimized: Option<PathBuf>,
         /// Emit machine-readable JSON.
         #[arg(long)]
         json: bool,
@@ -904,13 +910,35 @@ struct EvalReport {
 #[derive(Debug, Serialize)]
 struct MeasureSessionReport {
     file_path: String,
+    optimized_file_path: Option<String>,
+    baseline_usage: SessionUsageTotals,
+    optimized_usage: Option<SessionUsageTotals>,
+    session_token_difference: Option<i128>,
+    session_token_savings_percent: Option<String>,
     tool_results_count: usize,
     original_tool_tokens: usize,
     filtered_tool_tokens: usize,
-    total_session_tokens: usize,
-    tool_token_share_percent: f64,
-    estimated_session_savings_percent: f64,
+    total_session_tokens: u64,
+    replayed_tools: Vec<ReplayedToolResult>,
     caveats: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq)]
+struct SessionUsageTotals {
+    requests: usize,
+    input_tokens: u64,
+    cache_creation_input_tokens: u64,
+    cache_read_input_tokens: u64,
+    output_tokens: u64,
+    total_tokens: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct ReplayedToolResult {
+    tool_use_id: String,
+    filter: String,
+    original_tokens: usize,
+    filtered_tokens: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -1646,8 +1674,12 @@ async fn main() -> Result<()> {
                 );
             }
         }
-        Commands::MeasureSession { input, json } => {
-            let report = run_measure_session(&input).await?;
+        Commands::MeasureSession {
+            input,
+            optimized,
+            json,
+        } => {
+            let report = run_measure_session(&input, optimized.as_deref()).await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -5400,214 +5432,6 @@ fn format_eval_markdown(report: &EvalReport) -> String {
 
 fn markdown_escape(value: &str) -> String {
     value.replace('|', "\\|").replace('\n', " ")
-}
-
-fn extract_command_from_tool_use(value: &Value) -> Option<String> {
-    if let Some(cmd) = value
-        .get("input")
-        .and_then(|i| i.get("command"))
-        .and_then(Value::as_str)
-    {
-        return Some(cmd.to_string());
-    }
-    None
-}
-
-fn find_command_for_tool_result(content: &str, tool_use_id: &str) -> Option<String> {
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        let mut queue = vec![&value];
-        while let Some(node) = queue.pop() {
-            match node {
-                Value::Object(obj) => {
-                    if obj.get("type").and_then(Value::as_str) == Some("tool_use") {
-                        if obj.get("id").and_then(Value::as_str) == Some(tool_use_id) {
-                            return extract_command_from_tool_use(node);
-                        }
-                    }
-                    for v in obj.values() {
-                        queue.push(v);
-                    }
-                }
-                Value::Array(arr) => {
-                    for v in arr {
-                        queue.push(v);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    None
-}
-
-async fn run_measure_session(input: &Path) -> Result<MeasureSessionReport> {
-    let content = tokio::fs::read_to_string(input)
-        .await
-        .with_context(|| format!("could not read {}", input.display()))?;
-
-    let tokenizer = lm_resizer_core::tokenizer::get_tokenizer("o200k_base");
-    let mut total_session_tokens = 0;
-
-    let mut tool_results_count = 0;
-    let mut original_tool_tokens = 0;
-    let mut filtered_tool_tokens = 0;
-    let store = InMemoryCcrStore::new();
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-
-        let mut queue = vec![&value];
-        while let Some(node) = queue.pop() {
-            match node {
-                Value::Object(obj) => {
-                    if obj.get("type").and_then(Value::as_str) == Some("text") {
-                        if let Some(text) = obj.get("text").and_then(Value::as_str) {
-                            total_session_tokens += tokenizer.count_text(text);
-                        }
-                        continue;
-                    }
-                    if obj.get("type").and_then(Value::as_str) == Some("tool_use") {
-                        if let Some(command) = extract_command_from_tool_use(node) {
-                            total_session_tokens += tokenizer.count_text(&command);
-                        }
-                        continue;
-                    }
-                    if obj.get("type").and_then(Value::as_str) == Some("tool_result") {
-                        if let Some(content_block) = obj.get("content") {
-                            if let Some(text) = extract_text_from_content(content_block) {
-                                total_session_tokens += tokenizer.count_text(&text);
-                                let mut command_parts = vec!["sh".to_string()];
-                                if let Some(id) = obj.get("tool_use_id").and_then(Value::as_str) {
-                                    if let Some(cmd) = find_command_for_tool_result(&content, id) {
-                                        if let Some(parts) = split_shell_words(&cmd) {
-                                            command_parts = parts;
-                                        }
-                                    }
-                                }
-                                let (_name, filtered) =
-                                    filter_command_output(&command_parts, &text);
-                                if let Ok(compressed) = compress_text_with_pipeline_gate(
-                                    &filtered,
-                                    "",
-                                    &store,
-                                    &build_pipeline(),
-                                    None,
-                                    false,
-                                ) {
-                                    tool_results_count += 1;
-                                    original_tool_tokens += tokenizer.count_text(&text);
-                                    filtered_tool_tokens +=
-                                        tokenizer.count_text(&compressed.output);
-                                }
-                            }
-                        }
-                        continue;
-                    }
-                    if obj.get("role").is_some() {
-                        if let Some(text) = obj.get("content").and_then(Value::as_str) {
-                            total_session_tokens += tokenizer.count_text(text);
-                        }
-                    }
-                    for v in obj.values() {
-                        queue.push(v);
-                    }
-                }
-                Value::Array(arr) => {
-                    for v in arr {
-                        queue.push(v);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    let tool_token_share_percent = if total_session_tokens > 0 {
-        (original_tool_tokens as f64 / total_session_tokens as f64) * 100.0
-    } else {
-        0.0
-    };
-
-    let estimated_session_savings_percent = if total_session_tokens > 0 {
-        let tokens_saved = original_tool_tokens.saturating_sub(filtered_tool_tokens);
-        (tokens_saved as f64 / total_session_tokens as f64) * 100.0
-    } else {
-        0.0
-    };
-
-    Ok(MeasureSessionReport {
-        file_path: input.display().to_string(),
-        tool_results_count,
-        original_tool_tokens,
-        filtered_tool_tokens,
-        total_session_tokens,
-        tool_token_share_percent,
-        estimated_session_savings_percent,
-        caveats: vec![
-            "Économiser sur la sortie d'une commande ne prouve pas que la facture de la session baisse.".to_string(),
-            "La réutilisation du cache du fournisseur (prompt caching) n'est pas mesurable ici.".to_string(),
-            "Un contexte plus concis peut modifier le nombre de tours supplémentaires nécessaires à l'agent.".to_string(),
-        ],
-    })
-}
-
-fn extract_text_from_content(content: &Value) -> Option<String> {
-    if let Some(s) = content.as_str() {
-        return Some(s.to_string());
-    }
-    if let Some(arr) = content.as_array() {
-        let mut result = String::new();
-        for item in arr {
-            if let Some(text) = item.get("text").and_then(Value::as_str) {
-                result.push_str(text);
-            }
-        }
-        return Some(result);
-    }
-    None
-}
-
-fn format_measure_session_report(report: &MeasureSessionReport) -> String {
-    let mut out = String::new();
-    out.push_str(&format!("Fichier: {}\n", report.file_path));
-    out.push_str(&format!(
-        "Résultats d'outils analysés: {}\n",
-        report.tool_results_count
-    ));
-    out.push_str(&format!(
-        "Jetons totaux de la session (o200k_base): {}\n",
-        report.total_session_tokens
-    ));
-    out.push_str(&format!(
-        "  - Jetons d'outils avant filtrage: {} ({:.1}% du total)\n",
-        report.original_tool_tokens, report.tool_token_share_percent
-    ));
-    out.push_str(&format!(
-        "  - Jetons d'outils après filtrage: {}\n",
-        report.filtered_tool_tokens
-    ));
-    out.push_str(&format!(
-        "Économie estimée sur la session: {:.1}%\n\n",
-        report.estimated_session_savings_percent
-    ));
-    out.push_str("Ce qui n'est pas mesurable ici :\n");
-    for caveat in &report.caveats {
-        out.push_str(&format!("- {}\n", caveat));
-    }
-    out
 }
 
 fn run_learn(
@@ -11269,36 +11093,29 @@ Successfully tagged localhost/app:latest\n";
     #[tokio::test]
     async fn measure_session_reports_savings_on_synthetic_fixture() {
         let fixture = Path::new("fixtures/exec/synthetic_session.jsonl");
-        let report = run_measure_session(fixture)
+        let optimized = Path::new("fixtures/exec/synthetic_session_optimized.jsonl");
+        let report = run_measure_session(fixture, Some(optimized))
             .await
             .expect("measure session failed");
         assert_eq!(report.tool_results_count, 1);
-        assert!(report.original_tool_tokens > 0);
-        assert!(report.filtered_tool_tokens > 0);
-        assert!(report.total_session_tokens > report.original_tool_tokens);
-        assert!(report.tool_token_share_percent > 0.0);
-        let session: Vec<Value> = std::fs::read_to_string(fixture)
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
-        let tokenizer = lm_resizer_core::tokenizer::get_tokenizer("o200k_base");
-        let expected_total: usize = [
-            session[0]["content"][0]["text"].as_str().unwrap(),
-            session[1]["content"][0]["input"]["command"]
-                .as_str()
-                .unwrap(),
-            session[2]["content"][0]["content"][0]["text"]
-                .as_str()
-                .unwrap(),
-            session[3]["content"][0]["text"].as_str().unwrap(),
-        ]
-        .iter()
-        .map(|text| tokenizer.count_text(text))
-        .sum();
-        assert_eq!(report.total_session_tokens, expected_total);
+        assert_eq!(report.baseline_usage.requests, 2);
+        assert_eq!(report.baseline_usage.input_tokens, 220);
+        assert_eq!(report.baseline_usage.cache_creation_input_tokens, 30);
+        assert_eq!(report.baseline_usage.cache_read_input_tokens, 110);
+        assert_eq!(report.baseline_usage.output_tokens, 30);
+        assert_eq!(report.total_session_tokens, 390);
+        assert_eq!(report.optimized_usage.unwrap().total_tokens, 300);
+        assert_eq!(report.session_token_difference, Some(90));
+        assert_eq!(
+            report.session_token_savings_percent.as_deref(),
+            Some("23.08")
+        );
+        assert_eq!(report.replayed_tools[0].tool_use_id, "call_1");
+        assert_eq!(report.replayed_tools[0].filter, "cargo_test");
+        assert_eq!(report.original_tool_tokens, 110);
+        assert_eq!(report.filtered_tool_tokens, 8);
         let text = format_measure_session_report(&report);
-        assert!(text.contains("Ce qui n'est pas mesurable ici"));
+        assert!(text.contains("Économie de jetons de session A/B: 23.08%"));
     }
 
     #[test]

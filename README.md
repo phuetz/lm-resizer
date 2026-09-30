@@ -53,6 +53,8 @@ cargo uninstall --root "$HOME/.local" lm-resizer
 
 The CLI also offers `compress` for files or standard input, `tool-output` for already captured command output, and opt-in MCP, HTTP and agent hook integrations. See [the agent integration guide](docs/CLAUDE_CODEX.md) and [the release guide](docs/RELEASE.md) for those workflows.
 
+To compare **whole-session token usage**, use `measure-session` with baseline and optimized Claude Code JSONL captures. The A/B percentage comes from provider `usage` counters, including cache reads and writes; replayed Bash output is shown separately. A single capture gives a token total but no savings percentage. See the [session measurement method and synthetic example](docs/MEASURE-SESSION.md).
+
 ## Measured against RTK and Headroom
 
 **Replayed 2026-09-30** from merge commit `df30334`, on Linux x86_64, 24 logical CPU cores and 93 GiB RAM. The comparison uses RTK 0.50.0, Headroom 0.39.1 with ONNX Runtime 1.24.4, and the same 22 input fixtures. `o200k_base` counts output tokens. A saving counts only when every fact in the case's stated oracle survives; otherwise its *qualified saving* is zero. Three fixtures are captured from real tools; the others are synthetic. [Method, fixtures and full results](bench/README.md).
