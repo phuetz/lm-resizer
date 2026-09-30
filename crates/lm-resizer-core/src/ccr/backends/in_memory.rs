@@ -50,7 +50,7 @@ struct Entry {
 }
 
 impl InMemoryCcrStore {
-    /// Default: 1000 entries, 5-minute TTL.
+    /// Default: 1000 entries, 30-minute TTL.
     pub fn new() -> Self {
         Self::with_capacity_and_ttl(DEFAULT_CAPACITY, DEFAULT_TTL)
     }

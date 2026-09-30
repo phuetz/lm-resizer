@@ -18,9 +18,12 @@ archives to a release.
 - [ ] `scripts/check-publish-readiness.ps1` or
       `scripts/check-publish-readiness.sh` completed successfully.
 - [ ] The local proxy preview smoke test completed successfully.
-- [ ] The release archive contains `release-evidence.json`, docs, examples,
-      fixtures, scripts, GitHub workflow/templates, contribution/security
-      guidance, the C header, and the WASM wrapper package.
+- [ ] The binary archive contains the executable, `release-evidence.json`,
+      user docs, license, contribution/security guidance, skills and their
+      installer. Development fixtures, workflows and WASM packages stay in
+      the repository or their separate distribution.
+- [ ] The packaged executable passes the source/JSON recovery test:
+      `LM_RESIZER_TEST_BINARY=/path/to/lm-resizer cargo test --test cli_retrieval`.
 - [ ] The separate install smoke jobs passed on Linux, macOS and Windows.
 
 ## Publish Approval
@@ -42,13 +45,21 @@ archives to a release.
 ## Commands
 
 To prepare the next binary release, first merge the version-aligned code and
-create a new tag (`v0.2.3` for this change). Run **Prepare binary release draft**
+create a new tag (`v0.2.4` for this change). Run **Prepare binary release draft**
 with that existing tag and `confirm=PREPARE_DRAFT`. The workflow builds four
 platform archives, verifies their checksums, and creates a draft with the
 archives and sidecars. Review its assets before publishing the draft manually.
 The installer URLs in the README become usable only after that publication.
 Do not reuse the asset-free `v0.2.2` tag. The generated `dist` evidence and
 checksums are build artifacts; stale copies are not kept in Git.
+
+The tag must include `60d5cc6` and the v0.2.4 preparation commits. A local
+`dist/SHA256SUMS` is evidence for that local build only; it does not establish
+the hashes of GitHub assets. After publishing, run both README installers on
+clean accounts, check `lm-resizer --version` reports 0.2.4 and repeat source
+and JSON retrieval with the downloaded executable. Run the four platform
+installation checks before announcing the release. Binary publication does
+not require publishing the npm package.
 
 PowerShell:
 

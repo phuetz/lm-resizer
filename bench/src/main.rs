@@ -124,8 +124,7 @@ fn run_command(
     input: Option<&str>,
     home: &Path,
     shims: &Path,
-    fixture: &Path,
-    expected_exit: i32,
+    (fixture, expected_exit): (&Path, i32),
     qa: &Path,
 ) -> Result<(Output, f64)> {
     fs::create_dir_all(home)?;
@@ -446,7 +445,7 @@ fn verify_home(lm_bin: &Path, shims: &Path, qa: &Path, bpe: &CoreBPE) -> Result<
     ];
     let mut views = Vec::new();
     for home in [qa.join("home-lm-resizer"), qa.join("h")] {
-        let (output, _) = run_command(lm_bin, &args, None, &home, shims, &fixture, 0, qa)?;
+        let (output, _) = run_command(lm_bin, &args, None, &home, shims, (&fixture, 0), qa)?;
         if !output.status.success() {
             bail!("HOME proof: lm-resizer exec failed");
         }
@@ -535,8 +534,7 @@ fn run_all(cases: &[Case], lm_bin: &Path, qa: &Path, bpe: &CoreBPE) -> Result<Ve
                 input,
                 &home,
                 &shims,
-                &fixture,
-                expected_exit(case),
+                (&fixture, expected_exit(case)),
                 qa,
             )?;
             let raw_out = String::from_utf8_lossy(&output.stdout).into_owned();

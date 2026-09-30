@@ -1,25 +1,27 @@
 # Using lm-resizer With Claude Code Or Codex
 
 lm-resizer is intentionally opt-in. Nothing rewrites commands until you
-explicitly install hook config. Claude Code and Codex can use it in four
+explicitly install hook config. Claude Code and Codex can use it in these
 practical ways:
 
 1. MCP compression tools
 2. explicit `lm-resizer exec -- ...` command wrapping
 3. project hook instructions in `CLAUDE.md` or `AGENTS.md`
-4. native hook config: a PreToolUse rewrite that actively routes supported
-   commands through `exec` (the model sees filtered, compressed output) plus
-   non-blocking PostToolUse savings records
+4. experimental native hook config and an offline-testable hook handler;
+   activation depends on the agent version and event protocol
 5. a drop-in **skill** (`.claude/skills/lm-resizer`, `.codex/skills/lm-resizer`)
    that teaches the agent when to wrap, how to recover raw output, and how to
    report savings — copy the folder into your repo or your home skills dir
 
 ## Install
 
-Build the binary first:
+After the v0.2.4 release is published, install the binary using the [README](../README.md), or build and
+install from a checkout:
 
 ```bash
-cargo build --release
+cargo install --quiet --path . --locked --root "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+lm-resizer --version
 ```
 
 Then add MCP configuration:
@@ -29,11 +31,14 @@ lm-resizer install --client claude --scope project
 lm-resizer install --client codex --scope global
 ```
 
-For a repository-local setup:
+For several clients at once (Claude, Cursor and VS Code use project config;
+Codex always uses user config, including with `--scope project`):
 
 ```bash
 lm-resizer install --client all --scope project --project-dir /path/to/repo
 ```
+
+The Codex installer replaces an existing `[mcp_servers.lm_resizer]` table without a backup. Save your user configuration first. `--scope project` with `--client all` does not isolate Codex configuration to the repository.
 
 Check the environment:
 
@@ -49,7 +54,7 @@ For noisy commands, ask the agent to run through `exec`:
 lm-resizer exec -- cargo test
 lm-resizer exec --stream -- cargo test
 lm-resizer exec -- rg -n "TODO|FIXME" .
-lm-resizer exec --json -- kubectl get pods -A
+lm-resizer exec --json -- kubectl get pods -A  # requires kubectl and a configured cluster
 ```
 
 `exec` runs the command, keeps useful errors and summaries, stores recoverable
@@ -83,14 +88,21 @@ they do not execute target commands.
 
 ## Add Native Hook Config
 
-Generate project-local Codex and Claude hook config:
+Generate experimental project-local hook config:
 
 ```bash
-lm-resizer init-native-hooks --client all --project-dir . --force
+lm-resizer init-native-hooks --client all --project-dir .
 ```
 
-This writes `.codex/hooks.json` and `.claude/settings.json`. The generated
-config wires `lm-resizer hook` on two `Bash` events:
+This writes `.codex/hooks.json` and `.claude/settings.json`. File generation
+and the handler can be tested locally; automatic execution and rewriting in
+a running Claude/Codex agent have not been verified. Confirm support for the
+configuration and events in your agent version before relying on them.
+An existing file is refused unless you pass `--force`, which overwrites the
+whole file: back up and merge any existing settings yourself.
+`uninstall-hooks` removes guidance blocks only; to undo native configuration,
+remove the generated hook entries or restore your saved configuration.
+The generated config wires `lm-resizer hook` on two `Bash` events:
 
 - `PreToolUse` — if the command is supported (git, cargo, vitest/jest, rg, …),
   the hook emits `updatedInput` rewriting it to `lm-resizer exec -- <cmd>`, so
@@ -103,14 +115,15 @@ config wires `lm-resizer hook` on two `Bash` events:
 
 ## Audit Existing Sessions
 
-To estimate savings from previous Claude/Codex sessions:
+If no sessions exist yet, `discover-sessions --agent all --markdown` reports
+missing known directories. Once sessions exist, inspect their output:
 
 ```bash
 lm-resizer discover ~/.claude/projects --recursive --markdown
 lm-resizer discover ~/.codex --recursive --json
 ```
 
-The discover command scans logs and session JSON for command/output pairs
+Explicit paths must exist. The discover command scans logs and session JSON for command/output pairs
 without executing anything.
 
 ## Review Savings

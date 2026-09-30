@@ -1,6 +1,6 @@
 # Compression structurelle guidée par Code Explorer
 
-`lm-resizer compress --input fichier.cs` utilise les symboles de l'index Code Explorer lorsqu'il existe. Le même chemin couvre Go, Java, C et C++, après C#. Le binaire appelle `code-explorer cypher --repo ...`, lit les plages de classes et de fonctions du graphe, puis retire seulement les lignes intérieures des corps de fonctions. Il garde les signatures, attributs, imports et accolades. Le fichier complet est conservé dans CCR ; la sortie donne une clé de récupération. Une requête qui nomme une fonction garde son corps entier.
+`lm-resizer compress --input fichier.cs` utilise les symboles de l'index Code Explorer lorsqu'il existe. Le même chemin couvre Go, Java, C et C++, après C#. Le binaire appelle `code-explorer cypher --repo ...`, lit les plages de classes et de fonctions du graphe, puis retire seulement les lignes intérieures des corps de fonctions. Il garde les signatures, attributs, imports et accolades. Le fichier complet est conservé dans CCR pendant 30 minutes par défaut (exportez-le avant expiration pour une preuve durable) ; la sortie donne une clé de récupération. Une requête qui nomme une fonction garde son corps entier.
 
 L'index doit contenir le fichier et être au moins aussi récent que lui. Le pont refuse un résultat absent, obsolète ou mal formé ; le pipeline ordinaire prend alors la suite. `--advice-from-code-explorer` demande explicitement la tentative et expose son statut dans `--json`. Pour préparer un projet :
 

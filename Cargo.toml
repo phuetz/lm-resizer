@@ -9,7 +9,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.86"
 license = "Apache-2.0"
 repository = "https://github.com/phuetz/lm-resizer"
 authors = ["lm-resizer contributors"]
@@ -29,7 +29,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 
 [package]
 name = "lm-resizer"
-version = "0.2.3"
+version = "0.2.4"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
