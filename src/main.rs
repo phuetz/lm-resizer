@@ -2471,30 +2471,42 @@ fn split_shell_words(segment: &str) -> Option<Vec<String>> {
     let mut in_single = false;
     let mut in_double = false;
     let mut escaped = false;
+    let mut has_word = false;
 
     for ch in segment.chars() {
         if escaped {
             current.push(ch);
+            has_word = true;
             escaped = false;
             continue;
         }
         match ch {
             '\\' if !in_single => escaped = true,
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => {
+                in_single = !in_single;
+                has_word = true;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                has_word = true;
+            }
             ch if ch.is_whitespace() && !in_single && !in_double => {
-                if !current.is_empty() {
+                if has_word {
                     words.push(std::mem::take(&mut current));
+                    has_word = false;
                 }
             }
-            _ => current.push(ch),
+            _ => {
+                current.push(ch);
+                has_word = true;
+            }
         }
     }
 
     if escaped || in_single || in_double {
         return None;
     }
-    if !current.is_empty() {
+    if has_word {
         words.push(current);
     }
     Some(words)
@@ -2503,7 +2515,9 @@ fn split_shell_words(segment: &str) -> Option<Vec<String>> {
 fn shell_join(args: &[String]) -> String {
     args.iter()
         .map(|arg| {
-            if arg.chars().all(|c| {
+            if arg.is_empty() {
+                String::from("\"\"")
+            } else if arg.chars().all(|c| {
                 c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '\\' | ':')
             }) {
                 arg.clone()
@@ -4009,7 +4023,10 @@ fn filter_tsc(raw: &str) -> String {
     let mut skipped = 0usize;
 
     for line in raw.lines() {
-        if let Some(pos) = line.find("): error TS").or_else(|| line.find("): warning TS")) {
+        if let Some(pos) = line
+            .find("): error TS")
+            .or_else(|| line.find("): warning TS"))
+        {
             if let Some(open_paren_idx) = line[..pos].rfind('(') {
                 let file = &line[..open_paren_idx];
                 by_file
@@ -9203,6 +9220,20 @@ command = "node"
         assert!(config.contains("command = \"lm-resizer.exe\""));
         assert!(config.contains("\"--store\""));
         assert!(!config.contains("command = \"old\""));
+    }
+
+    #[test]
+    fn split_shell_words_keeps_empty_quoted_argument() {
+        assert_eq!(
+            split_shell_words("grep -rn \"\" src").unwrap(),
+            vec!["grep", "-rn", "", "src"]
+        );
+        let report = rewrite_shell_report("grep -rn \"\" src");
+        assert!(
+            report.rewritten.contains("grep -rn \"\" src"),
+            "Rewritten command does not contain empty quotes: {}",
+            report.rewritten
+        );
     }
 
     #[test]
