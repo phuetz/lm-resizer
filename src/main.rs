@@ -1147,9 +1147,20 @@ fn provider_label(provider: ProviderKind) -> &'static str {
     }
 }
 
+fn main() -> Result<()> {
+    // Clap's generated command builder has a large debug stack frame. Windows
+    // gives the main thread only 1 MiB, so dispatch on a thread with an explicit
+    // stack rather than depending on a platform-specific linker flag.
+    std::thread::Builder::new()
+        .name("lm-resizer-cli".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| run(Cli::parse()))?
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
-    let cli = Cli::parse();
+async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Compress {
             input,
