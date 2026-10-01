@@ -4060,7 +4060,16 @@ fn filter_pytest(raw: &str) -> String {
             || trimmed.contains(" error")
             || trimmed.contains(" warnings")
             || line.starts_with("E   ")
-            || line.starts_with("File ");
+            || line.starts_with("File ")
+            || line.starts_with("> ")
+            || {
+                let u_start = line.chars().take_while(|&c| c == '_').count();
+                let u_end = line.chars().rev().take_while(|&c| c == '_').count();
+                u_start >= 3
+                    && u_end >= 3
+                    && line[u_start..].starts_with(' ')
+                    && line[..line.len() - u_end].ends_with(' ')
+            };
 
         if important {
             kept.push(line.to_string());
@@ -12136,4 +12145,13 @@ Prisma CLI Version : 5.15.0
             .unwrap_or_else(|| panic!("missing package.version in {}", path.display()))
             .to_string()
     }
+}
+#[test]
+fn pytest_filter_keeps_failing_statement_and_test_header() {
+    let raw = "=== FAILURES ===\n___ test_x ___\n\n    def test_x():\n        data = load()\n>       assert check(data)\nE       AssertionError\n\ntests/test_a.py:9: AssertionError\n=== short test summary info ===\nFAILED tests/test_a.py::test_x\n1 failed in 0.1s\n";
+    let filtered = crate::filter_command_output(&["pytest".into()], raw).1;
+    assert!(filtered.contains(">       assert check(data)"));
+    assert!(filtered.contains("___ test_x ___"));
+    assert!(filtered.contains("tests/test_a.py:9"));
+    assert!(!filtered.contains("data = load()"));
 }
