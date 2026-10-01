@@ -10,7 +10,9 @@
 
 ### Binaire précompilé, après la publication de v0.2.4
 
-Une fois la release v0.2.4 et ses archives binaires publiées, utilisez la commande de votre plateforme. L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire avant de poser `lm-resizer` dans `~/.local/bin` par défaut. Plateformes préparées : Linux x86_64, macOS x86_64/arm64 et Windows x86_64. La release v0.2.2 existante n'a pas d'archives précompilées.
+**Ne lancez pas les commandes ci-dessous avant la publication de la release v0.2.4 et de ses archives : elles renvoient actuellement HTTP 404. Pour installer maintenant, suivez « Compiler depuis les sources » plus bas.**
+
+Après cette publication seulement, utilisez la commande de votre plateforme. L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire avant de poser `lm-resizer` dans `~/.local/bin` par défaut. Plateformes préparées : Linux x86_64, macOS x86_64/arm64 et Windows x86_64. La release v0.2.2 existante n'a pas d'archives précompilées.
 
 Linux et macOS :
 
@@ -28,30 +30,94 @@ Sur Linux/macOS, ajoutez `~/.local/bin` au `PATH` si l'installeur le demande. L'
 
 ### Compiler depuis les sources dès maintenant
 
-Il faut Rust/Cargo (Rust 1.86 ou plus récent), Git et les outils de compilation natifs : compilateur C/C++ et éditeur de liens sur Linux/macOS ; Visual Studio Build Tools avec les outils C++ MSVC et le SDK Windows pour la toolchain Windows MSVC. Ces prérequis ne sont pas installés par LM Resizer. Depuis un checkout de ce dépôt :
+Rust **1.86.0 ou plus récent** est requis. Le Rust 1.85.1 fourni par Debian 13 est trop ancien : utilisez **rustup officiel**, pas seulement le Cargo du système. Le fichier `rust-toolchain.toml` sélectionne 1.86.0 dans ce dépôt via les commandes rustup ; il inclut `rustfmt` et `clippy` pour les contrôles de développement. Un `cargo +stable` explicite ou `RUSTUP_TOOLCHAIN` peut remplacer ce choix.
+
+Prérequis système à installer avant Rust :
+
+- **Debian 13 / Ubuntu** : `curl`, certificats HTTPS, Git, compilateur C (`cc`/`gcc`), compilateur C++ (`c++`/`g++`), en-têtes de la libc et éditeur de liens (`binutils`, installé avec GCC). Dans un terminal avec sudo (ou comme root sans `sudo`) :
+
+~~~bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends ca-certificates curl git gcc g++ libc6-dev
+~~~
+
+- **macOS** : installez les outils de ligne de commande Xcode (`xcode-select --install`) ; ils fournissent Git, Clang/Clang++, les en-têtes et le SDK. Terminez la boîte de dialogue d’installation avant de poursuivre.
+- **Windows x86_64** : installez [Git for Windows](https://git-scm.com/downloads/win) et [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022) avec **Développement Desktop en C++**, les outils **MSVC C++ x64/x86** et le **SDK Windows**. Si ces composants sont déjà présents, conservez-les.
+
+La compilation native par défaut a été vérifiée sur Debian 13 avec Rust 1.86.0 **sans `make`, `pkg-config` ni `cmake`**. GCC seul ne suffit pas : `esaxx-rs` compile du C++. SQLite et Oniguruma sont intégrés ; leurs paquets de développement système ne sont pas requis. Les fonctions optionnelles, notamment `--features magika`, ne font pas partie de cette recette.
+
+Si Rust manque ou est trop ancien, exécutez les étapes d’installation de rustup au début du bloc de votre plateforme. Si rustup est déjà installé et son dossier bin dans le PATH, vous pouvez les omettre : il installera la toolchain indiquée par le dépôt. L’installeur ci-dessous sélectionne 1.86.0 par défaut dans votre compte ; `--no-modify-path` laisse vos fichiers de profil et le PATH permanent intacts. Les commandes suivantes règlent seulement le PATH du terminal courant. [Instructions officielles Rust](https://www.rust-lang.org/tools/install/).
 
 Linux/macOS (Bash) :
 
 ~~~bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.86.0
+. "$HOME/.cargo/env"
+git clone --branch release/v0.2.4-recette-2026-10-01 https://github.com/phuetz/lm-resizer.git
+cd lm-resizer
+cargo --version
 cargo install --quiet --path . --locked --root "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 lm-resizer --version
 ~~~
 
-Windows (PowerShell) :
+Windows x86_64 (PowerShell) :
 
 ~~~powershell
+$rustupInstaller = Join-Path $env:TEMP 'lm-resizer-rustup-init.exe'
+Invoke-WebRequest -Uri 'https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe' -OutFile $rustupInstaller
+& $rustupInstaller -y --no-modify-path --profile minimal --default-toolchain 1.86.0
+$env:Path = "$(Join-Path $env:USERPROFILE '.cargo\bin');$env:Path"
+git clone --branch release/v0.2.4-recette-2026-10-01 https://github.com/phuetz/lm-resizer.git
+cd lm-resizer
+cargo --version
 $installRoot = Join-Path $env:USERPROFILE '.local'
 cargo install --quiet --path . --locked --root "$installRoot"
 $env:Path = "$installRoot\bin;$env:Path"
 lm-resizer --version
 ~~~
 
+Cargo télécharge ses dépendances dans `~/.cargo` (`%USERPROFILE%\.cargo` sous Windows) même si une compilation échoue ; rustup conserve les compilateurs dans `.rustup`. Ces caches sont distincts du préfixe `.local`. Si Cargo n’est pas en 1.86.0 dans ce checkout, vérifiez le PATH (`command -v cargo` sous Bash, `Get-Command cargo` sous PowerShell), `rustup show active-toolchain` et toute surcharge `RUSTUP_TOOLCHAIN`. Arrêtez-vous si `cargo install` échoue : les exemples et la désinstallation ci-dessous nécessitent un binaire effectivement installé.
+
 Essayez l'outil sur une **vraie sortie** de ce checkout. `exec` lance la commande puis affiche la sortie traitée. Les codes de sortie normaux sont conservés. Un processus terminé par un signal ou une commande impossible à lancer renvoie 1 ; pour une commande en échec, utilisez `--raw-on-failure` si vous avez besoin immédiatement de toute la sortie d'erreur.
 
 ~~~bash
 lm-resizer exec -- git log -20 '--format=Date: %ad%n%h %s' --date=short
 lm-resizer tee list
+~~~
+
+Extraits de sorties réellement capturées sur Debian 13 avec Rust 1.86.0, au commit `86bf58f` (les SHA, noms de fichiers et chemins varieront sur votre machine) :
+
+`lm-resizer --version` :
+
+~~~text
+lm-resizer 0.2.4
+~~~
+
+`exec` : trois premières lignes, résumé des lignes retirées et marqueur final :
+
+~~~text
+86bf58f Livrer la documentation des jetons dans les archives binaires
+4694506 Corriger les avertissements Clippy dans les tests du workspace
+5a12cfb Éviter le débordement de pile du CLI de développement sous Windows
+... omitted 20 low-signal lines
+[raw: e6c2d124d10b]
+~~~
+
+`lm-resizer tee list` :
+
+~~~text
+e6c2d124d10b5924173b779b04b40df78dce01a9678d825a706afa3bd3ad556a.log 1786 bytes /qa/debian-home/.local/state/lm-resizer/tee/e6c2d124d10b5924173b779b04b40df78dce01a9678d825a706afa3bd3ad556a.log
+~~~
+
+Un petit résultat peut rester inchangé, sans gain ni marqueur de récupération :
+
+~~~bash
+lm-resizer exec -- git rev-parse --short HEAD
+~~~
+
+~~~text
+86bf58f
 ~~~
 
 La première commande lit 20 vrais commits Git et retire leurs lignes de date de la vue de l'agent. Quand la sortie est raccourcie, `exec` peut afficher un identifiant `[raw: …]`. Donnez cet identifiant à `tee read` pour retrouver le texte original. La récupération concerne le texte UTF-8 : les octets non UTF-8 sont remplacés au décodage, et stdout/stderr sont combinés. Les fichiers tee restent locaux jusqu’à leur suppression ou purge. Les entrées CCR expirent après **30 minutes par défaut**, même si la base est conservée ; récupérez-les et exportez-les avant expiration pour garder une preuve durable. La sortie peut aussi rester intacte si la compression n'apporte rien.

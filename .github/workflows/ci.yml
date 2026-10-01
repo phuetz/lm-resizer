@@ -6,7 +6,29 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Keep release jobs on the stable toolchain installed by the action, despite
+# the local MSRV pin. The dedicated CI job below tests the minimum separately.
+env:
+  RUSTUP_TOOLCHAIN: stable
+
 jobs:
+  minimum-rust:
+    name: Rust minimum (1.86.0)
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: 1.86.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+          components: rustfmt, clippy
+      - name: Check the minimum compiler
+        run: |
+          cargo --version
+          cargo fmt --all --check
+          cargo test --workspace --release --locked
+
   release-check-linux:
     name: release check (ubuntu-latest)
     runs-on: ubuntu-latest

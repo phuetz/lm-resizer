@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+# Keep release jobs on the stable toolchain installed by the action, despite
+# the local MSRV pin. CI tests the minimum separately in ci.yml.
+env:
+  RUSTUP_TOOLCHAIN: stable
+
 jobs:
   package:
     strategy:

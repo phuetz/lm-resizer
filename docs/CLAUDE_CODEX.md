@@ -15,8 +15,8 @@ practical ways:
 
 ## Install
 
-After the v0.2.4 release is published, install the binary using the [README](../README.md), or build and
-install from a checkout. Source builds require Rust 1.86 or newer, Git and native C/C++ build tools (MSVC C++ tools and Windows SDK in Visual Studio Build Tools on Windows):
+Follow the [README](../README.md) for the exact clone command, official Rustup setup and native build prerequisites. Its prebuilt installer is usable only after v0.2.4 is published. Once the repository is cloned and Rustup is on PATH, build and
+install from its root. Source builds require Rust 1.86 or newer, Git and native C/C++ build tools (MSVC C++ tools and Windows SDK in Visual Studio Build Tools on Windows):
 
 Linux/macOS (Bash):
 
