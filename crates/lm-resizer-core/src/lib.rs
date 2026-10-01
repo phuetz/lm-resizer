@@ -41,6 +41,8 @@ pub use output::{
     classify_request_turn, classify_turn, has_concision_instruction, route_effort, steer_verbosity,
     EffortRoutingError, OutputShapingError, TurnClassification, CONCISION_PROMPT,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::OnceLock;
 
 /// Stable high-level compression report for embedding applications.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -207,6 +209,15 @@ pub unsafe extern "C" fn lm_resizer_free(ptr: *mut u8, len: usize) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+static STORE: OnceLock<Arc<InMemoryCcrStore>> = OnceLock::new();
+#[cfg(not(target_arch = "wasm32"))]
+fn get_store() -> Arc<InMemoryCcrStore> {
+    STORE
+        .get_or_init(|| Arc::new(InMemoryCcrStore::new()))
+        .clone()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn ffi_compress_json(
     content_ptr: *const u8,
     content_len: usize,
@@ -221,7 +232,7 @@ fn ffi_compress_json(
         Ok(query) => query,
         Err(error) => return ffi_error_json(error),
     };
-    let report = LmResizer::new().compress(content, query);
+    let report = LmResizer::with_store(get_store()).compress(content, query);
     serde_json::to_string(&report).unwrap_or_else(|err| ffi_error_json(err.to_string()))
 }
 
@@ -235,6 +246,32 @@ unsafe fn ffi_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str, String> {
     }
     std::str::from_utf8(std::slice::from_raw_parts(ptr, len))
         .map_err(|err| format!("input is not valid UTF-8: {err}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[no_mangle]
+pub unsafe extern "C" fn lm_resizer_retrieve_json(
+    hash_ptr: *const u8,
+    hash_len: usize,
+) -> *mut c_char {
+    let hash = match unsafe { ffi_str(hash_ptr, hash_len) } {
+        Ok(hash) => hash,
+        Err(error) => return c_string_ptr(ffi_error_json(error)),
+    };
+    let store = get_store();
+    match store.get(hash) {
+        Some(content) => {
+            let report = serde_json::json!({
+                "hash": hash,
+                "content": content
+            });
+            c_string_ptr(
+                serde_json::to_string(&report)
+                    .unwrap_or_else(|err| ffi_error_json(err.to_string())),
+            )
+        }
+        None => c_string_ptr(ffi_error_json(format!("CCR entry not found: {}", hash))),
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -289,6 +326,92 @@ mod tests {
         assert!(value["output"]
             .as_str()
             .is_some_and(|value| !value.is_empty()));
+    }
+
+    #[test]
+    fn c_abi_retrieve_json_works_and_round_trips() {
+        // (1) compresser par lm_resizer_compress_json un tableau JSON de 80 objets
+        let mut objects = Vec::new();
+        for i in 0..80 {
+            if i == 42 {
+                objects
+                    .push(serde_json::json!({"id": i, "name": "row", "status": "ERROR timeout"}));
+            } else {
+                objects.push(serde_json::json!({"id": i, "name": "row", "status": "ok"}));
+            }
+        }
+        let content = serde_json::to_string(&objects).unwrap();
+        let query = b"error timeout";
+
+        let compress_ptr = unsafe {
+            lm_resizer_compress_json(content.as_ptr(), content.len(), query.as_ptr(), query.len())
+        };
+        assert!(!compress_ptr.is_null());
+        let compress_json = unsafe { CStr::from_ptr(compress_ptr).to_string_lossy().into_owned() };
+        unsafe { lm_resizer_string_free(compress_ptr) };
+        let report: serde_json::Value = serde_json::from_str(&compress_json).unwrap();
+
+        let cache_keys = report["cache_keys"].as_array().unwrap();
+        assert!(!cache_keys.is_empty());
+
+        let mut found_semantic_match = false;
+
+        for key in cache_keys {
+            let hash = key.as_str().unwrap();
+            let retrieve_ptr = unsafe { lm_resizer_retrieve_json(hash.as_ptr(), hash.len()) };
+            assert!(!retrieve_ptr.is_null());
+            let retrieve_json =
+                unsafe { CStr::from_ptr(retrieve_ptr).to_string_lossy().into_owned() };
+            unsafe { lm_resizer_string_free(retrieve_ptr) };
+
+            let retrieve_val: serde_json::Value = serde_json::from_str(&retrieve_json).unwrap();
+            if let Some(content_val) = retrieve_val.get("content") {
+                let retrieved_content_str = content_val.as_str().unwrap();
+                assert!(!retrieved_content_str.is_empty());
+
+                let retrieved_content_val: serde_json::Value =
+                    serde_json::from_str(retrieved_content_str).unwrap();
+
+                // Re-parse input content to compare semantically
+                let original_val: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+                if retrieved_content_val == original_val {
+                    found_semantic_match = true;
+                }
+            } else {
+                panic!(
+                    "Expected 'content' in retrieve response, got: {}",
+                    retrieve_json
+                );
+            }
+        }
+
+        assert!(
+            found_semantic_match,
+            "No retrieved block matched the original input semantically"
+        );
+
+        // (2) clé inconnue => objet error
+        let unknown_hash = b"unknown_hash_123";
+        let unknown_ptr =
+            unsafe { lm_resizer_retrieve_json(unknown_hash.as_ptr(), unknown_hash.len()) };
+        let unknown_json = unsafe { CStr::from_ptr(unknown_ptr).to_string_lossy().into_owned() };
+        unsafe { lm_resizer_string_free(unknown_ptr) };
+        let unknown_val: serde_json::Value = serde_json::from_str(&unknown_json).unwrap();
+        assert!(unknown_val["error"]
+            .as_str()
+            .unwrap()
+            .contains("CCR entry not found"));
+
+        // (3) pointeur nul avec longueur 0 => objet error sans plantage
+        let null_ptr = unsafe { lm_resizer_retrieve_json(ptr::null(), 0) };
+        let null_json = unsafe { CStr::from_ptr(null_ptr).to_string_lossy().into_owned() };
+        unsafe { lm_resizer_string_free(null_ptr) };
+        let null_val: serde_json::Value = serde_json::from_str(&null_json).unwrap();
+        assert!(null_val["error"]
+            .as_str()
+            .unwrap()
+            .contains("CCR entry not found"));
     }
 
     #[test]
