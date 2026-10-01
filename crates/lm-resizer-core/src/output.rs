@@ -63,6 +63,35 @@ pub enum OutputShapingError {
     InvalidShape(String),
 }
 
+/// Helper to check if a text contains a phrase, ensuring that the phrase
+/// is not immediately preceded or followed by an ASCII digit.
+/// This prevents "10 failed" from matching "0 failed".
+fn contains_isolated_phrase(text: &str, phrase: &str) -> bool {
+    let mut start = 0;
+    while let Some(idx) = text[start..].find(phrase) {
+        let abs_idx = start + idx;
+
+        let before_ok = if abs_idx == 0 {
+            true
+        } else {
+            !text[..abs_idx].ends_with(|c: char| c.is_ascii_digit())
+        };
+
+        let after_idx = abs_idx + phrase.len();
+        let after_ok = if after_idx == text.len() {
+            true
+        } else {
+            !text[after_idx..].starts_with(|c: char| c.is_ascii_digit())
+        };
+
+        if before_ok && after_ok {
+            return true;
+        }
+        start = abs_idx + 1;
+    }
+    false
+}
+
 /// Check if text contains real error indicators, discounting zero-failure passing test summaries.
 fn contains_real_error(text: &str) -> bool {
     let detector = KeywordDetector::default();
@@ -72,11 +101,11 @@ fn contains_real_error(text: &str) -> bool {
     for line in text.lines() {
         let trimmed = line.trim();
         // Check for common test passing lines that mention "0 failed" or "0 errors"
-        if (trimmed.contains("0 failed")
-            || trimmed.contains("0 failure")
-            || trimmed.contains("failed: 0")
-            || trimmed.contains("failures: 0")
-            || trimmed.contains("0 errors"))
+        if (contains_isolated_phrase(trimmed, "0 failed")
+            || contains_isolated_phrase(trimmed, "0 failure")
+            || contains_isolated_phrase(trimmed, "failed: 0")
+            || contains_isolated_phrase(trimmed, "failures: 0")
+            || contains_isolated_phrase(trimmed, "0 errors"))
             && (trimmed.contains("ok")
                 || trimmed.contains("passed")
                 || trimmed.contains("test result: ok")
@@ -456,11 +485,43 @@ mod tests {
             TurnClassification::Routine
         );
 
+        // Routine: passing test result with 0 failed/errors
+        let test_pass_2 = "=== 5 passed, 0 failed ===";
+        assert_eq!(
+            classify_turn(test_pass_2, true),
+            TurnClassification::Routine
+        );
+
         // Non-routine: error / failure
         let test_fail =
             "running 2 tests\ntest test_one ... FAILED\nfailures:\nerror: assertion failed";
         assert_eq!(
             classify_turn(test_fail, true),
+            TurnClassification::NonRoutine
+        );
+
+        // Non-routine: failing test summaries containing 0 as part of another number
+        let test_fail_10 = "10 failed, 5 passed in 1.2s";
+        assert_eq!(
+            classify_turn(test_fail_10, true),
+            TurnClassification::NonRoutine
+        );
+
+        let test_fail_20 = "Tests: 20 failed, 4 passed, 24 total";
+        assert_eq!(
+            classify_turn(test_fail_20, true),
+            TurnClassification::NonRoutine
+        );
+
+        let test_fail_complex = "test result: FAILED. 3 passed; 10 failed; 0 ignored";
+        assert_eq!(
+            classify_turn(test_fail_complex, true),
+            TurnClassification::NonRoutine
+        );
+
+        let test_fail_10_errors = "Compilation failed with 10 errors and 5 passed checks";
+        assert_eq!(
+            classify_turn(test_fail_10_errors, true),
             TurnClassification::NonRoutine
         );
 
