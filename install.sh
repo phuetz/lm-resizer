@@ -25,7 +25,15 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 curl -fsSL "$base/$archive" -o "$tmp/$archive"
 curl -fsSL "$base/$archive.sha256" -o "$tmp/$archive.sha256"
-read -r expected named < "$tmp/$archive.sha256"
+expected=""
+named=""
+read -r expected named < "$tmp/$archive.sha256" || true
+cr="$(printf '\r')"
+named="${named%"$cr"}"
+if [ -z "$expected" ] || [ -z "$named" ]; then
+  echo "invalid checksum file: $tmp/$archive.sha256" >&2
+  exit 1
+fi
 if [ "$named" != "$archive" ]; then
   echo "checksum filename mismatch: $named" >&2
   exit 1
