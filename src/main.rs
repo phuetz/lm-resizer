@@ -2090,6 +2090,7 @@ fn run_exec_command(
     } else {
         let output = Command::new(&resolved_program)
             .args(args)
+            .stdin(Stdio::inherit())
             .output()
             .with_context(|| format!("failed to execute '{}'", command.join(" ")))?;
         (
@@ -2236,6 +2237,7 @@ fn process_captured_output(
 fn run_command_streaming(program: &Path, args: &[String], display: &str) -> Result<(i32, String)> {
     let mut child = Command::new(program)
         .args(args)
+        .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
