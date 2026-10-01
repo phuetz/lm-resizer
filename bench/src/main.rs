@@ -118,15 +118,27 @@ fn setup_shims(qa: &Path) -> Result<PathBuf> {
     Ok(shims)
 }
 
+struct ReplayEnvironment<'a> {
+    home: &'a Path,
+    shims: &'a Path,
+    fixture: &'a Path,
+    expected_exit: i32,
+    qa: &'a Path,
+}
+
 fn run_command(
     program: &Path,
     args: &[String],
     input: Option<&str>,
-    home: &Path,
-    shims: &Path,
-    (fixture, expected_exit): (&Path, i32),
-    qa: &Path,
+    replay: ReplayEnvironment<'_>,
 ) -> Result<(Output, f64)> {
+    let ReplayEnvironment {
+        home,
+        shims,
+        fixture,
+        expected_exit,
+        qa,
+    } = replay;
     fs::create_dir_all(home)?;
     let mut paths = vec![shims.to_path_buf()];
     paths.extend(env::split_paths(&env::var_os("PATH").unwrap_or_default()));
@@ -445,7 +457,18 @@ fn verify_home(lm_bin: &Path, shims: &Path, qa: &Path, bpe: &CoreBPE) -> Result<
     ];
     let mut views = Vec::new();
     for home in [qa.join("home-lm-resizer"), qa.join("h")] {
-        let (output, _) = run_command(lm_bin, &args, None, &home, shims, (&fixture, 0), qa)?;
+        let (output, _) = run_command(
+            lm_bin,
+            &args,
+            None,
+            ReplayEnvironment {
+                home: &home,
+                shims,
+                fixture: &fixture,
+                expected_exit: 0,
+                qa,
+            },
+        )?;
         if !output.status.success() {
             bail!("HOME proof: lm-resizer exec failed");
         }
@@ -532,10 +555,13 @@ fn run_all(cases: &[Case], lm_bin: &Path, qa: &Path, bpe: &CoreBPE) -> Result<Ve
                 program,
                 &args,
                 input,
-                &home,
-                &shims,
-                (&fixture, expected_exit(case)),
-                qa,
+                ReplayEnvironment {
+                    home: &home,
+                    shims: &shims,
+                    fixture: &fixture,
+                    expected_exit: expected_exit(case),
+                    qa,
+                },
             )?;
             let raw_out = String::from_utf8_lossy(&output.stdout).into_owned();
             let normalized = normalize_output(&raw_out, &home, &repo_dir());
