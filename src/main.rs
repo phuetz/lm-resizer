@@ -3556,7 +3556,7 @@ fn filter_git_status(raw: &str) -> String {
         let trimmed = line.trim();
         if trimmed.is_empty()
             || trimmed.starts_with("(use ")
-            || trimmed.starts_with("use ")
+            || trimmed.starts_with("use \"git ")
             || trimmed.starts_with("no changes added")
         {
             skipped += 1;
@@ -9168,6 +9168,15 @@ impl axum::response::IntoResponse for HttpError {
 mod tests {
     use super::*;
     use lm_resizer_core::ccr::InMemoryCcrStore;
+
+    #[test]
+    fn filter_git_status_keeps_untracked_file_named_use() {
+        let input = "On branch main\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\tuse cases.md\n\tuse-me.txt\n\nnothing added to commit but untracked files present (use \"git add\" to track)\n";
+        let filtered = filter_git_status(input);
+        assert!(filtered.contains("use cases.md"));
+        assert!(filtered.contains("use-me.txt"));
+        assert!(!filtered.contains("(use \"git add <file>...\" to include"));
+    }
 
     #[test]
     fn codex_config_replaces_existing_table() {
