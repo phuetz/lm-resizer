@@ -8,9 +8,9 @@
 
 ## Installer et essayer
 
-### Binaire précompilé, après la publication de v0.2.3
+### Binaire précompilé (v0.2.3)
 
-Une fois la release v0.2.3 et ses archives binaires publiées, utilisez la commande de votre plateforme. L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire avant de poser `lm-resizer` dans `~/.local/bin` par défaut. Plateformes préparées : Linux x86_64, macOS x86_64/arm64 et Windows x86_64. La release v0.2.2 existante n'a pas d'archives précompilées.
+Utilisez la commande de votre plateforme. L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire avant de poser `lm-resizer` dans `~/.local/bin` par défaut. Plateformes préparées : Linux x86_64, macOS x86_64/arm64 et Windows x86_64. La release v0.2.2 existante n'a pas d'archives précompilées.
 
 Linux et macOS :
 
@@ -26,7 +26,7 @@ irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.3/install.ps1 | iex
 
 Sur Linux/macOS, ajoutez `~/.local/bin` au `PATH` si l'installeur le demande. L'installeur Windows met à jour le `PATH` utilisateur. `LM_RESIZER_INSTALL_DIR` permet de choisir un autre répertoire. Pour désinstaller un binaire précompilé, retirez-le de ce répertoire.
 
-### Compiler depuis les sources dès maintenant
+### Compiler depuis les sources
 
 Il faut Rust/Cargo (Rust 1.80 ou plus récent). Depuis un checkout de ce dépôt :
 

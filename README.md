@@ -8,9 +8,9 @@
 
 ## Install and try it
 
-### Prebuilt binary, after the v0.2.3 release
+### Prebuilt binary (v0.2.3)
 
-Once the v0.2.3 release and its binary archives are published, use the command for your platform. The installer verifies the archive's SHA-256 checksum and binary version before placing `lm-resizer` in `~/.local/bin` by default. Prepared platforms are Linux x86_64, macOS x86_64/arm64 and Windows x86_64. The existing v0.2.2 release has no prebuilt archives.
+Use the command for your platform. The installer verifies the archive's SHA-256 checksum and binary version before placing `lm-resizer` in `~/.local/bin` by default. Prepared platforms are Linux x86_64, macOS x86_64/arm64 and Windows x86_64. The existing v0.2.2 release has no prebuilt archives.
 
 Linux and macOS:
 
@@ -26,7 +26,7 @@ irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.3/install.ps1 | iex
 
 On Linux and macOS, add `~/.local/bin` to `PATH` if the installer prompts you. The Windows installer updates the user `PATH`. `LM_RESIZER_INSTALL_DIR` selects another destination. To uninstall a prebuilt binary, remove it from that destination.
 
-### Build from source now
+### Build from source
 
 Requires Rust/Cargo (Rust 1.80 or newer). From a checkout of this repository:
 
