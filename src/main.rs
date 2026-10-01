@@ -11076,7 +11076,7 @@ Successfully tagged localhost/app:latest\n";
         let valid = root.path().join("session.jsonl");
         std::fs::write(&valid, "{}\n").unwrap();
         let missing = root.path().join("missing");
-        assert!(collect_discover_files(&[missing.clone()], true).is_err());
+        assert!(collect_discover_files(std::slice::from_ref(&missing), true).is_err());
         assert!(collect_discover_files(&[valid, missing], true).is_err());
     }
 
