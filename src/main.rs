@@ -4009,8 +4009,9 @@ fn filter_tsc(raw: &str) -> String {
     let mut skipped = 0usize;
 
     for line in raw.lines() {
-        if let Some((file, rest)) = line.split_once('(') {
-            if rest.contains("): error TS") || rest.contains("): warning TS") {
+        if let Some(pos) = line.find("): error TS").or_else(|| line.find("): warning TS")) {
+            if let Some(open_paren_idx) = line[..pos].rfind('(') {
+                let file = &line[..open_paren_idx];
                 by_file
                     .entry(file.to_string())
                     .or_default()
@@ -4018,6 +4019,7 @@ fn filter_tsc(raw: &str) -> String {
                 continue;
             }
         }
+
         if line.contains("Found 0 errors") {
             return "TypeScript: no errors\n".to_string();
         }
@@ -10263,6 +10265,15 @@ expected = "error: bad\n"
         assert!(filtered.contains("TypeScript: 2 diagnostics in 1 files"));
         assert!(filtered.contains("src/a.ts: 2 diagnostics"));
         assert!(filtered.contains("TS2322"));
+    }
+
+    #[test]
+    fn filter_tsc_keeps_parenthesised_paths() {
+        let raw = "app/(auth)/login/page.tsx(3,1): error TS2304: x\napp/(shop)/cart/page.tsx(1,1): error TS2304: y\n";
+        let filtered = filter_tsc(raw);
+        assert!(filtered.contains("app/(auth)/login/page.tsx: 1 diagnostics"));
+        assert!(filtered.contains("app/(shop)/cart/page.tsx: 1 diagnostics"));
+        assert!(!filtered.contains("app/: "));
     }
 
     #[test]
