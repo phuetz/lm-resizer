@@ -293,13 +293,13 @@ fn parse_rfc3339_millis(text: &str) -> Option<i64> {
     if text.len() < 19 || text.as_bytes().get(10) != Some(&b'T') {
         return None;
     }
-    let year: i32 = text[0..4].parse().ok()?;
-    let month: u32 = text[5..7].parse().ok()?;
-    let day: u32 = text[8..10].parse().ok()?;
-    let hour: u32 = text[11..13].parse().ok()?;
-    let min: u32 = text[14..16].parse().ok()?;
-    let sec: u32 = text[17..19].parse().ok()?;
-    let mut rest = &text[19..];
+    let year: i32 = text.get(0..4)?.parse().ok()?;
+    let month: u32 = text.get(5..7)?.parse().ok()?;
+    let day: u32 = text.get(8..10)?.parse().ok()?;
+    let hour: u32 = text.get(11..13)?.parse().ok()?;
+    let min: u32 = text.get(14..16)?.parse().ok()?;
+    let sec: u32 = text.get(17..19)?.parse().ok()?;
+    let mut rest = text.get(19..)?;
     let mut millis: i64 = 0;
     if let Some(stripped) = rest.strip_prefix('.') {
         let digits: String = stripped
@@ -311,7 +311,7 @@ fn parse_rfc3339_millis(text: &str) -> Option<i64> {
         while ms.len() < 3 {
             ms.push('0');
         }
-        millis = ms[..3].parse().ok()?;
+        millis = ms.get(..3)?.parse().ok()?;
     }
     let offset_min: i64 = if rest.is_empty() || rest == "Z" {
         0
@@ -1851,5 +1851,20 @@ Actual:   301</Message>
         format!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<TestRun xmlns=\"http://microsoft.com/schemas/VisualStudio/TeamTest/2010\">\n  <Times creation=\"{finish}\" finish=\"{finish}\" />\n  <Results>{results}</Results>\n  <TestDefinitions>{defs}</TestDefinitions>\n  <ResultSummary outcome=\"Failed\">\n    <Counters total=\"{total}\" passed=\"{passed}\" failed=\"{failed}\" />\n  </ResultSummary>\n</TestRun>\n"
         )
+    }
+
+    #[test]
+    fn parse_rfc3339_paniques_corrigees() {
+        // 1) Test de la fonction parse_rfc3339_millis directement
+        assert_eq!(parse_rfc3339_millis("2026-09-30T10:00:0é"), None);
+        assert_eq!(parse_rfc3339_millis("20é6-09-30T10:00:00Z"), None);
+        assert_eq!(
+            parse_rfc3339_millis("2026-09-30T10:00:00.250+02:00").is_some(),
+            true
+        );
+
+        // 2) Test de times_attr_millis
+        let xml = r#"<TestRun><Times creation="2026-09-30T10:00:0é" /></TestRun>"#;
+        assert_eq!(times_attr_millis(xml, "creation"), None);
     }
 }
