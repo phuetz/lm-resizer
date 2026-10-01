@@ -50,6 +50,9 @@ try {
 
   $repacked = Join-Path $tmp "repacked"
   Expand-Archive -LiteralPath (Join-Path $bad $archive) -DestinationPath $repacked
+  if (-not (Test-Path -LiteralPath (Join-Path $repacked "docs\TOKEN-STATISTICS.md"))) {
+    throw "release archive missing docs/TOKEN-STATISTICS.md"
+  }
   Set-Content -LiteralPath (Join-Path $repacked "TAMPERED") -Value "tampered"
   Remove-Item -LiteralPath (Join-Path $bad $archive) -Force
   Compress-Archive -Path (Join-Path $repacked "*") -DestinationPath (Join-Path $bad $archive)

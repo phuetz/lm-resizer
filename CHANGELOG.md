@@ -3,6 +3,7 @@
 ## [0.2.4] - à publier
 
 ### Corrigé
+- Les archives binaires Linux/macOS et Windows incluent la documentation des statistiques de jetons liée depuis les README ; les tests d’installation vérifient sa présence dans l’archive réelle.
 - Démarrage CLI sous Windows : le parseur Clap de développement dépassait la pile principale de 1 Mio. Le CLI est exécuté dans un thread joint avec une pile explicite de 8 Mio ; les tests de compression/récupération et un test Unix à pile limitée couvrent la régression.
 - Statistiques CLI : comptage réel du texte final avec `tiktoken-rs/o200k_base` (encodage `o200k_base`), distinct des estimations historiques octets/4 ; les chiffres comparatifs des README étaient déjà tokenisés et ne sont pas remplacés par ces statistiques.
 - Parcours source documenté pour PowerShell avec préfixe utilisateur explicite, PATH de session et prérequis MSVC/SDK Windows ; exemples `discover` sans tilde non développé par les commandes natives.

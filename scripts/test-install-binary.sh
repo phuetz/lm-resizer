@@ -63,6 +63,10 @@ expect_rejected() {
 folder="lm-resizer-$version-$platform"
 mkdir -p "$tmp/repacked"
 tar -xzf "$tmp/bad/$archive" -C "$tmp/repacked"
+# The README statistics link must resolve in the shipped archive.
+[ -f "$tmp/repacked/$folder/docs/TOKEN-STATISTICS.md" ] || {
+  echo "release archive missing docs/TOKEN-STATISTICS.md" >&2; exit 1;
+}
 # Exercise the skill installer shipped in the archive, not the checkout copy.
 # A release missing skills/grok/lm-resizer must fail before publication.
 for target in grok codex; do
