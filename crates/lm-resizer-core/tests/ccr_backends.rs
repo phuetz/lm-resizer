@@ -197,3 +197,30 @@ mod redis_tests {
         assert_eq!(store.get(&hash).as_deref(), Some(payload));
     }
 }
+
+#[test]
+fn sqlite_len_and_writes_purge_expired_without_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = SqliteCcrStore::open(dir.path().join("expired.sqlite"), 0).unwrap();
+    store.put("expired", "original");
+    assert_eq!(store.len(), 0);
+    // Observe physical rows directly; len() must not be the only maintenance path.
+    for index in 0..64 {
+        store.put(&format!("expired-{index}"), "original");
+    }
+    let conn = rusqlite::Connection::open(store.path()).unwrap();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM ccr_entries", [], |row| row.get(0))
+        .unwrap();
+    assert!(count <= 2, "expired rows accumulated: {count}");
+}
+
+#[test]
+fn sqlite_preserves_live_entries_beyond_memory_capacity() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = SqliteCcrStore::open(dir.path().join("live.sqlite"), 300).unwrap();
+    for index in 0..(lm_resizer_core::ccr::DEFAULT_CAPACITY + 25) {
+        store.put(&format!("live-{index}"), "original");
+    }
+    assert_eq!(store.get("live-0").as_deref(), Some("original"));
+}

@@ -38,6 +38,7 @@
 //! land while a compression flushes a fresh row.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -54,6 +55,7 @@ pub struct SqliteCcrStore {
     /// Path the connection was opened against — kept for diagnostics
     /// and for the proxy-restart simulation test.
     path: PathBuf,
+    put_counter: AtomicU64,
 }
 
 impl SqliteCcrStore {
@@ -89,6 +91,7 @@ impl SqliteCcrStore {
             conn: Mutex::new(conn),
             default_ttl_seconds,
             path: path_buf,
+            put_counter: AtomicU64::new(0),
         })
     }
 
@@ -126,6 +129,15 @@ impl CcrStore for SqliteCcrStore {
     fn put(&self, hash: &str, payload: &str) {
         let now = Self::now_unix_seconds();
         let conn = self.conn.lock().expect("ccr sqlite mutex poisoned");
+        let write_number = self
+            .put_counter
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1);
+        if write_number == 1 || write_number % 64 == 0 {
+            if let Err(err) = Self::purge_expired(&conn, now) {
+                tracing::warn!(target = "ccr.sqlite", error = %err, "ccr_sqlite_purge_failed");
+            }
+        }
         // Upsert by PK. ON CONFLICT REPLACE matches the in-memory
         // backend's idempotent re-store semantics.
         let res = conn.execute(
@@ -196,6 +208,9 @@ impl CcrStore for SqliteCcrStore {
 
     fn len(&self) -> usize {
         let conn = self.conn.lock().expect("ccr sqlite mutex poisoned");
+        if let Err(err) = Self::purge_expired(&conn, Self::now_unix_seconds()) {
+            tracing::warn!(target = "ccr.sqlite", error = %err, "ccr_sqlite_purge_failed");
+        }
         conn.query_row("SELECT COUNT(*) FROM ccr_entries", [], |r| {
             r.get::<_, i64>(0)
         })
