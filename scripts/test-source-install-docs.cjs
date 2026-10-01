@@ -23,6 +23,7 @@ for (const file of ['README.md', 'README.fr.md']) {
   const doc = fs.readFileSync(file, 'utf8');
   assert.match(doc, /https:\/\/sh\.rustup\.rs/);
   assert.match(doc, /https:\/\/static\.rust-lang\.org\/rustup\/dist\/x86_64-pc-windows-msvc\/rustup-init\.exe/);
+  assert.match(doc, /Join-Path \$env:TEMP 'rustup-init\.exe'/, `${file}: rustup installer requires its original basename`);
   assert.match(doc, /--default-toolchain 1\.86\.0/);
   assert.match(doc, /\. "\$HOME\/\.cargo\/env"/);
   assert.match(doc, /git clone --branch release\/v0\.2\.4-recette-2026-10-01 https:\/\/github\.com\/phuetz\/lm-resizer\.git/);

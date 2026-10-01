@@ -64,7 +64,7 @@ lm-resizer --version
 Windows x86_64 (PowerShell):
 
 ~~~powershell
-$rustupInstaller = Join-Path $env:TEMP 'lm-resizer-rustup-init.exe'
+$rustupInstaller = Join-Path $env:TEMP 'rustup-init.exe'
 Invoke-WebRequest -Uri 'https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe' -OutFile $rustupInstaller
 & $rustupInstaller -y --no-modify-path --profile minimal --default-toolchain 1.86.0
 $env:Path = "$(Join-Path $env:USERPROFILE '.cargo\bin');$env:Path"
