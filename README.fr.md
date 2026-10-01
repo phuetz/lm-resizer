@@ -28,11 +28,22 @@ Sur Linux/macOS, ajoutez `~/.local/bin` au `PATH` si l'installeur le demande. L'
 
 ### Compiler depuis les sources dès maintenant
 
-Il faut Rust/Cargo (Rust 1.86 ou plus récent). Depuis un checkout de ce dépôt :
+Il faut Rust/Cargo (Rust 1.86 ou plus récent), Git et les outils de compilation natifs : compilateur C/C++ et éditeur de liens sur Linux/macOS ; Visual Studio Build Tools avec les outils C++ MSVC et le SDK Windows pour la toolchain Windows MSVC. Ces prérequis ne sont pas installés par LM Resizer. Depuis un checkout de ce dépôt :
+
+Linux/macOS (Bash) :
 
 ~~~bash
 cargo install --quiet --path . --locked --root "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
+lm-resizer --version
+~~~
+
+Windows (PowerShell) :
+
+~~~powershell
+$installRoot = Join-Path $env:USERPROFILE '.local'
+cargo install --quiet --path . --locked --root "$installRoot"
+$env:Path = "$installRoot\bin;$env:Path"
 lm-resizer --version
 ~~~
 
@@ -49,6 +60,12 @@ Pour retirer un binaire installé avec Cargo :
 
 ~~~bash
 cargo uninstall --root "$HOME/.local" lm-resizer
+~~~
+
+Windows (PowerShell) :
+
+~~~powershell
+cargo uninstall --root "$installRoot" lm-resizer
 ~~~
 
 Le CLI propose aussi `compress` pour les fichiers ou l'entrée standard, `tool-output` pour une sortie déjà capturée, et des intégrations MCP, HTTP et hooks d'agents activées sur demande. `install --client all --scope project` écrit aussi la configuration utilisateur Codex et remplace une table `mcp_servers.lm_resizer` existante sans sauvegarde ; conservez-en une copie avant installation. Voir le [guide des intégrations agents](docs/CLAUDE_CODEX.md) et le [guide de release](docs/RELEASE.md) pour ces usages.

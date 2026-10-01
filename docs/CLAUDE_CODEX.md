@@ -16,11 +16,22 @@ practical ways:
 ## Install
 
 After the v0.2.4 release is published, install the binary using the [README](../README.md), or build and
-install from a checkout:
+install from a checkout. Source builds require Rust 1.86 or newer, Git and native C/C++ build tools (MSVC C++ tools and Windows SDK in Visual Studio Build Tools on Windows):
+
+Linux/macOS (Bash):
 
 ```bash
 cargo install --quiet --path . --locked --root "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
+lm-resizer --version
+```
+
+Windows (PowerShell):
+
+```powershell
+$installRoot = Join-Path $env:USERPROFILE '.local'
+cargo install --quiet --path . --locked --root "$installRoot"
+$env:Path = "$installRoot\bin;$env:Path"
 lm-resizer --version
 ```
 
@@ -35,7 +46,7 @@ For several clients at once (Claude, Cursor and VS Code use project config;
 Codex always uses user config, including with `--scope project`):
 
 ```bash
-lm-resizer install --client all --scope project --project-dir /path/to/repo
+lm-resizer install --client all --scope project --project-dir .
 ```
 
 The Codex installer replaces an existing `[mcp_servers.lm_resizer]` table without a backup. Save your user configuration first. `--scope project` with `--client all` does not isolate Codex configuration to the repository.
@@ -48,7 +59,7 @@ lm-resizer doctor --json
 
 ## Use Explicit Command Compression
 
-For noisy commands, ask the agent to run through `exec`:
+For noisy commands, ask the agent to run through `exec`. The search example requires ripgrep (`rg`); the Kubernetes example requires `kubectl` and a configured cluster. Neither is installed by LM Resizer:
 
 ```bash
 lm-resizer exec -- cargo test
@@ -121,6 +132,13 @@ missing known directories. Once sessions exist, inspect their output:
 ```bash
 lm-resizer discover ~/.claude/projects --recursive --markdown
 lm-resizer discover ~/.codex --recursive --json
+```
+
+Windows PowerShell (native command arguments do not expand `~`; use the explicit profile path):
+
+```powershell
+lm-resizer discover "$env:USERPROFILE\.claude\projects" --recursive --markdown
+lm-resizer discover "$env:USERPROFILE\.codex" --recursive --json
 ```
 
 Explicit paths must exist. The discover command scans logs and session JSON for command/output pairs

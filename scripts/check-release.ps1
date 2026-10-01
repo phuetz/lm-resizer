@@ -14,6 +14,7 @@ function Invoke-Checked {
   if ($LASTEXITCODE -ne 0) { throw "$Label failed" }
 }
 
+Invoke-Checked "source install docs" { node scripts/test-source-install-docs.cjs }
 Invoke-Checked "cargo fmt --check" { cargo fmt --check }
 Invoke-Checked "cargo test --release" { cargo test --release }
 Invoke-Checked "cargo check --release" { cargo check --release }

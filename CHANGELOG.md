@@ -3,6 +3,8 @@
 ## [0.2.4] - à publier
 
 ### Corrigé
+- Statistiques CLI : comptage réel du texte final avec `tiktoken-rs/o200k_base` (encodage `o200k_base`), distinct des estimations historiques octets/4 ; les chiffres comparatifs des README étaient déjà tokenisés et ne sont pas remplacés par ces statistiques.
+- Parcours source documenté pour PowerShell avec préfixe utilisateur explicite, PATH de session et prérequis MSVC/SDK Windows ; exemples `discover` sans tilde non développé par les commandes natives.
 - Intégration de `60d5cc6`, absent du tag v0.2.3 (`44b9ccc`) : la première clé CCR du CLI conserve l'entrée exacte avant minification ou résumé de source. `retrieve` peut ainsi restituer l'original UTF-8 octet pour octet avant expiration du CCR.
 - Le même correctif rend les scripts shell générés par les helpers et shims exécutables et fait échouer `discover` sur un chemin explicitement demandé mais absent.
 - Versions Cargo, WASM, npm, plugin et installateurs alignées sur 0.2.4 ; commandes README prêtes pour la publication future de v0.2.4. La préparation ne publie aucune archive.
