@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 /// Lines that report a failure.
 pub static FAILURE_SIGNAL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)##\[error\]|\berror\b|\bfail(ed|ure|s)?\b|\bFAIL\b|✘|✗|×|exception|panic|traceback|\bassertion\b|\b(expected|actual|received)\b|:line\s+[0-9]+|\bvalues differ\b|\bdiff(erence)?\b|exit code [1-9]|timed? ?out",
+        r"(?i)##\[error\]|\berror\b|\bfail(ed|ure|s)?\b|\bFAIL\b|✘|✗|×|exception|panic|traceback|\bassertion\b|\b(expected|actual|received)\b|:line\s+[0-9]+|\bvalues differ\b|\bdiff(erence)?\b|exit code [1-9]|timed? ?out|(?-i:\b[A-Z]\w*Error\b)",
     )
     .expect("valid failure regex")
 });
@@ -223,5 +223,28 @@ mod tests {
         assert!(out.contains("Expected: 19,90 €"));
         assert!(out.contains("Actual:   20,00 €"));
         assert!(out.contains("PanierTests.cs:line 44"));
+    }
+
+    #[test]
+    fn les_lignes_js_python_error_sont_reinjectees() {
+        let mut original = String::new();
+        for _ in 0..50 {
+            original.push_str("INFO ok\n");
+        }
+        original.push_str("AssertionError: expected 3\n");
+        original.push_str("INFO ok\n");
+        original.push_str("ValueError: bad input\n");
+
+        let (out, n) = reinject_lost_failure_lines(&original, "[omitted]");
+        assert_eq!(n, 2);
+        assert!(out.contains("AssertionError: expected 3"));
+        assert!(out.contains("ValueError: bad input"));
+    }
+
+    #[test]
+    fn les_lignes_info_errorcode_ne_sont_pas_reinjectees() {
+        let original = "INFO ErrorCode=0\nINFO ok\n";
+        let lost = lost_failure_lines(original, "");
+        assert!(lost.is_empty());
     }
 }
