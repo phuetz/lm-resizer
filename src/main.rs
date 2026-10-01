@@ -4181,6 +4181,14 @@ fn filter_search_results(raw: &str) -> String {
 
     let location = Regex::new(r"^(.+?):([0-9]+):(.*)$").expect("valid search location");
     let context = Regex::new(r"^(.+?)-([0-9]+)-(.*)$").expect("valid search context");
+    let match_files: std::collections::HashSet<&str> = raw
+        .lines()
+        .filter_map(|line| {
+            location
+                .captures(line)
+                .map(|caps| caps.get(1).expect("file").as_str())
+        })
+        .collect();
 
     for line in raw.lines() {
         if let Some(caps) = location.captures(line) {
@@ -4193,10 +4201,27 @@ fn filter_search_results(raw: &str) -> String {
                 .push(format!("{number}:{rest}"));
             *matches_count.entry(file.to_string()).or_default() += 1;
             last_seen_file = Some(file.to_string());
-        } else if let Some(caps) = context.captures(line) {
-            let file = caps.get(1).expect("file").as_str();
-            let number = caps.get(2).expect("line").as_str();
-            let rest = caps.get(3).expect("content").as_str();
+        } else if let Some((file, number, rest)) = line
+            .rmatch_indices('-')
+            .find_map(|(index, _)| {
+                let file = &line[..index];
+                let suffix = &line[index + 1..];
+                let (number, rest) = suffix.split_once('-')?;
+                (!number.is_empty()
+                    && number.bytes().all(|byte| byte.is_ascii_digit())
+                    && match_files.contains(file))
+                .then_some((file, number, rest))
+            })
+            .or_else(|| {
+                context.captures(line).map(|caps| {
+                    (
+                        caps.get(1).expect("file").as_str(),
+                        caps.get(2).expect("line").as_str(),
+                        caps.get(3).expect("content").as_str(),
+                    )
+                })
+            })
+        {
             by_file
                 .entry(file.to_string())
                 .or_default()
@@ -9272,6 +9297,20 @@ command = "node"
     }
 
     #[test]
+    fn exec_search_filter_context_with_numeric_filename() {
+        let file = "docs/headroom-rtk-2026-09-22.md";
+        let raw = format!("{file}-4-before-7-token\n{file}:5:NEEDLE\n{file}-6-after-8-token\n");
+        let filtered = filter_search_results(&raw);
+
+        assert!(filtered.contains(&format!("{file}: 1 matches")));
+        assert!(!filtered.contains("docs/headroom-rtk: 0 matches"));
+        let before = filtered.find("  4-before-7-token").expect("before context");
+        let hit = filtered.find("  5:NEEDLE").expect("match");
+        let after = filtered.find("  6-after-8-token").expect("after context");
+        assert!(before < hit && hit < after);
+    }
+
+    #[test]
     fn exec_search_filter_context_and_groups() {
         let raw = "g/a.txt:2:NEEDLE one\ng/a.txt-3-after one\n--\ng/b.txt:2:NEEDLE two\ng/b.txt-3-after two\n";
         let filtered = filter_search_results(raw);
@@ -9294,6 +9333,8 @@ command = "node"
         assert!(filtered.contains("  3-after one"));
         assert!(filtered.contains("  3-after two"));
         assert!(filtered.contains("\n--\n"));
+        let pos_separator = filtered.find("\n--\n").expect("separator not found");
+        assert!(pos_after_one < pos_separator && pos_separator < pos_b_header);
     }
 
     #[test]
