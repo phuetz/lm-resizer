@@ -1051,6 +1051,7 @@ struct TomlFilterTestDef {
 
 #[derive(Debug)]
 struct CompiledTomlFilter {
+    builtin: bool,
     name: String,
     match_command: Regex,
     strip_ansi: bool,
@@ -2368,6 +2369,17 @@ fn rewrite_command_report(command: &[String]) -> RewriteReport {
 
 fn rewrite_shell_report(command: &str) -> RewriteShellReport {
     let tokens = split_shell_operators(command);
+    if tokens.iter().any(|token| match token {
+        ShellToken::Operator(operator) => operator == "|",
+        ShellToken::Segment(segment) => segment_has_redirect(segment),
+    }) {
+        return RewriteShellReport {
+            command: command.to_string(),
+            changed: false,
+            rewritten: command.to_string(),
+            rewrites: Vec::new(),
+        };
+    }
     let mut output = String::new();
     let mut rewrites = Vec::new();
     let mut after_pipe = false;
@@ -2720,8 +2732,17 @@ fn apply_toml_filters(command_text: &str, raw: &str) -> Option<(String, String)>
     if std::env::var("LM_RESIZER_NO_TOML_FILTERS").ok().as_deref() == Some("1") {
         return None;
     }
-    let filters = load_toml_filters().ok()?;
+    let filters = match load_toml_filters() {
+        Ok(filters) => filters,
+        Err(error) => {
+            eprintln!("lm-resizer: custom filters ignored: {error}");
+            compile_filter_sources(vec![BUILTIN_EXEC_FILTERS_TOML.to_string()]).ok()?
+        }
+    };
     for filter in filters {
+        if filter.builtin && command_runs_js_test(&split_shell_words(command_text)?) {
+            return Some(("js_test_runner".to_string(), filter_vitest(raw)));
+        }
         if filter.match_command.is_match(command_text) {
             return Some((
                 format!("toml:{}", filter.name),
@@ -2733,11 +2754,26 @@ fn apply_toml_filters(command_text: &str, raw: &str) -> Option<(String, String)>
 }
 
 fn load_toml_filters() -> Result<Vec<CompiledTomlFilter>> {
+    compile_filter_sources(toml_filter_sources()?)
+}
+
+fn compile_filter_sources(sources: Vec<String>) -> Result<Vec<CompiledTomlFilter>> {
     let mut filters = Vec::new();
-    for content in toml_filter_sources()? {
+    let mut loaded_names = std::collections::BTreeSet::new();
+    let builtin_index = sources.len().saturating_sub(1);
+    for (index, content) in sources.into_iter().enumerate() {
+        let builtin = index == builtin_index;
         let file: TomlFilterFile = toml::from_str(&content)?;
+        let mut source_names = std::collections::BTreeSet::new();
         for def in file.filters {
-            filters.push(compile_toml_filter(def)?);
+            if !source_names.insert(def.name.clone()) {
+                anyhow::bail!("duplicate filter `{}` in the same filter source", def.name);
+            }
+            if loaded_names.insert(def.name.clone()) {
+                let mut filter = compile_toml_filter(def)?;
+                filter.builtin = builtin;
+                filters.push(filter);
+            }
         }
     }
     Ok(filters)
@@ -2778,11 +2814,12 @@ fn trust_filter_file(path: &Path) -> Result<TrustFilterReport> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("could not read {}", path.display()))?;
     let verification = verify_filter_file(path)?;
-    if verification.failed > 0 {
+    if verification.failed > 0 || !verification.diagnostics.is_empty() {
         anyhow::bail!(
-            "filter verification failed: {} of {} tests failed",
+            "filter verification failed: {} of {} tests failed; diagnostics: {}",
             verification.failed,
-            verification.tests
+            verification.tests,
+            verification.diagnostics.join("; ")
         );
     }
     let canonical = canonical_or_absolute(path)?;
@@ -3036,6 +3073,7 @@ fn compile_toml_filter(def: TomlFilterDef) -> Result<CompiledTomlFilter> {
         replace.push((Regex::new(&rule.pattern)?, rule.replacement));
     }
     Ok(CompiledTomlFilter {
+        builtin: false,
         name: def.name,
         match_command: Regex::new(&def.match_command)?,
         strip_ansi: def.strip_ansi,
@@ -4427,6 +4465,63 @@ fn purge_tee_files(all: bool, file: Option<&str>) -> Result<TeePurgeReport> {
     })
 }
 
+fn redact_command_for_history(command: &str) -> String {
+    let mut redacted = command.to_string();
+    let substitutions = [
+        // SECRET=value / API_KEY="value" / TOKEN='value'
+        (
+            r#"(?i)\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[A-Z0-9_]*)=(?:'[^']*'|"[^"]*"|[^\s]+)"#,
+            "$1=<redacted>",
+        ),
+        // --api-key value / --token=value / --password "value"
+        (
+            r#"(?i)(--(?:api[-_]?key|token|secret|password|passwd|authorization)(?:=|\s+))(?:'[^']*'|"[^"]*"|[^\s]+)"#,
+            "$1<redacted>",
+        ),
+        // Authorization: Bearer ... headers commonly passed to curl.
+        (
+            r#"(?i)(authorization\s*:\s*(?:bearer|basic)\s+)[^\s'\"]+"#,
+            "$1<redacted>",
+        ),
+        // API-key headers commonly passed to curl/http clients.
+        (
+            r#"(?i)((?:x-api-key|api-key)\s*:\s*)[^\s'\"]+"#,
+            "$1<redacted>",
+        ),
+        // Credentials embedded in an HTTP(S) URL.
+        (r#"(?i)(https?://[^\s/:@]+:)[^\s@/]+@"#, "$1<redacted>@"),
+        // Secrets embedded in URL query parameters.
+        (
+            r#"(?i)([?&](?:api[-_]?key|access[-_]?token|token|secret|password)=)[^&\s'\"]+"#,
+            "$1<redacted>",
+        ),
+        // Well-known standalone credential formats that may be positional.
+        (
+            r#"\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|AIza[0-9A-Za-z_-]{20,}|AKIA[0-9A-Z]{16})\b"#,
+            "<redacted>",
+        ),
+        // JWTs used as positional bearer/session arguments.
+        (
+            r#"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"#,
+            "<redacted>",
+        ),
+    ];
+    for (pattern, replacement) in substitutions {
+        if let Ok(regex) = Regex::new(pattern) {
+            redacted = regex.replace_all(&redacted, replacement).into_owned();
+        }
+    }
+    const MAX_HISTORY_COMMAND_CHARS: usize = 512;
+    if redacted.chars().count() > MAX_HISTORY_COMMAND_CHARS {
+        redacted = redacted
+            .chars()
+            .take(MAX_HISTORY_COMMAND_CHARS)
+            .collect::<String>();
+        redacted.push_str("…[truncated]");
+    }
+    redacted
+}
+
 fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     if std::env::var("LM_RESIZER_TRACKING").ok().as_deref() == Some("0") {
         return Ok(());
@@ -4437,7 +4532,7 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     let record = ExecHistoryRecord {
         tokens: report.tokens.clone(),
         timestamp_unix: unix_timestamp(),
-        command: report.command.clone(),
+        command: redact_command_for_history(&report.command),
         exit_code: report.exit_code,
         filter: report.filter.clone(),
         original_bytes: report.original_bytes,
@@ -6731,14 +6826,12 @@ name = "docker-logs"
 match_command = "^(docker|podman)\\s+logs\\b"
 strip_ansi = true
 keep_lines_matching = [
-  "error",
-  "ERROR",
-  "warn",
-  "WARN",
-  "failed",
-  "FAILED",
-  "panic",
-  "Exception",
+  "(?i)error",
+  "(?i)warn(?:ing)?",
+  "(?i)fail(?:ed|ure)?",
+  "(?i)panic",
+  "(?i)fatal",
+  "(?i)exception",
 ]
 tail_lines = 160
 on_empty = "container logs: no warnings or errors"
@@ -7563,13 +7656,28 @@ fn spawn_proxy(
     store: Option<PathBuf>,
 ) -> Result<Child> {
     let exe = std::env::current_exe().context("could not resolve current executable")?;
+    proxy_command(&exe, bind, upstream, api_key, provider, store)
+        .spawn()
+        .context("failed to start lm-resizer proxy")
+}
+
+fn proxy_command(
+    exe: &Path,
+    bind: SocketAddr,
+    upstream: Option<String>,
+    api_key: Option<String>,
+    provider: ProviderKind,
+    store: Option<PathBuf>,
+) -> Command {
     let mut cmd = Command::new(exe);
     cmd.arg("serve").arg("--bind").arg(bind.to_string());
     if let Some(upstream) = upstream {
-        cmd.arg("--upstream").arg(upstream);
+        cmd.env("LM_RESIZER_UPSTREAM", upstream);
     }
     if let Some(api_key) = api_key {
-        cmd.arg("--api-key").arg(api_key);
+        // The child reads these existing Clap environment options. Avoid
+        // exposing provider credentials in its process arguments.
+        cmd.env("LM_RESIZER_API_KEY", api_key);
     }
     cmd.arg("--provider").arg(provider_label(provider));
     if let Some(store) = store {
@@ -7578,7 +7686,7 @@ fn spawn_proxy(
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::null());
-    cmd.spawn().context("failed to start lm-resizer proxy")
+    cmd
 }
 
 async fn wait_for_proxy(proxy_url: &str) -> Result<()> {
@@ -9367,20 +9475,15 @@ command = "node"
     #[test]
     fn rewrite_shell_preserves_redirect_suffix() {
         let report = rewrite_shell_report("git status > status.txt");
-        assert_eq!(
-            report.rewritten,
-            "lm-resizer exec -- git status > status.txt"
-        );
+        assert!(!report.changed);
+        assert_eq!(report.rewritten, "git status > status.txt");
     }
 
     #[test]
     fn rewrite_shell_does_not_rewrite_pipe_consumer() {
         let report = rewrite_shell_report("git status | grep modified");
-        assert_eq!(
-            report.rewritten,
-            "lm-resizer exec -- git status | grep modified"
-        );
-        assert_eq!(report.rewrites.len(), 1);
+        assert_eq!(report.rewritten, "git status | grep modified");
+        assert!(report.rewrites.is_empty());
     }
 
     #[test]
@@ -12225,5 +12328,110 @@ Prisma CLI Version : 5.15.0
             .and_then(toml::Value::as_str)
             .unwrap_or_else(|| panic!("missing package.version in {}", path.display()))
             .to_string()
+    }
+    #[test]
+    fn docker_logs_filter_preserves_all_critical_signal_classes() {
+        let mut lines = (0..600)
+            .map(|index| format!("INFO routine container message {index}"))
+            .collect::<Vec<_>>();
+        lines.insert(25, "ERROR database connection refused".to_string());
+        lines.insert(175, "PANIC worker invariant violated".to_string());
+        lines.insert(325, "request failed after retries".to_string());
+        lines.insert(475, "FATAL supervisor stopped".to_string());
+        let raw = lines.join("\n") + "\n";
+
+        let (filter, output) =
+            filter_command_output(&["docker".into(), "logs".into(), "app".into()], &raw);
+
+        assert_eq!(filter, "toml:docker-logs");
+        assert!(output.contains("ERROR database connection refused"));
+        assert!(output.contains("PANIC worker invariant violated"));
+        assert!(output.contains("request failed after retries"));
+        assert!(output.contains("FATAL supervisor stopped"));
+        assert!(!output.contains("routine container message"));
+    }
+
+    #[test]
+    fn filter_command_output_routes_vitest_before_builtin_toml() {
+        let raw = " Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Duration  10ms\n";
+        for command in [vec!["vitest", "run"], vec!["npx", "vitest", "run"]] {
+            let command = command.into_iter().map(String::from).collect::<Vec<_>>();
+            let (name, filtered) = filter_command_output(&command, raw);
+            assert_eq!(name, "js_test_runner", "command {command:?}");
+            assert_ne!(name, "toml:js-quality", "command {command:?}");
+            assert!(filtered.contains("Tests  3 passed (3)"));
+            assert!(!filtered.contains("Duration"));
+        }
+    }
+
+    #[test]
+    fn wip_rewrite_shell_preserves_pipe_and_redirect_bytes() {
+        for command in [
+            "  git status | wc -l  ",
+            "git diff > change.patch",
+            "git status && git log | wc -l",
+        ] {
+            let report = rewrite_shell_report(command);
+            assert!(!report.changed, "{command}");
+            assert_eq!(report.rewritten, command);
+            assert!(report.rewrites.is_empty());
+        }
+    }
+
+    #[test]
+    fn command_history_redacts_assignments_headers_urls_queries_and_tokens() {
+        let command = concat!(
+            "OPENAI_API_KEY=sk-env-secret-12345 curl ",
+            "-H 'Authorization: Bearer bearer-secret-12345' ",
+            "-H 'x-api-key: header-secret-12345' ",
+            "--token cli-secret-12345 ",
+            "'https://alice:url-secret@example.test/api?access_token=query-secret' ",
+            "sk-positional-secret-12345"
+        );
+        let redacted = redact_command_for_history(command);
+
+        for secret in [
+            "sk-env-secret-12345",
+            "bearer-secret-12345",
+            "header-secret-12345",
+            "cli-secret-12345",
+            "url-secret",
+            "query-secret",
+            "sk-positional-secret-12345",
+        ] {
+            assert!(!redacted.contains(secret), "secret leaked: {secret}");
+        }
+        assert!(redacted.matches("<redacted>").count() >= 7);
+        assert!(redacted.contains("https://alice:<redacted>@example.test"));
+        assert!(redacted.contains("access_token=<redacted>"));
+    }
+    #[test]
+    fn wip_proxy_credentials_are_kept_out_of_argv() {
+        let upstream = "https://service.example.test/?token=fixture";
+        let key = "transient-provider-credential";
+        let cmd = proxy_command(
+            Path::new("lm-resizer"),
+            "127.0.0.1:8080".parse().unwrap(),
+            Some(upstream.into()),
+            Some(key.into()),
+            ProviderKind::OpenAi,
+            None,
+        );
+        let args = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(!args
+            .iter()
+            .any(|arg| arg.contains(key) || arg.contains(upstream)));
+        let envs = cmd.get_envs().collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("LM_RESIZER_API_KEY")),
+            Some(&Some(std::ffi::OsStr::new(key)))
+        );
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("LM_RESIZER_UPSTREAM")),
+            Some(&Some(std::ffi::OsStr::new(upstream)))
+        );
     }
 }
