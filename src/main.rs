@@ -2196,7 +2196,9 @@ fn run_exec_command(
             .push("diagnostic_gate:kept_filtered".to_string());
         compressed.cache_keys.clear();
     }
-    let tee_hint = tee_raw_output_if_useful(&raw, &filtered)?;
+    // La pipeline peut réduire une sortie que le filtre n'a pas modifiée.
+    // Le tee doit couvrir les omissions de toutes les étapes d'exec.
+    let tee_hint = tee_raw_output_if_useful(&raw, &compressed.output)?;
     let mut final_output = compressed.output;
     if let Some(hint) = &tee_hint {
         if !final_output.ends_with('\n') && !final_output.is_empty() {
@@ -4429,7 +4431,15 @@ fn filter_generic(raw: &str) -> String {
     if repeat_count > 0 {
         out.push(format!("... previous line repeated {repeat_count} times"));
     }
-    append_omitted(out, skipped)
+    // Le fallback (notamment bash -c) doit rester borné, sans obliger la
+    // porte de conservation à revenir au brut pour un diagnostic tardif.
+    // Garder début, fin et tous les signaux ; annoncer les autres omissions,
+    // dont exec conserve l'original intégral dans le tee.
+    let out = keep_signal_within(out, 240, TruncateFrom::Middle, "generic");
+    let bounded = append_omitted(out, skipped);
+    // Les explications (Collection:, Not found:, etc.) peuvent ne contenir
+    // aucun mot d'échec. Elles suivent le même contrat que les diagnostics.
+    lm_resizer_core::transforms::diagnostic_gate::reinject_lost_failure_lines(raw, &bounded).0
 }
 
 fn append_omitted(mut lines: Vec<String>, skipped: usize) -> String {
@@ -4443,8 +4453,8 @@ fn append_omitted(mut lines: Vec<String>, skipped: usize) -> String {
     }
 }
 
-fn tee_raw_output_if_useful(raw: &str, filtered: &str) -> Result<Option<String>> {
-    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") || raw == filtered {
+fn tee_raw_output_if_useful(raw: &str, output: &str) -> Result<Option<String>> {
+    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") || raw == output {
         return Ok(None);
     }
 
@@ -11059,7 +11069,7 @@ Successfully tagged localhost/app:latest\n";
     }
 
     #[test]
-    fn generic_filter_keeps_all_lines_including_late_failure() {
+    fn generic_filter_bounds_noise_and_keeps_late_failure() {
         let mut raw = (0..250)
             .map(|n| format!("progress line {n}\n"))
             .collect::<String>();
@@ -11067,7 +11077,9 @@ Successfully tagged localhost/app:latest\n";
         let command = vec!["unknown-command".to_string()];
         let (name, output) = filter_command_output(&command, &raw);
         assert_eq!(name, "generic");
-        assert_eq!(output, raw);
+        assert!(output.len() < raw.len());
+        assert!(output.contains("error: src/main.rs:42: missing value"));
+        assert!(first_lost_failure_line(&raw, &output).is_none());
     }
 
     #[test]
