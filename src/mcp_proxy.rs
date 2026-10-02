@@ -229,6 +229,7 @@ pub fn compress_tool_call_result(
             modified = true;
 
             let exec_report = ExecReport {
+                streams: None,
                 tokens,
                 command: format!("mcp:{tool_name}"),
                 exit_code: 0,

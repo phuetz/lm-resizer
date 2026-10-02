@@ -685,7 +685,27 @@ struct BatchItemReport {
 }
 
 #[derive(Debug, Serialize)]
+struct CapturedStreams {
+    stdout_bytes: usize,
+    stderr_bytes: usize,
+    /// Streams are captured independently; cross-stream chronology is unknown.
+    layout: &'static str,
+}
+
+impl CapturedStreams {
+    fn new(stdout: &[u8], stderr: &[u8]) -> Self {
+        Self {
+            stdout_bytes: stdout.len(),
+            stderr_bytes: stderr.len(),
+            layout: "stdout_then_stderr; [stderr] boundary; no cross-stream chronology",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 struct ExecReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    streams: Option<CapturedStreams>,
     #[serde(flatten)]
     tokens: TokenCounts,
     command: String,
@@ -2136,7 +2156,7 @@ fn run_exec_command(
     let started = Instant::now();
     let (program, args) = command.split_first().context("missing command for exec")?;
     let resolved_program = resolve_command_path(program).unwrap_or_else(|| PathBuf::from(program));
-    let (exit_code, raw) = if stream {
+    let (exit_code, raw, streams) = if stream {
         run_command_streaming(&resolved_program, args, &command.join(" "))?
     } else {
         let output = Command::new(&resolved_program)
@@ -2145,8 +2165,9 @@ fn run_exec_command(
             .output()
             .with_context(|| format!("failed to execute '{}'", command.join(" ")))?;
         (
-            output.status.code().unwrap_or(1),
+            child_exit_code(output.status),
             combine_command_output(&output.stdout, &output.stderr),
+            CapturedStreams::new(&output.stdout, &output.stderr),
         )
     };
 
@@ -2210,6 +2231,7 @@ fn run_exec_command(
     }
 
     let report = ExecReport {
+        streams: Some(streams),
         tokens: TokenCounts::measure(&raw, &final_output),
         command: command.join(" "),
         exit_code,
@@ -2277,6 +2299,7 @@ fn process_captured_output(
         keys.push(key);
     }
     Ok(ExecReport {
+        streams: None,
         tokens: TokenCounts::measure(raw, &output),
         command: command.join(" "),
         exit_code,
@@ -2292,7 +2315,11 @@ fn process_captured_output(
     })
 }
 
-fn run_command_streaming(program: &Path, args: &[String], display: &str) -> Result<(i32, String)> {
+fn run_command_streaming(
+    program: &Path,
+    args: &[String],
+    display: &str,
+) -> Result<(i32, String, CapturedStreams)> {
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::inherit())
@@ -2313,8 +2340,9 @@ fn run_command_streaming(program: &Path, args: &[String], display: &str) -> Resu
         .join()
         .map_err(|_| anyhow::anyhow!("stderr stream thread panicked"))??;
     Ok((
-        status.code().unwrap_or(1),
+        child_exit_code(status),
         combine_command_output(&stdout, &stderr),
+        CapturedStreams::new(&stdout, &stderr),
     ))
 }
 
@@ -2339,13 +2367,27 @@ fn stream_reader<R: std::io::Read>(reader: R, stderr: bool) -> Result<Vec<u8>> {
     Ok(captured)
 }
 
+fn child_exit_code(status: std::process::ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return 128 + signal;
+        }
+    }
+    1
+}
+
 fn combine_command_output(stdout: &[u8], stderr: &[u8]) -> String {
     let stdout = String::from_utf8_lossy(stdout);
     let stderr = String::from_utf8_lossy(stderr);
-    match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
+    match (stdout.is_empty(), stderr.is_empty()) {
         (false, false) => format!("{stdout}\n[stderr]\n{stderr}"),
         (false, true) => stdout.into_owned(),
-        (true, false) => stderr.into_owned(),
+        (true, false) => format!("[stderr]\n{stderr}"),
         (true, true) => String::new(),
     }
 }
@@ -2645,6 +2687,10 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
         return (format!("lossless:{name}"), output);
     }
     let (name, output) = route_command_filter(command, raw);
+    if raw.lines().any(|line| line == "[stderr]") && !output.lines().any(|line| line == "[stderr]")
+    {
+        return (format!("{name}:stream-guard"), raw.to_string());
+    }
     // Filters are also a possible source of lost diagnostics. The later
     // pipeline gate only compares its input with its output, so it cannot
     // recover a failure that disappeared here.
@@ -3576,6 +3622,11 @@ fn first_lost_indispensable_line<'a>(
     after: &str,
     filter: &str,
 ) -> Option<&'a str> {
+    if before.lines().any(|line| line == "[stderr]")
+        && !after.lines().any(|line| line == "[stderr]")
+    {
+        return Some("[stderr]");
+    }
     first_lost_failure_line(before, after).or_else(|| {
         if matches!(filter, "search_results" | "listing") {
             return before
@@ -4714,6 +4765,7 @@ fn run_native_hook(client: &str, event: &str) -> NativeHookRunReport {
     match compress_text(&filtered, &format!("{client} {event} hook"), &store).and_then(
         |compressed| {
             let exec_report = ExecReport {
+                streams: None,
                 tokens: TokenCounts::measure(&output, &compressed.output),
                 command: command.clone(),
                 exit_code: extract_hook_exit_code(value.as_ref()).unwrap_or(0),
