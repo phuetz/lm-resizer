@@ -49,6 +49,7 @@ mod provider_usage;
 mod raw_proxy;
 mod rtk_filters;
 mod session_audit;
+mod settings_cli;
 mod shared_context;
 mod token_metrics;
 
@@ -146,6 +147,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Show, create or edit persistent local settings.
+    Config(settings_cli::Options),
     /// Execute without filtering while recording usage and preserving exit status.
     Proxy {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
@@ -1334,6 +1337,9 @@ fn run_on_cli_thread() -> Result<()> {
 
 #[tokio::main]
 async fn run(cli: Cli) -> Result<()> {
+    if !matches!(cli.command, Commands::Config(_)) {
+        settings_cli::apply()?;
+    }
     if cli.skip_env {
         std::env::set_var("SKIP_ENV_VALIDATION", "1");
     }
@@ -1345,6 +1351,7 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
     match cli.command {
+        Commands::Config(options) => settings_cli::run(options)?,
         Commands::Proxy { command } => {
             let code = raw_proxy::run(&command)?;
             if code != 0 {
