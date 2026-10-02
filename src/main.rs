@@ -49,6 +49,7 @@ mod mcp_proxy;
 mod parity_filters;
 mod provider_usage;
 mod raw_proxy;
+mod recovery_cli;
 mod rtk_filters;
 mod session_audit;
 mod settings_cli;
@@ -311,12 +312,7 @@ enum Commands {
     },
     /// Retrieve an original payload by CCR hash.
     #[command(visible_alias = "recall")]
-    Retrieve {
-        hash: String,
-        /// CCR SQLite database path.
-        #[arg(long)]
-        store: Option<PathBuf>,
-    },
+    Retrieve(recovery_cli::Options),
     /// Save a named, compressed handoff for other agents sharing this store.
     Share {
         key: String,
@@ -1599,14 +1595,7 @@ async fn run(cli: Cli) -> Result<()> {
                 println!("{}", report.rewritten);
             }
         }
-        Commands::Retrieve { hash, store } => {
-            let store = open_store(store)?;
-            let payload = store
-                .get(&hash)
-                .with_context(|| format!("CCR entry not found: {hash}"))?;
-            let _ = record_retrieval_feedback(&hash, payload.len(), "cli");
-            print!("{payload}");
-        }
+        Commands::Retrieve(options) => recovery_cli::run(options)?,
         Commands::Share {
             key,
             input,
