@@ -192,8 +192,20 @@ impl Views {
                 for kind in ["daily", "weekly", "monthly", "history"] {
                     if let Some(rows) = report[kind].as_array() {
                         println!("\n{kind}:");
+                        println!("| Period / command | Commands | Tokens saved | Unmeasured | Exit |\n|---|---:|---:|---:|---:|");
                         for row in rows {
-                            println!("{}", row);
+                            let label = row["period"]
+                                .as_str()
+                                .or_else(|| row["command"].as_str())
+                                .unwrap_or("");
+                            println!(
+                                "| {} | {} | {} | {} | {} |",
+                                crate::markdown_escape(label),
+                                row["commands"],
+                                row["tokens_saved"],
+                                row["unmeasured_commands"],
+                                row["exit_code"]
+                            );
                         }
                     }
                 }
@@ -239,10 +251,30 @@ fn csv(report: &Value) -> String {
         "estimated_tokens_saved",
         "exit_code",
         "duration_ms",
+        "filter",
+        "reason",
+        "error",
+        "elisions",
+        "recalls",
+        "recalls_per_elision",
+        "tier",
+        "estimated_monthly_tokens",
+        "percent",
+        "method",
     ];
     let mut out = format!("view,{}\r\n", columns.join(","));
-    for kind in ["exec_history", "daily", "weekly", "monthly", "history"] {
-        let rows = match report.get(kind) {
+    for (kind, value) in [
+        ("exec_history", report.get("exec_history")),
+        ("daily", report.get("daily")),
+        ("weekly", report.get("weekly")),
+        ("monthly", report.get("monthly")),
+        ("history", report.get("history")),
+        ("quota", report.get("quota")),
+        ("recalls", report.pointer("/recalls/by_filter")),
+        ("errors", report.pointer("/failures/errors")),
+        ("raw_fallbacks", report.pointer("/failures/raw_fallbacks")),
+    ] {
+        let rows = match value {
             Some(Value::Array(rows)) => rows.clone(),
             Some(row) => vec![row.clone()],
             None => continue,
@@ -286,6 +318,16 @@ mod tests {
             1
         );
         assert!(periods(&content, Some("/other"), "daily").is_empty());
+    }
+    #[test]
+    fn csv_includes_requested_quota_recall_and_failure_views() {
+        let text = csv(
+            &json!({"quota":{"tier":"pro","percent":3.0},"recalls":{"by_filter":[{"filter":"git","recalls":2}]},"failures":{"errors":[{"error":"missing file","reason":"cli_error"}]}}),
+        );
+        assert!(text.contains("quota,"));
+        assert!(text.contains("recalls,"));
+        assert!(text.contains("errors,"));
+        assert!(text.contains("missing file"));
     }
     #[test]
     fn csv_quotes_commands_and_preserves_negative_savings() {
