@@ -6978,7 +6978,7 @@ fn command_has_specific_filter(command: &str) -> bool {
         return false;
     }
     let (filter, _) = filter_command_output(&parts, "");
-    filter != "generic" && filter != "none"
+    !matches!(filter.as_str(), "generic" | "none" | "lossless:generic")
 }
 
 fn split_command_for_filter(command: &str) -> Vec<String> {

@@ -14,6 +14,7 @@ fn discover_scopes_projects_dates_and_limits_and_session_measures_adoption() {
             json!({"type":"tool_use","id":"a","name":"Bash","input":{"command":"git status"}}),
             json!({"type":"tool_result","tool_use_id":"a","content":"On branch main\n"}),
             json!({"type":"tool_use","id":"b","name":"Bash","input":{"command":"lm-resizer exec -- git status"}}),
+            json!({"type":"tool_use","id":"c","name":"Bash","input":{"command":"unknown-command"}}),
         ];
         std::fs::write(
             root.path().join(format!("{name}.jsonl")),
@@ -45,7 +46,10 @@ fn discover_scopes_projects_dates_and_limits_and_session_measures_adoption() {
     assert_eq!(report["sessions"].as_array().unwrap().len(), 2);
     assert_eq!(report["opportunities_total"], 2);
     assert_eq!(report["opportunities"].as_array().unwrap().len(), 1);
-    assert_eq!(report["sessions"][0]["adoption_percent"], 50.0);
+    assert!(
+        (report["sessions"][0]["adoption_percent"].as_f64().unwrap() - 100.0 / 3.0).abs() < 1e-9
+    );
+    assert_eq!(report["unsupported"]["unknown-command"], 2);
     let recent = run(&["discover", "--all", "--since", "1", "--json"]);
     assert_eq!(recent["sessions"].as_array().unwrap().len(), 2);
     let report = run(&["session", "--all", "--since", "0", "-f", "json"]);
