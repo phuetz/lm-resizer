@@ -40,3 +40,12 @@ pub fn run(opts: Options) -> Result<()> {
     );
     Ok(())
 }
+
+/// Trust requires successful fixtures for every declared filter. Diagnostics
+/// include absent coverage and duplicate definitions; neither is a clean audit.
+pub fn require_verified(report: &crate::VerifyFiltersReport) -> Result<()> {
+    if report.failed > 0 || report.tests == 0 || !report.diagnostics.is_empty() {
+        anyhow::bail!("filter trust requires passing fixtures for every filter and no diagnostics: {} failed; {}", report.failed, report.diagnostics.join("; "));
+    }
+    Ok(())
+}

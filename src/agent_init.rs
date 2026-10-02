@@ -121,9 +121,8 @@ pub fn run(mut opts: Options) -> Result<()> {
         let filter_path = project.join(".lm-resizer/filters.toml");
         if opts.trust_filters && filter_path.exists() {
             let verification = crate::verify_filter_file(&filter_path)?;
-            if verification.failed > 0 {
-                bail!("project filter verification failed; no installation changes applied");
-            }
+            crate::trust_cli::require_verified(&verification)
+                .context("project filter verification failed; no installation changes applied")?;
         }
         apply(&edits)?;
         if opts.trust_filters && filter_path.exists() {

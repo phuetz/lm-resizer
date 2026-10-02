@@ -3370,13 +3370,7 @@ fn trust_filter_file(path: &Path) -> Result<TrustFilterReport> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("could not read {}", path.display()))?;
     let verification = verify_filter_file(path)?;
-    if verification.failed > 0 {
-        anyhow::bail!(
-            "filter verification failed: {} of {} tests failed",
-            verification.failed,
-            verification.tests
-        );
-    }
+    trust_cli::require_verified(&verification)?;
     let canonical = canonical_or_absolute(path)?;
     let hash = sha256_hex(content.as_bytes());
     let mut records = load_trusted_filter_records()?;
