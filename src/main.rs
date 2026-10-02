@@ -56,6 +56,7 @@ mod session_audit;
 mod settings_cli;
 mod shared_context;
 mod token_metrics;
+mod update_cli;
 
 use token_metrics::{TokenCounts, TOKENIZER};
 
@@ -151,6 +152,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Check releases or explicitly install a checksum-verified binary.
+    Update(update_cli::Options),
     /// Verify installed agent hooks, plugins and guidance without modifying files.
     Verify(integration_doctor::Options),
     /// Show, create or edit persistent local settings.
@@ -1354,6 +1357,7 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
     match cli.command {
+        Commands::Update(options) => update_cli::run(options).await?,
         Commands::Verify(options) => integration_doctor::run(options)?,
         Commands::Config(options) => settings_cli::run(options)?,
         Commands::Proxy { command } => {
