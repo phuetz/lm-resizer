@@ -12,13 +12,24 @@ use std::{
     time::Instant,
 };
 
+#[path = "artifact.rs"]
+mod artifact;
+use artifact::{Artifact, Provenance};
+
 const REVISION: &str = "09b1db0617311f3b39f165bb3480c0ce2f718b27";
 const URL: &str = "https://github.com/microsoft/TypeScript.git";
 
 #[derive(Parser)]
 struct Args {
-    #[arg(long, default_value = "target/release/lm-resizer")]
-    binary: PathBuf,
+    /// Verified prebuilt artifact; otherwise build HEAD from its Git archive.
+    #[arg(long)]
+    binary: Option<PathBuf>,
+    /// Build this original commit before measuring, never reuse an old CLI.
+    #[arg(long, conflicts_with_all = ["before", "baseline_results"])]
+    before_ref: Option<String>,
+    /// Build artifacts only, then exit before measuring.
+    #[arg(long, conflicts_with = "baseline_results")]
+    build_only: bool,
     /// Original release binary for full JSON/stdout/stderr parity.
     #[arg(long, conflicts_with = "baseline_results")]
     before: Option<PathBuf>,
@@ -133,15 +144,17 @@ fn prepare(repo: &Path, directory: &Path) -> Result<Vec<Case>> {
             0,
         )?;
         let large = data.repeat(5_000_000_usize.div_ceil(data.len()));
-        add_case(
-            &mut cases,
-            directory,
-            &format!("{name}-5mb"),
-            &command,
-            &large,
-            Some(2.0),
-            0,
-        )?;
+        if large != data {
+            add_case(
+                &mut cases,
+                directory,
+                &format!("{name}-5mb"),
+                &command,
+                &large,
+                Some(2.0),
+                0,
+            )?;
+        }
         if name == "find" {
             let text = std::str::from_utf8(&data)?;
             let mut end = 3_000_000.min(data.len());
@@ -235,18 +248,39 @@ fn prepare(repo: &Path, directory: &Path) -> Result<Vec<Case>> {
     Ok(cases)
 }
 
+#[derive(Clone, Serialize, serde::Deserialize)]
+struct Measurement {
+    seconds: f64,
+    commit: String,
+    binary_sha256: String,
+    format: String,
+}
+
+impl Measurement {
+    fn verify_identity(&self, provenance: &Provenance) -> Result<()> {
+        ensure!(
+            self.commit == provenance.commit
+                && self.binary_sha256 == provenance.binary_sha256
+                && self.format == "json",
+            "baseline measurement provenance mismatch"
+        );
+        Ok(())
+    }
+}
+
 fn invoke(
-    binary: &Path,
+    artifact: &Artifact,
     case: &Case,
     directory: &Path,
     shim: &Path,
     json_mode: bool,
-) -> Result<(Output, f64)> {
+) -> Result<(Output, Measurement)> {
+    artifact.verify()?;
     let mut path = vec![shim.to_path_buf()];
     path.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
-    let mut command = Command::new(binary);
+    let mut command = Command::new(&artifact.binary);
     command.arg("exec");
     if json_mode {
         command.arg("--json");
@@ -273,7 +307,16 @@ fn invoke(
         output.status.code(),
         String::from_utf8_lossy(&output.stderr)
     );
-    Ok((output, elapsed))
+    artifact.verify()?;
+    Ok((
+        output,
+        Measurement {
+            seconds: elapsed,
+            commit: artifact.provenance.commit.clone(),
+            binary_sha256: artifact.provenance.binary_sha256.clone(),
+            format: if json_mode { "json" } else { "text" }.into(),
+        },
+    ))
 }
 
 #[cfg(unix)]
@@ -301,8 +344,29 @@ fn main() -> Result<()> {
     ensure!(!args.output.exists(), "artifact directory already exists");
     fs::create_dir_all(&args.output)?;
     let directory = args.output.canonicalize()?;
-    let binary = args.binary.canonicalize()?;
-    let before = args.before.map(fs::canonicalize).transpose()?;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cache = root.join("target");
+    let binary = if let Some(path) = &args.binary {
+        Artifact::load(path, root)?
+    } else {
+        Artifact::build(root, "HEAD", &directory.join("artifacts/after"), &cache)?
+    };
+    let before = if let Some(reference) = &args.before_ref {
+        Some(Artifact::build(
+            root,
+            reference,
+            &directory.join("artifacts/before"),
+            &cache,
+        )?)
+    } else {
+        args.before
+            .as_ref()
+            .map(|p| Artifact::load(p, root))
+            .transpose()?
+    };
+    if args.build_only {
+        return Ok(());
+    }
     let repo = args
         .repo
         .unwrap_or_else(|| std::env::temp_dir().join("lmr-perf-typescript"));
@@ -314,22 +378,35 @@ fn main() -> Result<()> {
             Ok(serde_json::from_slice(&fs::read(p.join("results.json"))?)?)
         })
         .transpose()?;
-    if let Some(baseline) = &baseline {
+    let baseline_provenance = if let Some(baseline) = &baseline {
+        ensure!(
+            baseline["schema_version"] == 2,
+            "baseline lacks versioned artifact provenance"
+        );
+        let provenance: Provenance = serde_json::from_value(baseline["before_artifact"].clone())
+            .context("baseline before artifact missing")?;
+        provenance.validate(root)?;
         ensure!(
             baseline["revision"] == REVISION,
             "baseline revision mismatch"
         );
-    }
+        Some(provenance)
+    } else {
+        None
+    };
     let shim = directory.join("bin");
     create_shims(&cases, &shim)?;
-    let mut result = json!({"revision":REVISION, "binary_sha256":digest(&fs::read(&binary)?), "cases":[], "passed":true});
+    let mut result = json!({"schema_version":2, "revision":REVISION, "after_artifact":binary.provenance, "cases":[], "passed":true, "threshold_policy":"every sample, strict absolute limit"});
     if let Some(before) = &before {
-        result["before_sha256"] = json!(digest(&fs::read(before)?));
+        result["before_artifact"] = json!(before.provenance);
+    } else if let Some(provenance) = &baseline_provenance {
+        result["before_artifact"] = json!(provenance);
     }
     let mut failures = Vec::new();
     for case in cases {
         let mut row = serde_json::to_value(&case)?;
         let mut samples = Vec::new();
+        let mut measurements = Vec::new();
         let mut last = None;
         for _ in 0..if case.threshold.is_some() {
             args.runs
@@ -337,7 +414,8 @@ fn main() -> Result<()> {
             1
         } {
             let (output, elapsed) = invoke(&binary, &case, &directory, &shim, false)?;
-            samples.push(elapsed);
+            samples.push(elapsed.seconds);
+            measurements.push(elapsed);
             last = Some(output);
         }
         let output = last.context("missing sample")?;
@@ -354,6 +432,7 @@ fn main() -> Result<()> {
         sorted.sort_by(f64::total_cmp);
         let n = sorted.len();
         let median = (sorted[(n - 1) / 2] + sorted[n / 2]) / 2.0;
+        row["measurements"] = json!(measurements);
         row["seconds"] = json!(samples);
         row["median"] = json!(median);
         row["maximum"] = json!(maximum);
@@ -366,8 +445,8 @@ fn main() -> Result<()> {
         }
         if before.is_some() || baseline.is_some() {
             let (old_stdout, old_stderr, elapsed) = if let Some(before) = &before {
-                let (old, elapsed) = invoke(before, &case, &directory, &shim, true)?;
-                (old.stdout, old.stderr, elapsed)
+                let (old, measurement) = invoke(before, &case, &directory, &shim, true)?;
+                (old.stdout, old.stderr, measurement)
             } else {
                 let rows = baseline.as_ref().context("baseline")?["cases"]
                     .as_array()
@@ -382,15 +461,22 @@ fn main() -> Result<()> {
                     case.name
                 );
                 let path = args.baseline_results.as_ref().context("baseline path")?;
-                (
-                    fs::read(path.join(format!("{}.before.json", case.name)))?,
-                    fs::read(path.join(format!("{}.before.stderr", case.name)))?,
-                    recorded["before_seconds"]
-                        .as_f64()
-                        .context("baseline elapsed")?,
-                )
+                let stdout = fs::read(path.join(format!("{}.before.json", case.name)))?;
+                let stderr = fs::read(path.join(format!("{}.before.stderr", case.name)))?;
+                ensure!(
+                    recorded["before_stdout_sha256"] == digest(&stdout)
+                        && recorded["before_stderr_sha256"] == digest(&stderr),
+                    "baseline output hash mismatch"
+                );
+                let measurement: Measurement =
+                    serde_json::from_value(recorded["before_measurement"].clone())?;
+                let provenance = baseline_provenance
+                    .as_ref()
+                    .context("baseline provenance")?;
+                measurement.verify_identity(provenance)?;
+                (stdout, stderr, measurement)
             };
-            let (new, _) = invoke(&binary, &case, &directory, &shim, true)?;
+            let (new, after_measurement) = invoke(&binary, &case, &directory, &shim, true)?;
             fs::write(
                 directory.join(format!("{}.before.json", case.name)),
                 &old_stdout,
@@ -404,7 +490,12 @@ fn main() -> Result<()> {
                 &new.stdout,
             )?;
             let parity = old_stdout == new.stdout && old_stderr == new.stderr;
-            row["before_seconds"] = json!(elapsed);
+            row["before_seconds"] = json!(elapsed.seconds);
+            row["before_measurement"] = json!(elapsed);
+            row["after_json_measurement"] = json!(after_measurement);
+            row["baseline_reused"] = json!(baseline.is_some());
+            row["before_stdout_sha256"] = json!(digest(&old_stdout));
+            row["before_stderr_sha256"] = json!(digest(&old_stderr));
             row["parity"] = json!(parity);
             if !parity {
                 failures.push(format!("{}: JSON/stdout/stderr mismatch", case.name));
@@ -445,4 +536,33 @@ fn main() -> Result<()> {
         bail!("{}", failures.join("\n"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn baseline_measurement_must_name_the_recorded_commit_and_binary() {
+        let provenance = Provenance {
+            commit: "commit-a".into(),
+            tree: String::new(),
+            binary_sha256: "hash-a".into(),
+            archive_sha256: String::new(),
+            rustc: String::new(),
+            build_command: Vec::new(),
+        };
+        let measurement = Measurement {
+            seconds: 0.1,
+            commit: "commit-a".into(),
+            binary_sha256: "hash-a".into(),
+            format: "json".into(),
+        };
+        measurement.verify_identity(&provenance).unwrap();
+        let mut changed = measurement.clone();
+        changed.commit = "commit-b".into();
+        assert!(changed.verify_identity(&provenance).is_err());
+        changed = measurement;
+        changed.binary_sha256 = "hash-b".into();
+        assert!(changed.verify_identity(&provenance).is_err());
+    }
 }
