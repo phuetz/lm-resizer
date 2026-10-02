@@ -7354,7 +7354,12 @@ fn install_mcp(
                 ClientConfig::Cursor,
                 &project_dir,
             )?;
-            install_json_mcp(scope, &exe_path, store, ClientConfig::VsCode, &project_dir)
+            if scope == "global" {
+                eprintln!("Warning: VS Code global MCP config is profile-dependent; skipping global installation for VS Code. Use --scope project to configure it.");
+                Ok(())
+            } else {
+                install_json_mcp(scope, &exe_path, store, ClientConfig::VsCode, &project_dir)
+            }
         }
         other => {
             anyhow::bail!("unsupported client '{other}'. Use claude, codex, cursor, vscode, or all")
@@ -12326,5 +12331,52 @@ Prisma CLI Version : 5.15.0
             .and_then(toml::Value::as_str)
             .unwrap_or_else(|| panic!("missing package.version in {}", path.display()))
             .to_string()
+    }
+
+    #[test]
+    fn install_all_global() {
+        let old_home = std::env::var("HOME").ok();
+        let old_userprofile = std::env::var("USERPROFILE").ok();
+        let old_codex_home = std::env::var("CODEX_HOME").ok();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let home = temp_dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        std::env::set_var("HOME", &home);
+        std::env::set_var("USERPROFILE", &home);
+        std::env::set_var("CODEX_HOME", home.join(".codex"));
+
+        let store_dir = temp_dir.path().join("store");
+
+        let result = install_mcp("all", "global", None, Some(store_dir));
+        assert!(
+            result.is_ok(),
+            "install_mcp (avec correctif) devrait réussir pour tout (vscode ignoré en global)"
+        );
+
+        // Assert that the other config files were created
+        assert!(home.join(".mcp.json").exists());
+        assert!(home.join(".codex").join("config.toml").exists());
+        assert!(home.join(".cursor").join("mcp.json").exists());
+
+        // vscode is not created globally
+        assert!(!home.join(".vscode").join("mcp.json").exists());
+
+        if let Some(val) = old_home {
+            std::env::set_var("HOME", val);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        if let Some(val) = old_userprofile {
+            std::env::set_var("USERPROFILE", val);
+        } else {
+            std::env::remove_var("USERPROFILE");
+        }
+        if let Some(val) = old_codex_home {
+            std::env::set_var("CODEX_HOME", val);
+        } else {
+            std::env::remove_var("CODEX_HOME");
+        }
     }
 }

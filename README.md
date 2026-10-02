@@ -51,7 +51,7 @@ To remove a binary installed with Cargo:
 cargo uninstall --root "$HOME/.local" lm-resizer
 ~~~
 
-The CLI also offers `compress` for files or standard input, `tool-output` for already captured command output, and opt-in MCP, HTTP and agent hook integrations. See [the agent integration guide](docs/CLAUDE_CODEX.md) and [the release guide](docs/RELEASE.md) for those workflows.
+The CLI also offers `compress` for files or standard input, `tool-output` for already captured command output, and opt-in MCP, HTTP and agent hook integrations. See [the agent integration guide](docs/CLAUDE_CODEX.md) and [the release guide](docs/RELEASE.md) for those workflows. Note: When using `install --client all` with `--scope global`, VS Code will be skipped with a warning because its global configuration requires a profile path. Other agents will be configured normally.
 
 ## Measured against RTK and Headroom
 
