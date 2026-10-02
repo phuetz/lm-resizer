@@ -130,6 +130,12 @@ const NATIVE_TOOLS: &[&str] = &[
 #[command(about = "Rust-native context compression for LLM agents")]
 #[command(version)]
 struct Cli {
+    /// Print diagnostic startup information to stderr (-v, -vv, -vvv).
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
+    /// Set SKIP_ENV_VALIDATION=1 for child processes.
+    #[arg(long, global = true)]
+    skip_env: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -1299,6 +1305,16 @@ fn run_on_cli_thread() -> Result<()> {
 
 #[tokio::main]
 async fn run(cli: Cli) -> Result<()> {
+    if cli.skip_env {
+        std::env::set_var("SKIP_ENV_VALIDATION", "1");
+    }
+    if cli.verbose > 0 {
+        eprintln!(
+            "lm-resizer {} (verbosity {})",
+            env!("CARGO_PKG_VERSION"),
+            cli.verbose
+        );
+    }
     match cli.command {
         Commands::Compress {
             input,
