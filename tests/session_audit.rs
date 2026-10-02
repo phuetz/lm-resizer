@@ -3,9 +3,10 @@ use std::process::Command;
 #[test]
 fn discover_scopes_projects_dates_and_limits_and_session_measures_adoption() {
     let root = tempfile::tempdir().unwrap();
+    let today = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now()).to_rfc3339();
     for (name, cwd, date) in [
-        ("a", "/wanted/project", "2026-10-02T12:00:00Z"),
-        ("b", "/other", "2026-10-02T12:00:00Z"),
+        ("a", "/wanted/project", today.as_str()),
+        ("b", "/other", today.as_str()),
         ("c", "/wanted/project", "2020-01-01T00:00:00Z"),
     ] {
         let rows = [
@@ -45,6 +46,8 @@ fn discover_scopes_projects_dates_and_limits_and_session_measures_adoption() {
     assert_eq!(report["opportunities_total"], 2);
     assert_eq!(report["opportunities"].as_array().unwrap().len(), 1);
     assert_eq!(report["sessions"][0]["adoption_percent"], 50.0);
+    let recent = run(&["discover", "--all", "--since", "1", "--json"]);
+    assert_eq!(recent["sessions"].as_array().unwrap().len(), 2);
     let report = run(&["session", "--all", "--since", "0", "-f", "json"]);
     assert_eq!(report["sessions"].as_array().unwrap().len(), 3);
 }
