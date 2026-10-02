@@ -320,6 +320,15 @@ enum Commands {
     /// Show CCR store statistics.
     #[command(visible_alias = "gain")]
     Stats {
+        /// Include recent executions with exact counts, duration and exit status.
+        #[arg(short = 'H', long)]
+        history: bool,
+        /// Restrict execution statistics to the current working directory.
+        #[arg(short, long)]
+        project: bool,
+        /// Number of recent executions shown by --history.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
         /// CCR SQLite database path.
         #[arg(long)]
         store: Option<PathBuf>,
@@ -843,6 +852,7 @@ struct RewriteShellSegment {
 
 #[derive(Debug, Serialize)]
 struct ExecHistoryRecord {
+    cwd: String,
     #[serde(flatten)]
     tokens: TokenCounts,
     timestamp_unix: u64,
@@ -1566,20 +1576,61 @@ async fn run(cli: Cli) -> Result<()> {
                 println!("{key}");
             }
         }
-        Commands::Stats { store, markdown } => {
+        Commands::Stats {
+            store,
+            markdown,
+            history,
+            project,
+            limit,
+        } => {
             let store = open_store(store)?;
-            let exec_history = summarize_exec_history().unwrap_or_default();
+            let mut exec_history = summarize_exec_history().unwrap_or_default();
+            let mut recent = None;
+            if history || project {
+                let path = default_state_dir()?.join("exec-history.jsonl");
+                let content = if path.exists() {
+                    std::fs::read_to_string(path)?
+                } else {
+                    String::new()
+                };
+                let cwd = std::env::current_dir()?.to_string_lossy().into_owned();
+                let (summary, rows, unscoped) =
+                    token_metrics::select_history(&content, project.then_some(cwd.as_str()), limit);
+                exec_history = summary;
+                exec_history["unscoped_records"] = json!(unscoped);
+                if project {
+                    exec_history["project"] = json!(cwd);
+                }
+                if history {
+                    recent = Some(rows);
+                }
+            }
             let retrieval_feedback = summarize_retrieval_feedback().unwrap_or_default();
             let proxy_history = summarize_proxy_history().unwrap_or_default();
-            let report = json!({
+            let mut report = json!({
                 "entries": store.len(),
                 "empty": store.is_empty(),
                 "exec_history": exec_history,
                 "retrieval_feedback": retrieval_feedback,
                 "proxy_history": proxy_history,
             });
+            if let Some(rows) = recent {
+                report["history"] = json!(rows);
+            }
             if markdown {
                 print!("{}", format_stats_markdown(&report));
+                if let Some(rows) = report["history"].as_array() {
+                    println!("\n## Recent executions\n\n| Command | Exit | Tokens saved | Duration ms |\n|---|---:|---:|---:|");
+                    for row in rows {
+                        println!(
+                            "| {} | {} | {} | {} |",
+                            markdown_escape(row["command"].as_str().unwrap_or("")),
+                            row["exit_code"],
+                            row["tokens_saved"],
+                            row["duration_ms"]
+                        );
+                    }
+                }
             } else {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
@@ -4877,6 +4928,7 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("exec-history.jsonl");
     let record = ExecHistoryRecord {
+        cwd: std::env::current_dir()?.to_string_lossy().into_owned(),
         tokens: report.tokens.clone(),
         timestamp_unix: unix_timestamp(),
         command: report.command.clone(),

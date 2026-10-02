@@ -156,9 +156,57 @@ pub fn summarize_history(content: &str) -> Value {
     report
 }
 
+/// Project filtering never assigns legacy entries without cwd to a project.
+/// Signed exact savings and legacy estimates keep their existing distinction.
+pub fn select_history(
+    content: &str,
+    project: Option<&str>,
+    limit: usize,
+) -> (Value, Vec<Value>, usize) {
+    let records: Vec<Value> = content
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(Value::is_object)
+        .collect();
+    let unscoped = records
+        .iter()
+        .filter(|row| row["cwd"].as_str().is_none())
+        .count();
+    let mut selected: Vec<Value> = records
+        .into_iter()
+        .filter(|row| project.is_none_or(|path| row["cwd"].as_str() == Some(path)))
+        .collect();
+    let summary = summarize_history(
+        &selected
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    selected.reverse();
+    selected.sort_by_key(|row| std::cmp::Reverse(row["timestamp_unix"].as_u64().unwrap_or(0)));
+    selected.truncate(limit);
+    (summary, selected, unscoped)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_history_retains_negative_savings_and_excludes_unscoped_rows() {
+        let mut a = json!({"cwd":"/project/a","timestamp_unix":2,"command":"cargo test","tokenizer":TOKENIZER,"token_count_method":"exact","original_tokens":10,"compressed_tokens":12});
+        let legacy = json!({"timestamp_unix":1,"command":"legacy","bytes_saved":40});
+        let first = a.to_string();
+        a["cwd"] = json!("/project/b");
+        let content = [first, a.to_string(), legacy.to_string()].join("\n");
+        let (summary, recent, unscoped) = select_history(&content, Some("/project/a"), 1);
+        assert_eq!(summary["commands"], 1);
+        assert_eq!(summary["tokens_saved"], -2);
+        assert_eq!(recent.len(), 1);
+        assert_eq!(unscoped, 1);
+        assert_eq!(select_history(&content, None, 2).0["commands"], 3);
+    }
 
     #[test]
     fn real_counts_are_not_bytes_divided_by_four() {
