@@ -122,3 +122,99 @@ fn bad_local_config_and_shell_substitution_leave_hook_input_unchanged() {
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["changed"], false);
 }
+
+#[test]
+fn native_and_preview_hooks_defer_to_allow_deny_and_unreadable_policies() {
+    for (agent, directory, tool) in [
+        ("claude", ".claude", "Bash"),
+        ("codex", ".codex", "Bash"),
+        ("copilot", ".copilot", "bash"),
+        ("vibe", ".vibe", "bash"),
+    ] {
+        for content in [
+            r#"{"permissions":{"allow":["Bash(git status)"]}}"#,
+            r#"{"permissions":{"deny":["Bash(git status)"]}}"#,
+            "{invalid",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let dir = root.path().join(directory);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("settings.json"), content).unwrap();
+            assert_policy_abstention(root.path(), agent, tool);
+        }
+    }
+}
+
+fn assert_policy_abstention(root: &std::path::Path, agent: &str, tool: &str) {
+    let command = || {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_lm-resizer"));
+        cmd.env("HOME", root)
+            .env_remove("CODEX_HOME")
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env_remove("VIBE_HOME")
+            .env_remove("COPILOT_HOME")
+            .current_dir(root);
+        cmd
+    };
+    let out = command()
+        .args(["hook", "check", "--agent", agent, "git status"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["changed"], false, "preview {agent}");
+    let payload = serde_json::json!({"permission_mode":"default", "hook_event_name":"PreToolUse",
+        "tool_name":tool,"tool_input":{"command":"git status","timeout":7}});
+    let mut child = command()
+        .args(["hook", agent])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.to_string().as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    assert!(
+        out.stdout.is_empty(),
+        "native {agent}: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn vibe_toml_and_copilot_project_config_constraints_are_respected() {
+    for (agent, relative, content) in [
+        (
+            "vibe",
+            ".vibe/config.toml",
+            "[tools.bash]\nallowlist = ['git status']\n",
+        ),
+        (
+            "vibe",
+            ".vibe/config.toml",
+            "[tools.bash]\ndenylist = ['git status']\n",
+        ),
+        ("vibe", ".vibe/config.toml", "broken TOML ["),
+        (
+            "copilot",
+            ".github/settings.json",
+            r#"{"permissions":{"allow":["git status"]}}"#,
+        ),
+        (
+            "copilot",
+            ".copilot/config.json",
+            r#"{"permissions":{"deny":["git status"]}}"#,
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+        assert_policy_abstention(root.path(), agent, "bash");
+    }
+}

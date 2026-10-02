@@ -54,7 +54,7 @@ pub fn response(agent: &str, value: &Value, exe: &str) -> Option<Value> {
     let input = Value::Object(input);
     Some(match agent {
         // Codex requires protocol-level allow to accept updatedInput. Its
-        // native approval/sandbox checks still run on the replacement. Local
+        // host behavior is version-dependent; do not infer approval safety. Local
         // rule configurations are conservatively deferred by run().
         "codex" => {
             json!({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":input}})
@@ -77,7 +77,7 @@ pub fn run(agent: &str, command: &[String], check_agent: &str) -> Result<()> {
         if !crate::integration_doctor::CLIENTS.contains(&client) {
             anyhow::bail!("unknown agent {client}");
         }
-        let rewritten = if host_has_constraints(client) {
+        let rewritten = if host_has_constraints(client, None) {
             None
         } else {
             crate::rewrite_command_for_hook(&raw, "lm-resizer")
@@ -108,7 +108,7 @@ pub fn run(agent: &str, command: &[String], check_agent: &str) -> Result<()> {
     // Installed hook commands already resolve lm-resizer on PATH. A bare name
     // is valid in both POSIX shells and PowerShell, unlike a quoted path.
     let exe = "lm-resizer";
-    let output = if host_has_constraints(agent) {
+    let output = if host_has_constraints(agent, value.as_ref().and_then(|v| v["cwd"].as_str())) {
         None
     } else {
         value.as_ref().and_then(|v| response(agent, v, exe))
@@ -213,14 +213,23 @@ mod tests {
 }
 
 // A wrapper changes the command the host checks. Until every host's permission
-// language can be evaluated exactly, defer if local deny/ask policies exist.
-fn host_has_constraints(agent: &str) -> bool {
+// language can be evaluated exactly, defer if local permission policies exist.
+fn host_has_constraints(agent: &str, cwd: Option<&str>) -> bool {
     fn restricted(v: &Value) -> bool {
         match v {
             Value::Object(map) => map.iter().any(|(key, value)| {
                 (matches!(
                     key.as_str(),
-                    "deny" | "ask" | "exclude" | "commandDenylist" | "commandAllowlist"
+                    "allow"
+                        | "deny"
+                        | "ask"
+                        | "exclude"
+                        | "commandDenylist"
+                        | "commandAllowlist"
+                        | "allowlist"
+                        | "denylist"
+                        | "allowed_commands"
+                        | "denied_commands"
                 ) && match value {
                     Value::Array(a) => !a.is_empty(),
                     Value::Object(o) => !o.is_empty(),
@@ -239,19 +248,33 @@ fn host_has_constraints(agent: &str) -> bool {
     if let Ok(cwd) = std::env::current_dir() {
         roots.extend(cwd.ancestors().map(std::path::Path::to_path_buf));
     }
-    let directory = match agent {
-        "claude" => ".claude",
-        "codex" => ".codex",
-        "gemini" => ".gemini",
-        "cursor" => ".cursor",
-        "droid" => ".factory",
-        "trae" => ".trae",
+    if let Some(cwd) = cwd {
+        roots.extend(
+            std::path::Path::new(cwd)
+                .ancestors()
+                .map(std::path::Path::to_path_buf),
+        );
+    }
+    let directories = match agent {
+        "claude" => &[".claude"][..],
+        "codex" => &[".codex"][..],
+        "gemini" => &[".gemini"][..],
+        "cursor" => &[".cursor"][..],
+        "droid" => &[".factory"][..],
+        "trae" => &[".trae", ".trae-cn"][..],
+        "copilot" => &[".copilot", ".github"][..],
+        "vibe" => &[".vibe"][..],
         _ => return false,
     };
-    let mut directories: Vec<_> = roots.into_iter().map(|root| root.join(directory)).collect();
+    let mut directories: Vec<_> = roots
+        .iter()
+        .flat_map(|root| directories.iter().map(move |dir| root.join(dir)))
+        .collect();
     let variable = match agent {
         "codex" => Some("CODEX_HOME"),
         "claude" => Some("CLAUDE_CONFIG_DIR"),
+        "vibe" => Some("VIBE_HOME"),
+        "copilot" => Some("COPILOT_HOME"),
         _ => None,
     };
     if let Some(path) = variable.and_then(std::env::var_os) {
@@ -268,16 +291,30 @@ fn host_has_constraints(agent: &str) -> bool {
                 Err(_) => return true,
             }
         }
-        for name in ["settings.json", "settings.local.json", "cli-config.json"] {
+        for name in [
+            "settings.json",
+            "settings.local.json",
+            "cli-config.json",
+            "config.json",
+            "config.toml",
+        ] {
             match std::fs::read_to_string(dir.join(name)) {
                 Ok(text) => {
-                    match serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
-                        Ok(value) => {
+                    let text = text.trim_start_matches('\u{feff}');
+                    let parsed = if name.ends_with(".toml") {
+                        toml::from_str::<toml::Value>(text)
+                            .ok()
+                            .and_then(|v| serde_json::to_value(v).ok())
+                    } else {
+                        serde_json::from_str::<Value>(text).ok()
+                    };
+                    match parsed {
+                        Some(value) => {
                             if restricted(&value) {
                                 return true;
                             }
                         }
-                        Err(_) => return true,
+                        None => return true,
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
