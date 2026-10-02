@@ -55,6 +55,7 @@ mod rtk_filters;
 mod session_audit;
 mod settings_cli;
 mod shared_context;
+mod shell_cli;
 mod token_metrics;
 mod update_cli;
 
@@ -152,6 +153,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Run a shell command without filtering or usage tracking.
+    Run(shell_cli::Options),
     /// Check releases or explicitly install a checksum-verified binary.
     Update(update_cli::Options),
     /// Verify installed agent hooks, plugins and guidance without modifying files.
@@ -1357,6 +1360,12 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
     match cli.command {
+        Commands::Run(options) => {
+            let code = shell_cli::run(options)?;
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
         Commands::Update(options) => update_cli::run(options).await?,
         Commands::Verify(options) => integration_doctor::run(options)?,
         Commands::Config(options) => settings_cli::run(options)?,
