@@ -49,7 +49,7 @@ Codex always uses user config, including with `--scope project`):
 lm-resizer install --client all --scope project --project-dir .
 ```
 
-The Codex installer replaces an existing `[mcp_servers.lm_resizer]` table without a backup. Save your user configuration first. `--scope project` with `--client all` does not isolate Codex configuration to the repository.
+Run the project commands from your repository directory (`.`), or replace `.` with its actual path. The Codex installer replaces an existing `[mcp_servers.lm_resizer]` table without a backup. Save your user configuration first. `--scope project` with `--client all` does not isolate Codex configuration to the repository.
 
 Check the environment:
 
@@ -154,3 +154,9 @@ lm-resizer tee read <tee-file-name>
 
 Use `tee` only when you need the original raw output that was compressed out of
 the agent-facing response.
+
+`stats` records bytes saved by `exec` and MCP proxy output filtering. Its `estimated_tokens_saved` values are
+the heuristic **bytes saved / 4**, not a tokenizer measurement or an API billing
+measurement. JSON includes this method in `exec_history.token_estimation`;
+Markdown explains it beside the estimate. The benchmark's `o200k_base` token
+counts are separate measurements.
