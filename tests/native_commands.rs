@@ -66,3 +66,28 @@ fn gain_alias_reports_exact_tracking_fields() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["exec_history"]["commands"], 0);
 }
+
+#[test]
+fn pipe_filters_without_executing_and_preserves_errors_and_exit_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+        .env("LM_RESIZER_STATE_DIR", dir.path())
+        .args(["pipe", "--filter", "pytest", "--exit-code", "2", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let raw =
+        "ERROR collecting a.py\nModuleNotFoundError: missing dependency\n457 errors in 5.44s\n";
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(raw.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["output"], raw);
+    assert_eq!(value["exit_code"], 2);
+}

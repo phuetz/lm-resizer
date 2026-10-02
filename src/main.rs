@@ -135,6 +135,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Filter stdin without executing any command; accepts RTK pipe filter names.
+    Pipe {
+        #[arg(short, long)]
+        filter: String,
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value_t = 0)]
+        exit_code: i32,
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
     /// Expand a LMR-LINES/2 view from stdin or a file, without accessing tee.
     Expand {
         #[arg(short, long)]
@@ -1387,6 +1400,42 @@ async fn run(cli: Cli) -> Result<()> {
                         );
                     }
                 }
+            }
+        }
+        Commands::Pipe {
+            filter,
+            input,
+            json,
+            exit_code,
+            store,
+        } => {
+            let command = pipe_filter_command(&filter)
+                .context("unknown pipe filter; use a supported RTK pipe filter name")?;
+            let raw = read_input(input.as_deref()).await?;
+            let store = open_store(store)?;
+            let started = Instant::now();
+            let mut report =
+                process_captured_output(&command, &raw, exit_code, false, "", store.as_ref())?;
+            report.command = format!("pipe --filter {filter}");
+            report.tee_hint = tee_raw_output_if_useful(&raw, &report.output)?;
+            if let Some(hint) = &report.tee_hint {
+                if !report.output.ends_with('\n') {
+                    report.output.push('\n');
+                }
+                report.output.push_str(hint);
+                report.output.push('\n');
+                report.tokens = TokenCounts::measure(&raw, &report.output);
+                report.compressed_bytes = report.output.len();
+                report.bytes_saved = raw.len().saturating_sub(report.output.len());
+            }
+            record_exec_history(&report, started.elapsed())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.output);
+            }
+            if exit_code != 0 {
+                std::process::exit(exit_code);
             }
         }
         Commands::Expand { input } => {
@@ -2835,6 +2884,29 @@ fn shell_join(args: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn pipe_filter_command(name: &str) -> Option<Vec<String>> {
+    let command: &[&str] = match name {
+        "cargo-test" | "cargo" => &["cargo", "test"],
+        "pytest" => &["pytest"],
+        "vitest" => &["vitest"],
+        "grep" | "rg" => &["rg"],
+        "find" | "fd" => &["find"],
+        "git-log" => &["git", "log"],
+        "git-diff" => &["git", "diff"],
+        "git-status" => &["git", "status"],
+        "phpunit" | "pest" | "paratest" | "php-test" => &["phpunit"],
+        "ecs" | "pint" | "phpstan" => &["phpstan"],
+        "prettier" => &["prettier"],
+        "ctest" => &["ctest"],
+        // These inputs may be JSON or text. The conservative generic view
+        // preserves every row, including formats native RTK expects as JSON.
+        "go-test" | "go-build" | "tsc" | "mypy" | "ruff-check" | "ruff-format"
+        | "sqlfluff-lint" | "log" => &["pipe-raw"],
+        _ => return None,
+    };
+    Some(command.iter().map(|word| (*word).to_string()).collect())
 }
 
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {

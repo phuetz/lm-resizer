@@ -237,8 +237,8 @@ pub fn expand(view: &str) -> anyhow::Result<String> {
         }
         if record == "!0" || record == "!1" {
             let rest: Vec<_> = records.collect();
-            if !rest.is_empty()
-                && !(rest.len() == 1 && rest[0].starts_with("[raw: ") && rest[0].ends_with(']'))
+            if !(rest.is_empty()
+                || rest.len() == 1 && rest[0].starts_with("[raw: ") && rest[0].ends_with(']'))
             {
                 bail!("unexpected records after end of reversible view");
             }
