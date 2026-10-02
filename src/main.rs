@@ -2567,30 +2567,42 @@ fn split_shell_words(segment: &str) -> Option<Vec<String>> {
     let mut in_single = false;
     let mut in_double = false;
     let mut escaped = false;
+    let mut has_word = false;
 
     for ch in segment.chars() {
         if escaped {
             current.push(ch);
+            has_word = true;
             escaped = false;
             continue;
         }
         match ch {
             '\\' if !in_single => escaped = true,
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => {
+                in_single = !in_single;
+                has_word = true;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                has_word = true;
+            }
             ch if ch.is_whitespace() && !in_single && !in_double => {
-                if !current.is_empty() {
+                if has_word {
                     words.push(std::mem::take(&mut current));
+                    has_word = false;
                 }
             }
-            _ => current.push(ch),
+            _ => {
+                current.push(ch);
+                has_word = true;
+            }
         }
     }
 
     if escaped || in_single || in_double {
         return None;
     }
-    if !current.is_empty() {
+    if has_word {
         words.push(current);
     }
     Some(words)
@@ -2599,7 +2611,9 @@ fn split_shell_words(segment: &str) -> Option<Vec<String>> {
 fn shell_join(args: &[String]) -> String {
     args.iter()
         .map(|arg| {
-            if arg.chars().all(|c| {
+            if arg.is_empty() {
+                String::from("\"\"")
+            } else if arg.chars().all(|c| {
                 c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '\\' | ':')
             }) {
                 arg.clone()
@@ -3652,7 +3666,7 @@ fn filter_git_status(raw: &str) -> String {
         let trimmed = line.trim();
         if trimmed.is_empty()
             || trimmed.starts_with("(use ")
-            || trimmed.starts_with("use ")
+            || trimmed.starts_with("use \"git ")
             || trimmed.starts_with("no changes added")
         {
             skipped += 1;
@@ -4105,8 +4119,12 @@ fn filter_tsc(raw: &str) -> String {
     let mut skipped = 0usize;
 
     for line in raw.lines() {
-        if let Some((file, rest)) = line.split_once('(') {
-            if rest.contains("): error TS") || rest.contains("): warning TS") {
+        if let Some(pos) = line
+            .find("): error TS")
+            .or_else(|| line.find("): warning TS"))
+        {
+            if let Some(open_paren_idx) = line[..pos].rfind('(') {
+                let file = &line[..open_paren_idx];
                 by_file
                     .entry(file.to_string())
                     .or_default()
@@ -4114,6 +4132,7 @@ fn filter_tsc(raw: &str) -> String {
                 continue;
             }
         }
+
         if line.contains("Found 0 errors") {
             return "TypeScript: no errors\n".to_string();
         }
@@ -9238,6 +9257,15 @@ mod tests {
     use lm_resizer_core::ccr::InMemoryCcrStore;
 
     #[test]
+    fn filter_git_status_keeps_untracked_file_named_use() {
+        let input = "On branch main\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\tuse cases.md\n\tuse-me.txt\n\nnothing added to commit but untracked files present (use \"git add\" to track)\n";
+        let filtered = filter_git_status(input);
+        assert!(filtered.contains("use cases.md"));
+        assert!(filtered.contains("use-me.txt"));
+        assert!(!filtered.contains("(use \"git add <file>...\" to include"));
+    }
+
+    #[test]
     fn codex_config_replaces_existing_table() {
         let existing = r#"model = "gpt-test"
 
@@ -9260,6 +9288,20 @@ command = "node"
         assert!(config.contains("command = \"lm-resizer.exe\""));
         assert!(config.contains("\"--store\""));
         assert!(!config.contains("command = \"old\""));
+    }
+
+    #[test]
+    fn split_shell_words_keeps_empty_quoted_argument() {
+        assert_eq!(
+            split_shell_words("grep -rn \"\" src").unwrap(),
+            vec!["grep", "-rn", "", "src"]
+        );
+        let report = rewrite_shell_report("grep -rn \"\" src");
+        assert!(
+            report.rewritten.contains("grep -rn \"\" src"),
+            "Rewritten command does not contain empty quotes: {}",
+            report.rewritten
+        );
     }
 
     #[test]
@@ -10358,6 +10400,15 @@ expected = "error: bad\n"
         assert!(filtered.contains("TypeScript: 2 diagnostics in 1 files"));
         assert!(filtered.contains("src/a.ts: 2 diagnostics"));
         assert!(filtered.contains("TS2322"));
+    }
+
+    #[test]
+    fn filter_tsc_keeps_parenthesised_paths() {
+        let raw = "app/(auth)/login/page.tsx(3,1): error TS2304: x\napp/(shop)/cart/page.tsx(1,1): error TS2304: y\n";
+        let filtered = filter_tsc(raw);
+        assert!(filtered.contains("app/(auth)/login/page.tsx: 1 diagnostics"));
+        assert!(filtered.contains("app/(shop)/cart/page.tsx: 1 diagnostics"));
+        assert!(!filtered.contains("app/: "));
     }
 
     #[test]

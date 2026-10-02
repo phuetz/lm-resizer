@@ -28,7 +28,7 @@ irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.ps1 | iex
 
 On Linux and macOS, add `~/.local/bin` to `PATH` if the installer prompts you. The Windows installer updates the user `PATH`. `LM_RESIZER_INSTALL_DIR` selects another destination. To uninstall a prebuilt binary, remove it from that destination.
 
-### Build from source now
+### Build from source
 
 Rust **1.86.0 or newer** is required. Debian 13 ships Rust 1.85.1, which is too old: use **official rustup**, rather than only the distribution Cargo. The repository’s `rust-toolchain.toml` selects 1.86.0 through rustup’s commands and includes `rustfmt` and `clippy` for development checks. An explicit `cargo +stable` or `RUSTUP_TOOLCHAIN` can override this selection.
 
