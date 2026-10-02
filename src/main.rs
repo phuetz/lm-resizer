@@ -39,6 +39,7 @@ use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use walkdir::WalkDir;
 
 mod advice_cli;
+mod agent_hooks;
 mod agent_init;
 mod analytics_cli;
 mod lossless_filters;
@@ -577,6 +578,10 @@ enum Commands {
     },
     /// Native Codex/Claude hook handler. Reads event JSON from stdin and never blocks.
     Hook {
+        /// Native wire protocol client, or check for a non-executing preview.
+        mode: Option<String>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
         /// Agent client name.
         #[arg(long, default_value = "unknown")]
         client: String,
@@ -586,6 +591,11 @@ enum Commands {
         /// Emit machine-readable JSON.
         #[arg(long)]
         json: bool,
+    },
+    /// Inspect opt-in local hook rewrite audit records.
+    HookAudit {
+        #[arg(short, long, default_value_t = 7)]
+        since: u64,
     },
     /// Generate opt-in PATH shims that automatically route known commands through exec.
     InitShims {
@@ -2026,11 +2036,17 @@ async fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
+        Commands::HookAudit { since } => agent_hooks::audit_report(since)?,
         Commands::Hook {
+            mode,
+            command,
             client,
             event,
             json,
         } => {
+            if let Some(mode) = mode {
+                return agent_hooks::run(&mode, &command);
+            }
             // PreToolUse: rewrite a supported Bash command to run through `lm-resizer exec --`
             // (in-place output substitution, the rtk role). PostToolUse: measure-only telemetry.
             if event.eq_ignore_ascii_case("PreToolUse") {
