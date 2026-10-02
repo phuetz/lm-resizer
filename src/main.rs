@@ -1147,7 +1147,15 @@ fn provider_label(provider: ProviderKind) -> &'static str {
     }
 }
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(error) = run_on_cli_thread() {
+        // Keep contextual errors readable even when RUST_BACKTRACE is enabled.
+        eprintln!("Error: {error:#}");
+        std::process::exit(1);
+    }
+}
+
+fn run_on_cli_thread() -> Result<()> {
     // Clap's generated command builder has a large debug stack frame. Windows
     // gives the main thread only 1 MiB, so dispatch on a thread with an explicit
     // stack rather than depending on a platform-specific linker flag.
