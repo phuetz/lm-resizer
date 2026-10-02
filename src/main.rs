@@ -42,6 +42,7 @@ mod advice_cli;
 mod agent_hooks;
 mod agent_init;
 mod analytics_cli;
+mod history_admin;
 mod integration_doctor;
 mod lossless_filters;
 mod mcp_proxy;
@@ -896,6 +897,7 @@ struct RewriteShellSegment {
 
 #[derive(Debug, Serialize)]
 struct ExecHistoryRecord {
+    recovery_refs: Vec<String>,
     cwd: String,
     #[serde(flatten)]
     tokens: TokenCounts,
@@ -1650,6 +1652,9 @@ async fn run(cli: Cli) -> Result<()> {
             project,
             limit,
         } => {
+            if views.reset_if_requested()? {
+                return Ok(());
+            }
             let store = open_store(store)?;
             let mut exec_history = summarize_exec_history().unwrap_or_default();
             let mut recent = None;
@@ -4918,7 +4923,12 @@ fn run_tee_command(command: TeeCommand) -> Result<()> {
         }
         TeeCommand::Read { file } => {
             let path = resolve_tee_file(&file)?;
-            print!("{}", std::fs::read_to_string(path)?);
+            let content = std::fs::read_to_string(&path)?;
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                let _ =
+                    record_retrieval_feedback(name.get(..12).unwrap_or(name), content.len(), "tee");
+            }
+            print!("{content}");
         }
         TeeCommand::Purge { all, file, json } => {
             let report = purge_tee_files(all, file.as_deref())?;
@@ -5022,7 +5032,17 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     let dir = default_state_dir()?;
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("exec-history.jsonl");
+    let mut recovery_refs = report.cache_keys.clone();
+    if let Some(hint) = &report.tee_hint {
+        if let Some(reference) = hint
+            .strip_prefix("[raw: ")
+            .and_then(|s| s.strip_suffix(']'))
+        {
+            recovery_refs.push(reference.to_string());
+        }
+    }
     let record = ExecHistoryRecord {
+        recovery_refs,
         cwd: std::env::current_dir()?.to_string_lossy().into_owned(),
         tokens: report.tokens.clone(),
         timestamp_unix: unix_timestamp(),

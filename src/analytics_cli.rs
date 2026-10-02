@@ -14,6 +14,14 @@ pub enum Format {
 
 #[derive(Args, Default)]
 pub struct Views {
+    /// Archive statistics and start fresh; recovery originals remain available.
+    #[arg(long)]
+    reset: bool,
+    #[arg(long, requires = "reset")]
+    yes: bool,
+    /// Correlate recoveries to recorded output transformations.
+    #[arg(long)]
+    recalls: bool,
     #[arg(short = 'g', long)]
     graph: bool,
     #[arg(short = 'd', long)]
@@ -68,7 +76,39 @@ pub fn periods(content: &str, project: Option<&str>, kind: &str) -> Vec<Value> {
 }
 
 impl Views {
+    pub fn reset_if_requested(&self) -> Result<bool> {
+        if !self.reset {
+            return Ok(false);
+        }
+        println!(
+            "{}",
+            crate::history_admin::reset(&crate::default_state_dir()?, self.yes)?
+        );
+        Ok(true)
+    }
+
     pub fn enrich(&self, report: &mut Value, project: bool) -> Result<()> {
+        if self.recalls {
+            let dir = crate::default_state_dir()?;
+            let history = crate::history_admin::read(&dir, "exec-history.jsonl")?;
+            let history = if project {
+                let cwd = std::env::current_dir()?.to_string_lossy().into_owned();
+                history
+                    .lines()
+                    .filter(|line| {
+                        serde_json::from_str::<Value>(line).is_ok_and(|r| r["cwd"] == cwd)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                history
+            };
+            report["recalls"] = crate::history_admin::recalls(
+                &history,
+                &crate::history_admin::read(&dir, "retrieval-feedback.jsonl")?,
+            );
+        }
+
         if !(self.daily || self.weekly || self.monthly || self.all || self.graph || self.quota) {
             return Ok(());
         }
@@ -152,6 +192,9 @@ impl Views {
                 }
                 if let Some(graph) = report["graph"].as_str() {
                     println!("\n{graph}");
+                }
+                if let Some(recalls) = report.get("recalls") {
+                    println!("\nRecalls: {recalls}");
                 }
                 if let Some(quota) = report.get("quota") {
                     println!("\nQuota estimate: {quota}");
