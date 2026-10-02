@@ -15,6 +15,7 @@ function Invoke-Checked {
 }
 
 Invoke-Checked "source install docs" { node scripts/test-source-install-docs.cjs }
+Invoke-Checked "release path flags" { node scripts/test-release-paths.cjs }
 Invoke-Checked "cargo fmt --check" { cargo fmt --check }
 # `--workspace` is required to test all members since the root Cargo.toml doesn't define `default-members`.
 Invoke-Checked "cargo test --workspace --release" { cargo test --workspace --release }

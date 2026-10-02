@@ -7,7 +7,7 @@ if [ -z "$version" ]; then
   version="$(grep -m1 '^version = ' "$root/Cargo.toml" | sed 's/version = "\(.*\)"/\1/')"
 fi
 
-cargo build --release
+node "$root/scripts/build-release-artifact.cjs" native
 bin="$root/target/release/lm-resizer"
 if [ ! -x "$bin" ]; then
   printf >&2 '%s\n' "release binary not found: $bin"

@@ -8,7 +8,8 @@ if (-not $package) { throw "lm-resizer package metadata not found" }
 
 $version = $package.version
 $target = Join-Path $root "target\release\lm-resizer.exe"
-cargo build --release
+node (Join-Path $PSScriptRoot "build-release-artifact.cjs") native
+if ($LASTEXITCODE -ne 0) { throw "native release build failed" }
 if (-not (Test-Path $target)) { throw "release binary not found: $target" }
 
 powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "check-wasm-package.ps1")

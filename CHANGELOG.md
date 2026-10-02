@@ -7,6 +7,7 @@
 - Recette source corrigée après le test Debian : rustup officiel, clone explicite, prérequis C/C++ et parcours PowerShell. Rust minimal **1.86** ([`Cargo.toml`](Cargo.toml), [`rust-toolchain.toml`](rust-toolchain.toml)) ; le Rust système trop ancien doit être remplacé par la toolchain indiquée.
 - Archives allégées depuis v0.2.3, comprenant la documentation liée depuis les README et les skills utilisateur ([`scripts/package-release.sh`](scripts/package-release.sh), [`scripts/package-release.ps1`](scripts/package-release.ps1)).
 - Installation POSIX : fichiers SHA-256 sans saut de ligne final et avec CRLF acceptés ; fichier vide, archive altérée, nom incorrect et mauvaise version restent rejetés ([`install.sh`](install.sh), [`scripts/test-install-sha-format.sh`](scripts/test-install-sha-format.sh), [`scripts/test-install-binary.sh`](scripts/test-install-binary.sh)).
+- Les builds de paquetage natif et WASM remplacent les chemins personnels du constructeur par des préfixes neutres, y compris pour les dépendances Rust ([`scripts/build-release-artifact.cjs`](scripts/build-release-artifact.cjs), [`scripts/test-release-paths.cjs`](scripts/test-release-paths.cjs)).
 - La garde de release teste désormais tout le workspace ; les métadonnées de preuve reflètent cette commande ([`scripts/check-release.sh`](scripts/check-release.sh), [`scripts/check-release.ps1`](scripts/check-release.ps1), [`scripts/release-evidence.sh`](scripts/release-evidence.sh)).
 
 ### Récupération et diagnostics

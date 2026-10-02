@@ -5,6 +5,7 @@ root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$root"
 
 node scripts/test-source-install-docs.cjs
+node scripts/test-release-paths.cjs
 cargo fmt --check
 # `--workspace` is required to test all members since the root Cargo.toml doesn't define `default-members`.
 cargo test --workspace --release
