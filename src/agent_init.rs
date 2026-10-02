@@ -572,31 +572,7 @@ fn plugin_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>>
             edits.extend(owned_file(dir.join("plugins/lm-resizer-rewrite/plugin.yaml"),"name: lm-resizer-rewrite\nversion: '0.1.0'\ndescription: LM Resizer command rewriting\nhooks: [pre_tool_call]\nprovides_hooks: [pre_tool_call]\n",opts.uninstall)?);
             let path = dir.join("config.yaml");
             let before = read(&path)?;
-            let mut root: serde_yaml::Value = if before.trim().is_empty() {
-                serde_yaml::from_str("plugins: {enabled: []}")?
-            } else {
-                serde_yaml::from_str(&before)?
-            };
-            let mapping = root
-                .as_mapping_mut()
-                .context("Hermes config must be a YAML mapping")?;
-            let plugins = mapping
-                .entry(serde_yaml::Value::String("plugins".into()))
-                .or_insert(serde_yaml::from_str("enabled: []")?)
-                .as_mapping_mut()
-                .context("Hermes plugins must be a mapping")?;
-            let enabled = plugins
-                .entry(serde_yaml::Value::String("enabled".into()))
-                .or_insert(serde_yaml::Value::Sequence(vec![]))
-                .as_sequence_mut()
-                .context("Hermes plugins.enabled must be a list")?;
-            let name = serde_yaml::Value::String("lm-resizer-rewrite".into());
-            if opts.uninstall {
-                enabled.retain(|e| e != &name);
-            } else if !enabled.contains(&name) {
-                enabled.push(name);
-            }
-            let after = serde_yaml::to_string(&root)?;
+            let after = patch_hermes(&before, opts.uninstall)?;
             edits.push(Edit {
                 path,
                 before,
@@ -622,4 +598,77 @@ fn native_path(base: &Path, relative: &str, agent: &str, global: bool) -> PathBu
         }
     }
     base.join(relative)
+}
+
+// Edit only plugins.enabled in the concrete syntax tree. Validate its semantic
+// result independently, so unsupported YAML constructs abort the whole plan.
+fn patch_hermes(text: &str, uninstall: bool) -> Result<String> {
+    use serde_yaml::Value as Yaml;
+    use std::str::FromStr;
+    let mut expected: Yaml = serde_yaml::from_str(text)?;
+    if expected.is_null() {
+        expected = Yaml::Mapping(Default::default());
+    }
+    let original = expected.clone();
+    let mapping = expected
+        .as_mapping_mut()
+        .context("Hermes config must be a YAML mapping")?;
+    let plugins = mapping
+        .entry(Yaml::String("plugins".into()))
+        .or_insert(Yaml::Mapping(Default::default()))
+        .as_mapping_mut()
+        .context("Hermes plugins must be a mapping")?;
+    let enabled = plugins
+        .entry(Yaml::String("enabled".into()))
+        .or_insert(Yaml::Sequence(vec![]))
+        .as_sequence_mut()
+        .context("Hermes plugins.enabled must be a list")?;
+    let name = Yaml::String("lm-resizer-rewrite".into());
+    let indices: Vec<_> = enabled
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| (v == &name).then_some(i))
+        .collect();
+    if uninstall {
+        if indices.is_empty() {
+            return Ok(text.into());
+        }
+        enabled.retain(|v| v != &name);
+    } else if indices.is_empty() {
+        enabled.insert(0, name);
+    }
+    if expected == original {
+        return Ok(text.into());
+    }
+    let yaml = yaml_edit::YamlFile::from_str(text).context("parse lossless Hermes YAML")?;
+    let document = yaml.ensure_document();
+    let root = document
+        .as_mapping()
+        .context("Hermes YAML root must be editable")?;
+    if root.get_mapping("plugins").is_none() {
+        root.set("plugins", yaml_edit::Mapping::new());
+    }
+    let plugins = root
+        .get_mapping("plugins")
+        .context("Hermes plugins must be editable")?;
+    if plugins.get_sequence("enabled").is_none() {
+        plugins.set("enabled", yaml_edit::Sequence::new());
+    }
+    let enabled = plugins
+        .get_sequence("enabled")
+        .context("Hermes enabled list must be editable")?;
+    if uninstall {
+        for i in indices.into_iter().rev() {
+            enabled.remove(i);
+        }
+    } else {
+        enabled.insert(0, "lm-resizer-rewrite");
+    }
+    let after = yaml.to_string();
+    let parsed: Yaml =
+        serde_yaml::from_str(&after).context("invalid edited Hermes YAML; left untouched")?;
+    if parsed != expected {
+        bail!("Hermes YAML edit changed unrelated data; left untouched");
+    }
+    Ok(after)
 }

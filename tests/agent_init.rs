@@ -330,3 +330,33 @@ fn vibe_preserves_existing_array_and_refuses_modified_or_duplicate_owned_blocks(
         assert_eq!(std::fs::read_to_string(&path).unwrap(), invalid);
     }
 }
+
+#[test]
+fn hermes_preserves_yaml_comments_order_and_other_plugin_entries() {
+    for original in [
+        "# personal settings\nmodel: 'custom' # keep model\nplugins:\n  enabled: # keep list\n    - other # keep plugin\n# end\n",
+        "# flow style\nplugins: {enabled: [other]} # keep flow\nmodel: custom\n",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join(".hermes/config.yaml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, original).unwrap();
+        let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+            .env("HOME", root.path()).env_remove("HERMES_HOME").current_dir(root.path())
+            .args(["init", "--agent", "hermes", "--global"]).args(args).output().unwrap();
+        for args in [&[][..], &["--uninstall"][..]] {
+            let out = run(args);
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            let content = std::fs::read_to_string(&path).unwrap();
+            for comment in original.lines().filter_map(|line| line.split_once('#').map(|(_, c)| c)) {
+                assert!(content.contains(&format!("#{comment}")), "lost comment {comment}: {content}");
+            }
+            assert_eq!(content.find("model:").unwrap() < content.find("plugins:").unwrap(), original.find("model:").unwrap() < original.find("plugins:").unwrap());
+            let data: serde_yaml::Value = serde_yaml::from_str(&content).unwrap();
+            assert_eq!(data["model"], "custom");
+            let enabled = data["plugins"]["enabled"].as_sequence().unwrap();
+            assert!(enabled.contains(&serde_yaml::Value::String("other".into())));
+            assert_eq!(enabled.len(), if args.is_empty() { 2 } else { 1 });
+        }
+    }
+}
