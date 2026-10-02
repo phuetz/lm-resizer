@@ -6567,12 +6567,16 @@ keep_block_after_matching = [
 ]
 keep_lines_matching = [
   "^--- FAIL:",
+  "^\\s*--- FAIL:",
   "^FAIL",
   "^ok\\s",
   "^\\?",
   "panic:",
   "Error Trace:",
   "error",
+  "^\\s+\\S+\\.go:[0-9]+:",
+  "^\\./?\\S+\\.go:[0-9]+:[0-9]+:",
+  "^# ",
 ]
 max_lines = 160
 on_empty = "go test: passed"
@@ -9174,6 +9178,71 @@ impl axum::response::IntoResponse for HttpError {
 mod tests {
     use super::*;
     use lm_resizer_core::ccr::InMemoryCcrStore;
+
+    #[test]
+    fn go_test_keeps_assertion_line_and_subtest_fail() {
+        let output = vec![
+            "=== RUN   TestSum".to_string(),
+            "=== RUN   TestSum/neg".to_string(),
+            "    --- FAIL: TestSum/neg (0.00s)".to_string(),
+            "        sum_test.go:12: got 3, want 4".to_string(),
+            "--- FAIL: TestSum (0.00s)".to_string(),
+            "FAIL".to_string(),
+            "FAIL\texample.com/m/sum\t0.004s".to_string(),
+        ];
+        let (name, res) = filter_command_output(
+            &["go".to_string(), "test".to_string(), "./...".to_string()],
+            &output.join("\n"),
+        );
+        assert_eq!(name, "toml:go-test");
+        assert!(
+            !res.contains("=== RUN"),
+            "le bruit RUN ne doit pas rester : {res}"
+        );
+        assert!(
+            res.contains("sum_test.go:12: got 3, want 4"),
+            "res was: {}",
+            res
+        );
+        assert!(res.contains("--- FAIL: TestSum/neg"), "res was: {}", res);
+    }
+
+    #[test]
+    fn go_test_keeps_compile_error_cause() {
+        let output = vec![
+            "# example.com/m/sum".to_string(),
+            "./sum.go:5:2: undefined: foo".to_string(),
+            "FAIL\texample.com/m/sum [build failed]".to_string(),
+        ];
+        let (name, res) = filter_command_output(
+            &["go".to_string(), "test".to_string(), "./...".to_string()],
+            &output.join("\n"),
+        );
+        assert!(name.starts_with("toml:go-test"));
+        assert!(
+            res.contains("./sum.go:5:2: undefined: foo"),
+            "res was: {}",
+            res
+        );
+        assert!(res.contains("# example.com/m/sum"), "res was: {}", res);
+    }
+
+    #[test]
+    fn go_test_green_run_stays_compact() {
+        let output = vec![
+            "?   \texample.com/m/empty\t[no test files]".to_string(),
+            "ok  \texample.com/m/sum\t0.004s".to_string(),
+        ];
+        let (name, res) = filter_command_output(
+            &["go".to_string(), "test".to_string(), "./...".to_string()],
+            &output.join("\n"),
+        );
+        assert!(name.starts_with("toml:go-test"));
+        assert_eq!(
+            res,
+            "?   \texample.com/m/empty\t[no test files]\nok  \texample.com/m/sum\t0.004s"
+        );
+    }
 
     #[test]
     fn codex_config_replaces_existing_table() {
