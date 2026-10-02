@@ -4,7 +4,7 @@
 //! Host-specific wire formats; execution and final approval remain with the host.
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::io::{Read, Write};
+use std::io::Read;
 
 pub fn response(agent: &str, value: &Value, exe: &str) -> Option<Value> {
     if agent == "copilot" && value.get("tool_name").is_none() {
@@ -126,14 +126,9 @@ pub fn run(agent: &str, command: &[String], check_agent: &str) -> Result<()> {
 fn audit(agent: &str, changed: bool, value: Option<&Value>) -> Result<()> {
     let path = crate::default_state_dir()?.join("hook-audit.jsonl");
     std::fs::create_dir_all(path.parent().unwrap())?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(
-        file,
-        "{}",
-        json!({"timestamp_unix":crate::unix_timestamp(),"agent":agent,"changed":changed,"session_id":value.and_then(|v|v.get("session_id")),"tool_use_id":value.and_then(|v|v.get("tool_use_id"))})
+    crate::journal::append(
+        &path,
+        &json!({"timestamp_unix":crate::unix_timestamp(),"agent":agent,"changed":changed,"session_id":value.and_then(|v|v.get("session_id")),"tool_use_id":value.and_then(|v|v.get("tool_use_id"))}),
     )?;
     Ok(())
 }

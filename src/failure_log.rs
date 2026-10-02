@@ -2,7 +2,6 @@
 //! from an unchanged output: unchanged output can be a valid filter result.
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::io::Write;
 
 pub fn record(error: &anyhow::Error) -> Result<()> {
     if std::env::var("LM_RESIZER_TRACKING").as_deref() == Ok("0") {
@@ -10,14 +9,9 @@ pub fn record(error: &anyhow::Error) -> Result<()> {
     }
     let dir = crate::default_state_dir()?;
     std::fs::create_dir_all(&dir)?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join("command-errors.jsonl"))?;
-    writeln!(
-        file,
-        "{}",
-        json!({"timestamp_unix":crate::unix_timestamp(),"cwd":std::env::current_dir().ok(),"command":crate::shell_join(&std::env::args().skip(1).collect::<Vec<_>>()),"reason":"cli_error","error":format!("{error:#}")})
+    crate::journal::append(
+        &dir.join("command-errors.jsonl"),
+        &json!({"timestamp_unix":crate::unix_timestamp(),"cwd":std::env::current_dir().ok(),"command":crate::shell_join(&std::env::args().skip(1).collect::<Vec<_>>()),"reason":"cli_error","error":format!("{error:#}")}),
     )?;
     Ok(())
 }

@@ -45,6 +45,7 @@ mod analytics_cli;
 mod failure_log;
 mod history_admin;
 mod integration_doctor;
+mod journal;
 mod learning_cli;
 mod lossless_filters;
 mod mcp_proxy;
@@ -5127,11 +5128,7 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
         bytes_saved: report.bytes_saved,
         duration_ms: elapsed.as_millis(),
     };
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(file, "{}", serde_json::to_string(&record)?)?;
+    journal::append(&path, &record)?;
     Ok(())
 }
 
@@ -5434,11 +5431,7 @@ fn record_retrieval_feedback(hash: &str, bytes: usize, source: &str) -> Result<(
         "bytes": bytes,
         "source": source,
     });
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(file, "{}", serde_json::to_string(&record)?)?;
+    journal::append(&path, &record)?;
     Ok(())
 }
 
@@ -7023,13 +7016,7 @@ fn record_proxy_history(
         "upstream_status": upstream_status,
         "provider_usage": stats.provider_usage,
     });
-    let line = serde_json::to_string(&record)?;
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_path)?;
-    writeln!(file, "{line}")?;
+    journal::append(&history_path, &record)?;
     Ok(())
 }
 

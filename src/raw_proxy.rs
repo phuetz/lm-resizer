@@ -34,11 +34,7 @@ pub fn run(argv: &[String]) -> Result<i32> {
         }
         let dir = crate::default_state_dir()?;
         std::fs::create_dir_all(&dir)?;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join("exec-history.jsonl"))?;
-        writeln!(file, "{row}")?;
+        crate::journal::append(&dir.join("exec-history.jsonl"), &row)?;
     }
     Ok(code)
 }
