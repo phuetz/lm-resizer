@@ -60,3 +60,11 @@ SHA-256 de toutes les entrées doivent correspondre.
 
 Les durées par étape sont écrites sur stderr. L'instrumentation est inactive
 par défaut. Comparer les performances hors compilation/tests concurrents.
+
+## Branche combinant performance et nouveaux filtres
+
+La comparaison `--before` impose une sortie identique; elle est pertinente pour
+un correctif de performance seul. Les vues réversibles modifient volontairement
+le format : utiliser `bench/real/run.py` pour leur oracle de conservation, et le
+banc présent sans `--before` pour les seuils temporels. Le relevé intégré publié
+est dans `bench/real/performance.json` (cinq essais par gros volume).

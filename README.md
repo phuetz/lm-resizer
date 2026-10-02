@@ -86,62 +86,36 @@ When distribution Rust is already installed, rustup may print `cannot install wh
 
 Cargo downloads dependencies into `~/.cargo` (`%USERPROFILE%\.cargo` on Windows) even when a build fails; rustup stores compilers in `.rustup`. These caches are separate from the `.local` install prefix. If Cargo is not 1.86.0 in this checkout, check PATH (`command -v cargo` in Bash, `Get-Command cargo` in PowerShell), `rustup show active-toolchain` and any `RUSTUP_TOOLCHAIN` override. Stop if `cargo install` fails: the examples and uninstall command below require a successfully installed binary.
 
-Try it on **real output** from this checkout. `exec` runs the child command, then prints its processed output. Normal child exit codes are preserved. A child terminated by a signal or a command that cannot be started returns 1; for a failing command, use `--raw-on-failure` if you need the complete failure output immediately.
+Try it on real output from this checkout. `exec` preserves normal child exit codes; on Unix a signal produces `128 + signal`. stdout and stderr are captured separately, combined with a protected `[stderr]` boundary, and their byte counts are available in JSON. Cross-stream chronology is not reconstructed.
 
 ~~~bash
-lm-resizer exec -- git log -20 '--format=Date: %ad%n%h %s' --date=short
+lm-resizer git log -20
+lm-resizer exec --raw-on-failure -- cargo test
 lm-resizer tee list
+lm-resizer gain --history --project
 ~~~
 
-Output excerpts captured on Debian 13 with Rust 1.86.0 at commit `86bf58f` (commit IDs, recovery filenames and paths will vary on your machine):
-
-`lm-resizer --version`:
-
-~~~text
-lm-resizer 0.2.4
-~~~
-
-`exec`: first three lines, removed-line summary and final recovery marker:
-
-~~~text
-86bf58f Livrer la documentation des jetons dans les archives binaires
-4694506 Corriger les avertissements Clippy dans les tests du workspace
-5a12cfb Éviter le débordement de pile du CLI de développement sous Windows
-... omitted 20 low-signal lines
-[raw: e6c2d124d10b]
-~~~
-
-`lm-resizer tee list`:
-
-~~~text
-e6c2d124d10b5924173b779b04b40df78dce01a9678d825a706afa3bd3ad556a.log 1786 bytes /qa/debian-home/.local/state/lm-resizer/tee/e6c2d124d10b5924173b779b04b40df78dce01a9678d825a706afa3bd3ad556a.log
-~~~
-
-A small result can stay unchanged, with no saving or recovery marker:
+Repetitive output can use `LMR-LINES/2`: prefixes and earlier lines are referenced without truncating them. Git dates, full hashes and diff lines remain reconstructible. Successful test rows can be summarized by suite counts; diagnostics remain complete. To restore a saved view without the original command:
 
 ~~~bash
-lm-resizer exec -- git rev-parse --short HEAD
+lm-resizer expand -i view.txt
 ~~~
 
-~~~text
-86bf58f
-~~~
+A shortened view includes a `[raw: …]` recovery identifier. Use `tee read` with that identifier. Small output can remain unchanged and create no tee entry. Recovery currently covers UTF-8 text: non-UTF-8 bytes are replaced during decoding. Tee files remain local until deletion or purge; CCR entries expire after **30 minutes by default**. Export evidence before expiry if it must last.
 
-The first command reads 20 actual Git commits and removes their date lines from the agent view. When output is shortened, `exec` may show a `[raw: …]` identifier. Pass that identifier to `tee read` to retrieve the original text. Recovery covers UTF-8 text: non-UTF-8 bytes are replaced during decoding, and stdout/stderr are combined. Tee files remain local until removed or purged. CCR entries expire after **30 minutes by default**, even if the database file is kept; retrieve and export them before expiry for lasting evidence. Output can also remain unchanged when compression would not help.
-
-From Bash, retrieve the first listed original (in this fresh installation, the Git command above):
+From Bash, retrieve a listed original when one exists:
 
 ~~~bash
 tee_listing=$(lm-resizer tee list)
 tee_file=${tee_listing%% *}
-lm-resizer tee read "$tee_file"
+if [ -n "$tee_file" ]; then lm-resizer tee read "$tee_file"; fi
 ~~~
 
 In PowerShell, select the file from the JSON list:
 
 ~~~powershell
 $teeFiles = lm-resizer tee list --json | ConvertFrom-Json
-lm-resizer tee read $teeFiles.files[0].name
+if ($teeFiles.files.Count -gt 0) { lm-resizer tee read $teeFiles.files[0].name }
 ~~~
 
 If several files are listed, use the filename or `[raw: …]` identifier for the command you need.
@@ -183,36 +157,33 @@ This writes project files and your account's Codex configuration, including with
 
 New execution history records persist both counts. Stats keep existing byte counters and JSON fields, and add measured token totals and `measured_commands` / `unmeasured_commands`. Old records lack the text needed for recounting: their `estimated_tokens_saved` remains explicitly labeled **legacy bytes / 4**, separate from measured totals. `discover`, `discover-sessions`, `eval` and `learn` tokenize available original and filtered text; these are prospective filter savings. For JSON compatibility, `estimated_tokens_saved` in discovery/evaluation is an alias of the exact prospective `tokens_saved`, not a byte estimate.
 
-[Counting method, compatibility and reproduction](docs/TOKEN-STATISTICS.md). The benchmark below already uses `o200k_base`; its historical fixture results are unchanged.
+[Counting method, compatibility and reproduction](docs/TOKEN-STATISTICS.md). The real benchmark below uses both `o200k_base` and `cl100k_base`.
 
-## Measured against RTK and Headroom
+## Measured on real commands
 
-**Replayed 2026-09-30** from merge commit `df30334`, on Linux x86_64. The versioned measurement JSON does not record CPU or RAM. The comparison uses RTK 0.50.0, Headroom 0.39.1 with ONNX Runtime 1.24.4, and the same 22 input fixtures. `o200k_base` counts output tokens. A saving counts only when every fact in the case's stated oracle survives; otherwise its *qualified saving* is zero. Three fixtures are captured from real tools; the others are synthetic. [Method, fixtures and full results](bench/README.md).
+**2026-10-02, Linux x86_64:** 30 commands across pinned ripgrep, FastAPI and TypeScript repositories, plus five comparison cases. Python tiktoken 0.14.0 counts actual outputs with both encodings. These are unweighted per-command savings, including recovery markers. RTK's savings remain counted even when its output fails a fact check.
 
-| Result across 22 cases | LM Resizer | RTK | Headroom |
+| Encoding / statistic | LMR before | LMR after | RTK 0.50.0 |
 |---|---:|---:|---:|
-| Sole wins on qualified saving | 13 | 2 | 0 |
-| Shared win | 1 with RTK | 1 with LM Resizer | 0 |
-| Median qualified saving across cases | 74.7% | 0.0% | 0.0% |
-| Complete stated oracle | 22/22 | 15/22 | 22/22 |
+| cl100k median | 0.00% | 3.74% | 43.28% |
+| cl100k mean | 7.94% | 13.21% | 47.33% |
+| o200k median | 0.00% | 3.75% | 43.21% |
+| o200k mean | 7.96% | 13.26% | 47.41% |
 
-Six further cases have **no qualified gain from any tool**. Examples below use the measured input token count and qualified saving; zero can mean unchanged output or an incomplete oracle.
+LMR preserves **160,014/160,014 declared facts**, all 35 exit codes, and 24 changed originals recovered byte-for-byte from tee. The before views missed 359 facts under the strengthened oracle, which checks multiplicity. The grep regression was traced to `bb85e73`; the repair uses reversible views rather than restoring its old row limit.
 
-| Case | Input tokens | LM Resizer | RTK | Headroom | What happened |
-|---|---:|---:|---:|---:|---|
-| `cargo_ok` | 837 | 97% | 97% | 0% | LM Resizer and RTK tie. |
-| `logs` | 2,009 | 96% | 95% | 92% | All three retain the stated oracle. |
-| `dotnet_ok` | 111 | 50% | **81%** | 0% | RTK saves more. |
-| `git_diff` | 195 | **47%** (103 tokens remaining) | 36% (125 tokens remaining) | 0% | LM Resizer saves more. |
-| `compile_error` | 106 | 0% | **26%** | 0% | RTK saves more. |
-| Six source-code cases | 379–481 each | 0% | 0% | 0% | No measured saving. |
+**RTK still has much higher median savings.** On this corpus, its pytest view omits the `457 errors` collection count, and its recursive TypeScript listing omits `lib.dom.d.ts` and `checker.ts`. LMR keeps those facts. Retaining them costs tokens; feature parity and comparable median savings are **not achieved**.
 
-RTK's raw reductions on seven cases omit at least one required oracle fact and therefore count as zero qualified saving. These fixtures do not measure provider bills, coding-agent task success or performance on arbitrary real-world output. Latency depends on the machine and cache. See the [case-level data](bench/resultats.json) and [remaining misses](docs/KNOWN-MISSES.md).
+On the pinned TypeScript listing (2.65 MB), the integrated CLI takes a median **0.191 s**, maximum **0.200 s**, across five cold processes. The original real-command replay took **43.6 s** on this machine. The six large-output performance cases pass their strict thresholds; these measurements do not guarantee timing on other machines.
+
+[Reproduction and limitations](bench/real/README.md) · [Full before/after table](bench/real/RESULTATS.md) · [Feature inventory and remaining gaps](bench/real/PARITE-RTK.md) · [Performance benchmark](bench/perf/README.md).
+
+The previous mostly synthetic, “qualified savings” scoreboard is retained only as [historical evidence](bench/README.md), not as a current headline or a general claim. The real benchmark includes failed test commands and incomplete Python dependencies. RTK uses identical captures via `pipe` where available and live commands otherwise; those modes are labeled. A failed strict RTK oracle can also reflect an unrecognized reformulation, so its count is not presented as a universal semantic-loss measure.
 
 ## When not to use it
 
 - Do not treat a shortened view as a complete audit trail: inspect the saved original for security, compliance or subtle failures.
-- Do not expect savings on every input. The six source-code cases above stayed unchanged, and RTK beat LM Resizer on two measured cases (`dotnet_ok` and `compile_error`).
+- Do not expect savings on every input. Short commands and text with little repetition may stay unchanged.
 - Do not infer lower API bills or better agent decisions from output-token counts alone. Agent tasks and billing were not tested here.
 
 LM Resizer is Apache-2.0 licensed. [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)

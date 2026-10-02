@@ -1,15 +1,36 @@
 {
-  "label": "before-astra",
+  "label": "after-verified",
   "tokenizer": "0.14.0",
+  "binary_sha256": "3e8111fbc1d529f091dfdb1d4ff3f83729b0d787a36fbb58a20b5134801cb3d3",
+  "repositories": [
+    {
+      "name": "ripgrep",
+      "url": "https://github.com/BurntSushi/ripgrep",
+      "commit": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+      "depth": 21
+    },
+    {
+      "name": "fastapi",
+      "url": "https://github.com/fastapi/fastapi",
+      "commit": "5f9fc5c59a9bb54608aa35376715f3ba9708188e",
+      "depth": 21
+    },
+    {
+      "name": "TypeScript",
+      "url": "https://github.com/microsoft/TypeScript",
+      "commit": "09b1db0617311f3b39f165bb3480c0ce2f718b27",
+      "depth": 21
+    }
+  ],
   "summary": {
     "cl100k_base": {
-      "median": 0.0,
-      "mean": 7.940607144185551,
+      "median": 3.744103406062149,
+      "mean": 13.209752160174105,
       "cases": 30
     },
     "o200k_base": {
-      "median": 0.0,
-      "mean": 7.95947201854331,
+      "median": 3.753012005318646,
+      "mean": 13.264499911631015,
       "cases": 30
     }
   },
@@ -28,24 +49,26 @@
       "stdout_sha256": "d96edfde732a2f98573ec41f57951cbb30ed926cc4d4cdc25ed589e6e2a73563",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 9532,
-      "output_bytes": 8073,
-      "replay_seconds": 0.02801943101803772,
-      "exec_seconds": 0.2896065829845611,
-      "added_seconds": 0.2615871519665234,
-      "filter": "git_log",
+      "output_bytes": 8886,
+      "replay_seconds": 0.029379822983173653,
+      "exec_seconds": 0.09842683401075192,
+      "added_seconds": 0.06904701102757826,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 2982,
-          "output": 2479
+          "output": 2846
         },
         "o200k_base": {
           "raw": 2973,
-          "output": 2468
+          "output": 2836
         }
       },
       "facts": 183,
-      "missing_count": 20,
-      "exit_preserved": true
+      "missing_count": 0,
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "ripgrep-diff",
@@ -61,24 +84,26 @@
       "stdout_sha256": "8097c54fc84106a3c297a69361930ab841e97a87b0f390089be8cc5bbbfe363e",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 668,
-      "output_bytes": 271,
-      "replay_seconds": 0.017497371009085327,
-      "exec_seconds": 0.18117089799488895,
-      "added_seconds": 0.16367352698580362,
-      "filter": "diff_summary",
+      "output_bytes": 668,
+      "replay_seconds": 0.03152328499709256,
+      "exec_seconds": 0.07827973301755264,
+      "added_seconds": 0.046756448020460084,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 227,
-          "output": 114
+          "output": 227
         },
         "o200k_base": {
           "raw": 228,
-          "output": 115
+          "output": 228
         }
       },
       "facts": 24,
-      "missing_count": 14,
-      "exit_preserved": true
+      "missing_count": 0,
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "ripgrep-status",
@@ -94,10 +119,10 @@
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 104,
       "output_bytes": 104,
-      "replay_seconds": 0.0260389769973699,
-      "exec_seconds": 0.19016707700211555,
-      "added_seconds": 0.16412810000474565,
-      "filter": "git_status",
+      "replay_seconds": 0.02738273501745425,
+      "exec_seconds": 0.08019855499151163,
+      "added_seconds": 0.052815819974057376,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 23,
@@ -110,7 +135,9 @@
       },
       "facts": 3,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "ripgrep-show",
@@ -128,10 +155,10 @@
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 265,
       "output_bytes": 265,
-      "replay_seconds": 0.018382850976195186,
-      "exec_seconds": 0.16181206601322629,
-      "added_seconds": 0.1434292150370311,
-      "filter": "git_show",
+      "replay_seconds": 0.033947212010389194,
+      "exec_seconds": 0.10427963000256568,
+      "added_seconds": 0.07033241799217649,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 103,
@@ -144,7 +171,9 @@
       },
       "facts": 7,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "ripgrep-ls",
@@ -159,24 +188,26 @@
       "stdout_sha256": "0317d3b6d77be3c492b674f48d058821dda6b8d422918d314a888b1e7890b4a3",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 1769,
-      "output_bytes": 1769,
-      "replay_seconds": 0.026442133996170014,
-      "exec_seconds": 0.19592310997541063,
-      "added_seconds": 0.1694809759792406,
-      "filter": "listing",
+      "output_bytes": 1395,
+      "replay_seconds": 0.026667877013096586,
+      "exec_seconds": 0.085372230008943,
+      "added_seconds": 0.05870435299584642,
+      "filter": "lossless:listing",
       "tokens": {
         "cl100k_base": {
           "raw": 837,
-          "output": 837
+          "output": 656
         },
         "o200k_base": {
           "raw": 837,
-          "output": 837
+          "output": 656
         }
       },
       "facts": 31,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "ripgrep-recursive",
@@ -191,24 +222,26 @@
       "stdout_sha256": "aa1d6fcc645c8a22e62d0fa565be98ee88e54a8202c7b1244faf9e6e09af90df",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 4670,
-      "output_bytes": 4664,
-      "replay_seconds": 0.015113470988580957,
-      "exec_seconds": 0.1284538540057838,
-      "added_seconds": 0.11334038301720284,
-      "filter": "listing",
+      "output_bytes": 4545,
+      "replay_seconds": 0.031701850006356835,
+      "exec_seconds": 0.09303816899773665,
+      "added_seconds": 0.06133631899137981,
+      "filter": "lossless:listing",
       "tokens": {
         "cl100k_base": {
           "raw": 1599,
-          "output": 1619
+          "output": 1563
         },
         "o200k_base": {
           "raw": 1639,
-          "output": 1659
+          "output": 1595
         }
       },
       "facts": 343,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "ripgrep-find",
@@ -223,24 +256,26 @@
       "stdout_sha256": "2f10dfa42ac2fbb3430caba910ee61a915b777b1a99e541d7b1472b7b77d333d",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 10353,
-      "output_bytes": 10353,
-      "replay_seconds": 0.022390906990040094,
-      "exec_seconds": 0.14565792397479527,
-      "added_seconds": 0.12326701698475517,
-      "filter": "listing",
+      "output_bytes": 7778,
+      "replay_seconds": 0.038531744008651,
+      "exec_seconds": 0.08637509698746726,
+      "added_seconds": 0.047843352978816256,
+      "filter": "lossless:paths",
       "tokens": {
         "cl100k_base": {
           "raw": 3600,
-          "output": 3600
+          "output": 2731
         },
         "o200k_base": {
           "raw": 3695,
-          "output": 3695
+          "output": 2771
         }
       },
       "facts": 351,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "ripgrep-grep",
@@ -259,10 +294,10 @@
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 929,
       "output_bytes": 929,
-      "replay_seconds": 0.023150190012529492,
-      "exec_seconds": 0.15493453000090085,
-      "added_seconds": 0.13178433998837136,
-      "filter": "search_results",
+      "replay_seconds": 0.03693320098682307,
+      "exec_seconds": 0.1013013550254982,
+      "added_seconds": 0.06436815403867513,
+      "filter": "lossless:search",
       "tokens": {
         "cl100k_base": {
           "raw": 243,
@@ -275,7 +310,9 @@
       },
       "facts": 9,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "ripgrep-cat",
@@ -290,24 +327,26 @@
       "stdout_sha256": "779953a821d814ba7f66877d0e581f2a7d7b44099b2cd5c6c7a7271b517ebd1f",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 246353,
-      "output_bytes": 246353,
-      "replay_seconds": 0.016448273992864415,
-      "exec_seconds": 0.16662794700823724,
-      "added_seconds": 0.15017967301537283,
-      "filter": "file-read",
+      "output_bytes": 190882,
+      "replay_seconds": 0.03215904600801878,
+      "exec_seconds": 0.10018764098640531,
+      "added_seconds": 0.06802859497838654,
+      "filter": "lossless:file",
       "tokens": {
         "cl100k_base": {
           "raw": 63962,
-          "output": 63962
+          "output": 51895
         },
         "o200k_base": {
           "raw": 63937,
-          "output": 63937
+          "output": 51864
         }
       },
       "facts": 1,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "ripgrep-test",
@@ -322,24 +361,26 @@
       "stdout_sha256": "c36d631b17472e70b59066afa383b158c6ca7d903892fa0f411ebd1b8df4bc89",
       "stderr_sha256": "2a8f4a6c3c66506f77683512cfbafe33d4bff0b07e8cb00c0ea8cce9103992c6",
       "raw_bytes": 19055,
-      "output_bytes": 19065,
-      "replay_seconds": 0.022665362019324675,
-      "exec_seconds": 0.13502520599286072,
-      "added_seconds": 0.11235984397353604,
-      "filter": "cargo_test_diagnostics",
+      "output_bytes": 1063,
+      "replay_seconds": 0.019877828017342836,
+      "exec_seconds": 0.09784892402240075,
+      "added_seconds": 0.07797109600505792,
+      "filter": "lossless:cargo",
       "tokens": {
         "cl100k_base": {
           "raw": 5064,
-          "output": 5064
+          "output": 322
         },
         "o200k_base": {
           "raw": 5081,
-          "output": 5081
+          "output": 325
         }
       },
       "facts": 20,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "fastapi-log",
@@ -355,24 +396,26 @@
       "stdout_sha256": "18b955abb4dab8ab9cb3a1d5fb3b2bd59b6fc537a11123cfb2eee32a319e5d2c",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 5884,
-      "output_bytes": 4837,
-      "replay_seconds": 0.016209435008931905,
-      "exec_seconds": 0.13604957700590603,
-      "added_seconds": 0.11984014199697413,
-      "filter": "git_log",
+      "output_bytes": 3354,
+      "replay_seconds": 0.036169211991364136,
+      "exec_seconds": 0.09214135000365786,
+      "added_seconds": 0.055972138012293726,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 2190,
-          "output": 1750
+          "output": 1437
         },
         "o200k_base": {
           "raw": 2172,
-          "output": 1732
+          "output": 1419
         }
       },
       "facts": 110,
-      "missing_count": 20,
-      "exit_preserved": true
+      "missing_count": 0,
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "fastapi-diff",
@@ -388,24 +431,26 @@
       "stdout_sha256": "2c4c567c8cd64671746355e5d93179ca3195c28e01190d7a4f08d0b93c6e96c5",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 887,
-      "output_bytes": 282,
-      "replay_seconds": 0.02582006700686179,
-      "exec_seconds": 0.17917760999989696,
-      "added_seconds": 0.15335754299303517,
-      "filter": "diff_summary",
+      "output_bytes": 887,
+      "replay_seconds": 0.026347637991420925,
+      "exec_seconds": 0.06132759401225485,
+      "added_seconds": 0.034979956020833924,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 259,
-          "output": 93
+          "output": 259
         },
         "o200k_base": {
           "raw": 279,
-          "output": 100
+          "output": 279
         }
       },
       "facts": 10,
-      "missing_count": 6,
-      "exit_preserved": true
+      "missing_count": 0,
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "fastapi-status",
@@ -421,10 +466,10 @@
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 104,
       "output_bytes": 104,
-      "replay_seconds": 0.0182159079995472,
-      "exec_seconds": 0.14020385697949678,
-      "added_seconds": 0.12198794897994958,
-      "filter": "git_status",
+      "replay_seconds": 0.02905057798488997,
+      "exec_seconds": 0.07688349098316394,
+      "added_seconds": 0.04783291299827397,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 23,
@@ -437,7 +482,9 @@
       },
       "facts": 3,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "fastapi-show",
@@ -455,10 +502,10 @@
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 291,
       "output_bytes": 291,
-      "replay_seconds": 0.0164610669889953,
-      "exec_seconds": 0.16652525498648174,
-      "added_seconds": 0.15006418799748644,
-      "filter": "git_show",
+      "replay_seconds": 0.033023594005499035,
+      "exec_seconds": 0.0729564999928698,
+      "added_seconds": 0.03993290598737076,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 106,
@@ -471,7 +518,9 @@
       },
       "facts": 7,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "fastapi-ls",
@@ -487,10 +536,10 @@
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 1144,
       "output_bytes": 1144,
-      "replay_seconds": 0.015924661012832075,
-      "exec_seconds": 0.14947936098906212,
-      "added_seconds": 0.13355469997623004,
-      "filter": "listing",
+      "replay_seconds": 0.025932109012501314,
+      "exec_seconds": 0.08693187998142093,
+      "added_seconds": 0.06099977096891962,
+      "filter": "lossless:listing",
       "tokens": {
         "cl100k_base": {
           "raw": 528,
@@ -503,7 +552,9 @@
       },
       "facts": 20,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "fastapi-recursive",
@@ -518,24 +569,26 @@
       "stdout_sha256": "3ef05164905325a202bd3adbddba7ec2da7a16e87baeed586c4383d6fb3aaf2f",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 117867,
-      "output_bytes": 117381,
-      "replay_seconds": 0.014691178017528728,
-      "exec_seconds": 0.2411064270127099,
-      "added_seconds": 0.22641524899518117,
-      "filter": "listing",
+      "output_bytes": 100847,
+      "replay_seconds": 0.04180050300783478,
+      "exec_seconds": 0.12721396001870744,
+      "added_seconds": 0.08541345701087266,
+      "filter": "lossless:listing",
       "tokens": {
         "cl100k_base": {
           "raw": 35089,
-          "output": 35108
+          "output": 31106
         },
         "o200k_base": {
           "raw": 35310,
-          "output": 35329
+          "output": 31274
         }
       },
       "facts": 4885,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "fastapi-find",
@@ -550,24 +603,26 @@
       "stdout_sha256": "b3803f58837179b3780c8d38ee2e9590b463a62b394db3cc350d26ebe0170557",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 225728,
-      "output_bytes": 225728,
-      "replay_seconds": 0.02507415899890475,
-      "exec_seconds": 0.3310460410139058,
-      "added_seconds": 0.30597188201500103,
-      "filter": "listing",
+      "output_bytes": 186205,
+      "replay_seconds": 0.03230217398959212,
+      "exec_seconds": 0.08769038898753934,
+      "added_seconds": 0.055388214997947216,
+      "filter": "lossless:paths",
       "tokens": {
         "cl100k_base": {
           "raw": 61190,
-          "output": 61190
+          "output": 48096
         },
         "o200k_base": {
           "raw": 61723,
-          "output": 61723
+          "output": 48613
         }
       },
       "facts": 4449,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "fastapi-grep",
@@ -585,24 +640,26 @@
       "stdout_sha256": "b416a38d89b481d108f56bfab263f68a1f705faa9d95ae5c7a766af06fcf33f6",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 2882,
-      "output_bytes": 2674,
-      "replay_seconds": 0.0250420980155468,
-      "exec_seconds": 0.19312642599106766,
-      "added_seconds": 0.16808432797552086,
-      "filter": "search_results",
+      "output_bytes": 2679,
+      "replay_seconds": 0.028540330997202545,
+      "exec_seconds": 0.07407961299759336,
+      "added_seconds": 0.04553928200039081,
+      "filter": "lossless:search",
       "tokens": {
         "cl100k_base": {
           "raw": 753,
-          "output": 742
+          "output": 703
         },
         "o200k_base": {
           "raw": 759,
-          "output": 747
+          "output": 708
         }
       },
       "facts": 26,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "fastapi-cat",
@@ -617,24 +674,26 @@
       "stdout_sha256": "967b9544fb7215df3bf425bbf7d8b766a27f387902df8085a7f7a3226bc0b375",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 709704,
-      "output_bytes": 709704,
-      "replay_seconds": 0.028500383981736377,
-      "exec_seconds": 0.6443628149863798,
-      "added_seconds": 0.6158624310046434,
-      "filter": "file-read",
+      "output_bytes": 688376,
+      "replay_seconds": 0.036030142015079036,
+      "exec_seconds": 0.1066927989886608,
+      "added_seconds": 0.07066265697358176,
+      "filter": "lossless:file",
       "tokens": {
         "cl100k_base": {
           "raw": 210240,
-          "output": 210240
+          "output": 204696
         },
         "o200k_base": {
           "raw": 223103,
-          "output": 223103
+          "output": 218244
         }
       },
       "facts": 1,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "fastapi-test",
@@ -649,24 +708,26 @@
       "stdout_sha256": "5aefa93ca6b595daefecdd0f5a04aae34f3088d1d9496e265323dd3ff118ab70",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 415245,
-      "output_bytes": 415245,
-      "replay_seconds": 0.034730765997665,
-      "exec_seconds": 0.3003815289994236,
-      "added_seconds": 0.2656507630017586,
-      "filter": "pytest:diagnostic-guard",
+      "output_bytes": 154874,
+      "replay_seconds": 0.02839750499697402,
+      "exec_seconds": 0.09304313000757247,
+      "added_seconds": 0.06464562501059845,
+      "filter": "lossless:pytest",
       "tokens": {
         "cl100k_base": {
           "raw": 101036,
-          "output": 101036
+          "output": 44311
         },
         "o200k_base": {
           "raw": 100772,
-          "output": 100772
+          "output": 44483
         }
       },
       "facts": 6324,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "TypeScript-log",
@@ -682,24 +743,26 @@
       "stdout_sha256": "903a3bf986ebf197129686441363774c3ff5e2494be4ecf9d38ea30fb23a68b2",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 4516,
-      "output_bytes": 3661,
-      "replay_seconds": 0.02587645300081931,
-      "exec_seconds": 0.1581196729966905,
-      "added_seconds": 0.1322432199958712,
-      "filter": "git_log",
+      "output_bytes": 4052,
+      "replay_seconds": 0.02034246700350195,
+      "exec_seconds": 0.10853214102098718,
+      "added_seconds": 0.08818967401748523,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 1632,
-          "output": 1229
+          "output": 1521
         },
         "o200k_base": {
           "raw": 1628,
-          "output": 1226
+          "output": 1517
         }
       },
       "facts": 82,
-      "missing_count": 20,
-      "exit_preserved": true
+      "missing_count": 0,
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "TypeScript-diff",
@@ -715,24 +778,26 @@
       "stdout_sha256": "a3c98e918bcc12cedc65dcbfb59731614e53546daa5f5f4cabb8e958ef40ff5c",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 5989,
-      "output_bytes": 4559,
-      "replay_seconds": 0.017286535003222525,
-      "exec_seconds": 0.1696950189943891,
-      "added_seconds": 0.15240848399116658,
-      "filter": "diff_summary",
+      "output_bytes": 5670,
+      "replay_seconds": 0.032278308004606515,
+      "exec_seconds": 0.08577105798758566,
+      "added_seconds": 0.05349274998297915,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 2152,
-          "output": 1778
+          "output": 2089
         },
         "o200k_base": {
           "raw": 2174,
-          "output": 1790
+          "output": 2111
         }
       },
       "facts": 200,
-      "missing_count": 20,
-      "exit_preserved": true
+      "missing_count": 0,
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "TypeScript-status",
@@ -748,10 +813,10 @@
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 100,
       "output_bytes": 100,
-      "replay_seconds": 0.02371367800515145,
-      "exec_seconds": 0.14132222399348393,
-      "added_seconds": 0.11760854598833248,
-      "filter": "git_status",
+      "replay_seconds": 0.03595336800208315,
+      "exec_seconds": 0.09790362798958085,
+      "added_seconds": 0.0619502599874977,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 23,
@@ -764,7 +829,9 @@
       },
       "facts": 3,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "TypeScript-show",
@@ -782,10 +849,10 @@
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 706,
       "output_bytes": 706,
-      "replay_seconds": 0.01692752298549749,
-      "exec_seconds": 0.16497342399088666,
-      "added_seconds": 0.14804590100538917,
-      "filter": "git_show",
+      "replay_seconds": 0.03573757500271313,
+      "exec_seconds": 0.10446784499799833,
+      "added_seconds": 0.0687302699952852,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 207,
@@ -798,7 +865,9 @@
       },
       "facts": 11,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "TypeScript-ls",
@@ -813,24 +882,26 @@
       "stdout_sha256": "8e757ab1b79129b9f1ce5c9dc06569804aa73e6a2f0c057b9cdd53a0404e1521",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 1607,
-      "output_bytes": 1607,
-      "replay_seconds": 0.022514429001603276,
-      "exec_seconds": 0.1453470520209521,
-      "added_seconds": 0.12283262301934883,
-      "filter": "listing",
+      "output_bytes": 1380,
+      "replay_seconds": 0.04590240100515075,
+      "exec_seconds": 0.09513306201552041,
+      "added_seconds": 0.04923066101036966,
+      "filter": "lossless:listing",
       "tokens": {
         "cl100k_base": {
           "raw": 744,
-          "output": 744
+          "output": 650
         },
         "o200k_base": {
           "raw": 745,
-          "output": 745
+          "output": 651
         }
       },
       "facts": 27,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "TypeScript-recursive",
@@ -845,24 +916,26 @@
       "stdout_sha256": "86326f7f74450781adff0d71614a0eb06892be8b4b3a14adfe809c43aafac8eb",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 2650550,
-      "output_bytes": 2649848,
-      "replay_seconds": 0.026310015993658453,
-      "exec_seconds": 43.62751334998757,
-      "added_seconds": 43.60120333399391,
-      "filter": "listing",
+      "output_bytes": 1504416,
+      "replay_seconds": 0.041029860003618523,
+      "exec_seconds": 0.2057602859858889,
+      "added_seconds": 0.1647304259822704,
+      "filter": "lossless:listing",
       "tokens": {
         "cl100k_base": {
           "raw": 621835,
-          "output": 621856
+          "output": 400471
         },
         "o200k_base": {
           "raw": 616572,
-          "output": 616593
+          "output": 397296
         }
       },
       "facts": 68412,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "TypeScript-find",
@@ -877,24 +950,26 @@
       "stdout_sha256": "c5bb9e594490269c0ede5624f2490f9e54e636b7061c061575f62a826a18ef1e",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 5678963,
-      "output_bytes": 5678963,
-      "replay_seconds": 0.028971446998184547,
-      "exec_seconds": 65.01110566701391,
-      "added_seconds": 64.98213422001572,
-      "filter": "listing",
+      "output_bytes": 4733369,
+      "replay_seconds": 0.08808216502075084,
+      "exec_seconds": 0.582790834014304,
+      "added_seconds": 0.49470866899355315,
+      "filter": "lossless:paths",
       "tokens": {
         "cl100k_base": {
           "raw": 1368105,
-          "output": 1368105
+          "output": 1036299
         },
         "o200k_base": {
           "raw": 1361069,
-          "output": 1361069
+          "output": 1029234
         }
       },
       "facts": 67761,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "TypeScript-grep",
@@ -912,24 +987,26 @@
       "stdout_sha256": "2d177b24ee99202f559df895e6307ca1a029f44fb8079623692a63b18920fab4",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 103655,
-      "output_bytes": 103655,
-      "replay_seconds": 0.03434320099768229,
-      "exec_seconds": 1.8884808569855522,
-      "added_seconds": 1.85413765598787,
-      "filter": "search_results:diagnostic-guard",
+      "output_bytes": 90050,
+      "replay_seconds": 0.05778337101219222,
+      "exec_seconds": 0.1724790649896022,
+      "added_seconds": 0.11469569397740997,
+      "filter": "lossless:search",
       "tokens": {
         "cl100k_base": {
           "raw": 25694,
-          "output": 25694
+          "output": 21685
         },
         "o200k_base": {
           "raw": 25868,
-          "output": 25868
+          "output": 21662
         }
       },
       "facts": 677,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "TypeScript-cat",
@@ -944,24 +1021,26 @@
       "stdout_sha256": "ffe288edd0eae68f65e4b81b5bbfd4fe5fbed62b55246dc140813078555050fb",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 3151774,
-      "output_bytes": 3151774,
-      "replay_seconds": 0.030426776997046545,
-      "exec_seconds": 2.2154864439798985,
-      "added_seconds": 2.185059666982852,
-      "filter": "file-read",
+      "output_bytes": 2782409,
+      "replay_seconds": 0.0474706279928796,
+      "exec_seconds": 0.2840955649735406,
+      "added_seconds": 0.236624936980661,
+      "filter": "lossless:file",
       "tokens": {
         "cl100k_base": {
           "raw": 593089,
-          "output": 593089
+          "output": 588121
         },
         "o200k_base": {
           "raw": 597267,
-          "output": 597267
+          "output": 591931
         }
       },
       "facts": 1,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "TypeScript-test",
@@ -976,24 +1055,26 @@
       "stdout_sha256": "36cf49c25ed6627fe73de330ff5c271a21372db9f98c8fbd787e8acb45df66ca",
       "stderr_sha256": "3cb2fc505271a7802f80b579867c47aeac7871bf6605dc693e6c427f4122e061",
       "raw_bytes": 71,
-      "output_bytes": 42,
-      "replay_seconds": 0.03869488200871274,
-      "exec_seconds": 0.2950674149906263,
-      "added_seconds": 0.25637253298191354,
-      "filter": "toml:js-quality",
+      "output_bytes": 81,
+      "replay_seconds": 0.07163694498012774,
+      "exec_seconds": 0.12063677600235678,
+      "added_seconds": 0.048999831022229046,
+      "filter": "lossless:npm-test",
       "tokens": {
         "cl100k_base": {
           "raw": 31,
-          "output": 17
+          "output": 31
         },
         "o200k_base": {
           "raw": 31,
-          "output": 17
+          "output": 31
         }
       },
       "facts": 3,
-      "missing_count": 3,
-      "exit_preserved": true
+      "missing_count": 0,
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "compare-log",
@@ -1010,24 +1091,26 @@
       "stdout_sha256": "eb07352621e942990fc65fda3763277f1a97f93209a17d3a13807dff8900f20d",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 9932,
-      "output_bytes": 8402,
-      "replay_seconds": 0.029864993004593998,
-      "exec_seconds": 0.3499924410134554,
-      "added_seconds": 0.3201274480088614,
-      "filter": "git_log",
+      "output_bytes": 9246,
+      "replay_seconds": 0.029331925994483754,
+      "exec_seconds": 0.07566284100175835,
+      "added_seconds": 0.0463309150072746,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 3090,
-          "output": 2560
+          "output": 2944
         },
         "o200k_base": {
           "raw": 3083,
-          "output": 2552
+          "output": 2937
         }
       },
       "facts": 191,
-      "missing_count": 21,
-      "exit_preserved": true
+      "missing_count": 0,
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "compare-diff",
@@ -1043,24 +1126,26 @@
       "stdout_sha256": "430339376d59822a6a5a92dc24d0adacd903a47b5903c91bf6f516dc8e967d00",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 155164,
-      "output_bytes": 148059,
-      "replay_seconds": 0.0246969019935932,
-      "exec_seconds": 6.704339071002323,
-      "added_seconds": 6.67964216900873,
-      "filter": "diff_summary:diagnostic-guard",
+      "output_bytes": 136539,
+      "replay_seconds": 0.04328080601408146,
+      "exec_seconds": 0.11283378000371158,
+      "added_seconds": 0.06955297398963012,
+      "filter": "lossless:git",
       "tokens": {
         "cl100k_base": {
           "raw": 43282,
-          "output": 40350
+          "output": 40206
         },
         "o200k_base": {
           "raw": 43405,
-          "output": 40470
+          "output": 40301
         }
       },
       "facts": 4544,
-      "missing_count": 235,
-      "exit_preserved": true
+      "missing_count": 0,
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "compare-grep",
@@ -1077,24 +1162,26 @@
       "stdout_sha256": "3bcc85ee414a0239773a01eee988b39d9c6ded0ccdc08b2b2c613ae8a32cb132",
       "stderr_sha256": "adf004b3088d2728ffbcd735f15a9a8f53b2ca0a4e41d0c12c800a81aa529200",
       "raw_bytes": 11037,
-      "output_bytes": 11047,
-      "replay_seconds": 0.03272317300434224,
-      "exec_seconds": 0.3482320609909948,
-      "added_seconds": 0.31550888798665255,
-      "filter": "search_results:diagnostic-guard",
+      "output_bytes": 10008,
+      "replay_seconds": 0.035686540009919554,
+      "exec_seconds": 0.07403474301099777,
+      "added_seconds": 0.03834820300107822,
+      "filter": "lossless:search",
       "tokens": {
         "cl100k_base": {
           "raw": 2867,
-          "output": 2867
+          "output": 2552
         },
         "o200k_base": {
           "raw": 2966,
-          "output": 2966
+          "output": 2645
         }
       },
       "facts": 128,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "compare-find",
@@ -1111,24 +1198,26 @@
       "stdout_sha256": "eacc0c4f9fb358d3fd26668696ae25ca8ba67df8b49babeb1730cb817a74b8df",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 58888,
-      "output_bytes": 58888,
-      "replay_seconds": 0.03389608298311941,
-      "exec_seconds": 0.3479419570066966,
-      "added_seconds": 0.3140458740235772,
-      "filter": "listing",
+      "output_bytes": 48104,
+      "replay_seconds": 0.029642116016475484,
+      "exec_seconds": 0.08553019200917333,
+      "added_seconds": 0.05588807599269785,
+      "filter": "lossless:paths",
       "tokens": {
         "cl100k_base": {
           "raw": 14042,
-          "output": 14042
+          "output": 11092
         },
         "o200k_base": {
           "raw": 14203,
-          "output": 14203
+          "output": 11224
         }
       },
       "facts": 1166,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     },
     {
       "id": "compare-cat",
@@ -1143,27 +1232,27 @@
       "stdout_sha256": "d6b1eba8496bdd0eed6fc8a685768fe01b2da4a0388b5fe7df558290bffcf32f",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "raw_bytes": 2349483,
-      "output_bytes": 2349483,
-      "replay_seconds": 0.06035724299727008,
-      "exec_seconds": 0.7078639699902851,
-      "added_seconds": 0.647506726993015,
-      "filter": "file-read",
+      "output_bytes": 2195935,
+      "replay_seconds": 0.039904725999804214,
+      "exec_seconds": 0.20431350902072154,
+      "added_seconds": 0.16440878302091733,
+      "filter": "lossless:file",
       "tokens": {
         "cl100k_base": {
           "raw": 530260,
-          "output": 530260
+          "output": 503014
         },
         "o200k_base": {
           "raw": 535949,
-          "output": 535949
+          "output": 507181
         }
       },
       "facts": 1,
       "missing_count": 0,
-      "exit_preserved": true
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
     }
   ],
-  "oracle": "exhaustive facts with multiplicity; revalidated against immutable pre-change views",
-  "binary_sha256": "18453ef41f884f40acce77ed95b2d53ec7261852e9610590431e5584b2357923",
-  "source_commit": "b39f1d55604df7791b96f55f39c6cde4c204b4e3"
+  "source_commit": "0807402"
 }

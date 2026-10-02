@@ -1,0 +1,14 @@
+RTK — Rust Token Killer
+Source: https://github.com/rtk-ai/rtk
+Reference: v0.50.0, commit 1d87b8e719ce0a50c223cd93ca64dd16921f9aec
+License: Apache License 2.0 (full text in this repository's LICENSE).
+
+bench/real/PARITE-RTK.md reproduces command names, option names and help
+text from the reference RTK binary to document interoperability and gaps.
+Descriptions and inventory annotations were added for LM Resizer.
+No RTK filtering implementation was copied for the lossless views added
+in this branch. The source is cited next to the inventory and benchmarks.
+
+RTK is distributed under the Apache License, Version 2.0, without warranties
+or conditions of any kind, either express or implied. See LICENSE for the
+permissions and limitations under that license.

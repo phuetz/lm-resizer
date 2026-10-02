@@ -25,14 +25,36 @@ PY
 ```
 
 La préparation des dépendances de test est séparée de la mesure. Voir
-`environment.json` et `python-freeze.txt` pour l'environnement mesuré. Ne pas
+`environment.json` et `python-freeze.txt` pour l'environnement mesuré.
+Après le clonage, préparer un environnement isolé (Python 3.11 pour le rejeu
+publié) :
+
+```bash
+python3.11 -m venv /tmp/lmr-bench-env
+/tmp/lmr-bench-env/bin/pip install -r bench/real/python-freeze.txt
+/tmp/lmr-bench-env/bin/pip install --no-deps -e /tmp/lmr-repos/fastapi
+rustup toolchain install 1.96.0 --profile minimal
+# Sorties de compilation hors du clone : find/ls ne doivent pas voir target/.
+CARGO_TARGET_DIR=/tmp/lmr-real-cargo RUSTUP_TOOLCHAIN=1.96.0 \
+  cargo test --no-run --locked --manifest-path /tmp/lmr-repos/ripgrep/Cargo.toml
+export CARGO_TARGET_DIR=/tmp/lmr-real-cargo
+export RUSTUP_TOOLCHAIN=1.96.0
+export PATH="/tmp/lmr-bench-env/bin:$PATH"
+```
+
+Le manifeste LM Resizer reste compilé avec son toolchain épinglé : employer
+`cargo +1.86.0 build --release --locked` dans ce shell. La préparation ci-dessus
+ne lance pas les tests : les captures restent les vraies commandes mesurées.
+Les fichiers temporaires de pytest et l'état de Git peuvent faire varier une
+capture neuve; les SHA-256 figent les entrées du rejeu avant/après local.
+ Ne pas
 installer les dépendances npm de TypeScript pour reproduire le cas d'échec
 `hereby: not found`. Les dépendances Python volontairement incomplètes
 produisent des erreurs de collecte : ce banc vérifie leur conservation, il ne
 certifie pas la suite FastAPI. Mettre le target Cargo hors des clones.
 
 ```bash
-cargo build --release --locked
+cargo +1.86.0 build --release --locked --target-dir target
 cp target/release/lm-resizer /tmp/lm-resizer-before
 python3 bench/real/run.py capture --repos /tmp/lmr-repos --work /tmp/lmr-results
 python3 bench/real/run.py replay --repos /tmp/lmr-repos --work /tmp/lmr-results --binary /tmp/lm-resizer-before --label before
@@ -56,7 +78,7 @@ de temps total de la suite de tests ni de facture API.
 Chaque cas produit sa **liste exhaustive** `<cas>.facts.json`, sa vue et ses
 métadonnées. Les listes et captures volumineuses restent dans le dossier de
 travail, les mesures compactes sont versionnées. L'oracle est indépendant du
-code Rust. Il reconstruit les préfixes du format réversible `LMR-LINES/1`.
+code Rust. Il reconstruit les préfixes du format réversible `LMR-LINES/2`.
 
 - grep : chaque tuple (fichier, numéro de ligne, contenu exact), et toute
   ligne non reconnue. Aucun plafond de fichiers, lignes ou longueur.
@@ -96,3 +118,44 @@ du marqueur de récupération. Une sortie peu répétitive peut rester brute.
 Les lignes de tests Cargo réussis peuvent être remplacées par les compteurs
 de la suite, mais les blocs de diagnostic restent intégraux et reconstructibles.
 La comparaison stricte de toutes les lignes Git garde les dates et les hunks.
+
+## RTK et limites de la comparaison
+
+Installer le binaire officiel v0.50.0 avec son script et le checksum obligatoire,
+puis (adapter uniquement le chemin du binaire) :
+
+```bash
+python3 bench/real/compare_rtk.py --work /tmp/lmr-results \
+  --repos /tmp/lmr-repos --binary /tmp/rtk/rtk
+python3 -m unittest discover -s bench/real -p test_oracle.py
+```
+
+Le champ `mode` distingue un filtre `rtk pipe` sur la **capture identique** d'une
+commande native relancée. Le mode pipe ne comprend pas l'exécution de la commande
+et ne propage pas son code d'échec; ses durées ne sont pas une comparaison du temps
+total des suites. Les listes grep/find RTK sont dégroupées avant comparaison.
+`oracle_missing_count` compte les faits non reconnus, pas une preuve automatique
+de perte sémantique : RTK peut reformuler. Les changements d'indentation de grep
+sont comptés séparément dans `search_whitespace_changed`. Les compteurs d'erreurs,
+hash complets et noms absents restent des exemples vérifiables de perte.
+
+Les médianes RTK incluent les commandes disponibles, même si l'oracle échoue;
+on ne remplace jamais leur économie réelle par zéro. Les compteurs RTK internes
+ne servent pas au calcul : Python tiktoken compte les sorties des deux outils.
+Le comparatif n'exécute ni code téléchargé par un agent ni appel à un modèle.
+
+`lm-resizer expand -i vue.txt` reconstruit le texte sans tee. Son décodeur refuse
+les références invalides, les vues de plus de 512 Mio ou d'un million de lignes;
+le tee conserve l'original, indépendamment de cette limite du décodeur CLI.
+
+Le rejeu compare aussi les deux comptes o200k du CLI au tokenizer Python
+indépendant (`cli_exact_counts_verified`). Les optimisations de comptage ne
+peuvent donc pas transformer silencieusement les mesures en estimations.
+
+Pour régénérer le tableau à partir des trois JSON :
+
+```bash
+python3 bench/real/report.py --before bench/real/before.json \
+  --after bench/real/after.json --rtk bench/real/rtk.json \
+  --output /tmp/lmr-tableau.md
+```

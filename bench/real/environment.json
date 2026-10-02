@@ -7,5 +7,11 @@
   "rtk_version": "0.50.0",
   "rtk_commit": "1d87b8e719ce0a50c223cd93ca64dd16921f9aec",
   "capture_origin": "previous session; immutable stdout/stderr SHA-256 checked on replay",
-  "test_environment": "Python dependencies in python-freeze.txt; FastAPI 457 collection errors, not a passing suite; npm without node_modules; Cargo dependencies prepared before capture"
+  "test_environment": "Python dependencies in python-freeze.txt; FastAPI 457 collection errors, not a passing suite; npm without node_modules; Cargo dependencies prepared before capture",
+  "benchmark_python_requirement": "3.11; requirements and test dependency freeze pinned separately",
+  "rtk_installation": "official installer v0.50.0; SHA-256 verification enabled and successful",
+  "logical_cpus_available": 24,
+  "kernel": "6.17.0-1032-oem",
+  "final_source_commit": "0807402b4da015a0f6319e7a30b7cbadc8db31c5",
+  "latency_conditions": "No concurrent local builds/tests during final measurements; OS caches not flushed; other machine activity not controlled"
 }
