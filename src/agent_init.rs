@@ -51,6 +51,7 @@ pub struct Edit {
     pub path: PathBuf,
     pub before: String,
     pub after: String,
+    pub delete: bool,
 }
 
 fn read(path: &Path) -> Result<String> {
@@ -181,6 +182,7 @@ pub fn plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>> {
         path,
         before,
         after,
+        delete: false,
     }])
 }
 
@@ -204,7 +206,11 @@ pub fn apply(edits: &[Edit]) -> Result<()> {
         if let Some(parent) = edit.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        // Do not delete the file: an empty pre-existing file is still user-owned.
+        if edit.delete {
+            std::fs::remove_file(&edit.path)?;
+            continue;
+        }
+        // Do not delete user-owned configuration or instruction files.
         std::fs::write(&edit.path, &edit.after)
             .with_context(|| format!("write {}", edit.path.display()))?;
     }
@@ -322,6 +328,7 @@ fn native_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>>
         path,
         before,
         after,
+        delete: false,
     }];
     if !opts.hook_only {
         let path = base.join(rules);
@@ -331,6 +338,7 @@ fn native_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>>
             path,
             before,
             after,
+            delete: false,
         });
     }
     Ok(edits)
@@ -445,6 +453,7 @@ fn owned_file(path: PathBuf, content: &str, uninstall: bool) -> Result<Edit> {
         path,
         before,
         after,
+        delete: uninstall,
     })
 }
 
@@ -524,6 +533,7 @@ fn plugin_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>>
                 path,
                 before,
                 after,
+                delete: false,
             });
         }
         _ => unreachable!(),

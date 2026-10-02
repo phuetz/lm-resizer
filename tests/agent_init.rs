@@ -149,6 +149,6 @@ fn plugin_clients_install_and_preserve_foreign_files() {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "user changes");
         std::fs::write(&path, bytes).unwrap();
         assert!(run(&["--uninstall"]).status.success());
-        assert_eq!(std::fs::read_to_string(path).unwrap(), "");
+        assert!(!path.exists());
     }
 }
