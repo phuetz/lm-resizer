@@ -333,7 +333,7 @@ fn native_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>>
         ),
         _ => unreachable!(),
     };
-    let path = base.join(relative);
+    let path = native_path(base, relative, agent, opts.global);
     let before = read(&path)?;
     let command = format!("lm-resizer hook {agent}");
     let after = if agent == "vibe" {
@@ -354,8 +354,19 @@ fn native_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>>
         after,
         delete: false,
     }];
+    if agent == "trae" && opts.global {
+        let path = home.join(".trae-cn/hooks.json");
+        let before = read(&path)?;
+        let after = patch_json(&before, event, matcher, &command, false, opts.uninstall)?;
+        edits.push(Edit {
+            path,
+            before,
+            after,
+            delete: false,
+        });
+    }
     if !opts.hook_only {
-        let path = base.join(rules);
+        let path = native_path(base, rules, agent, opts.global);
         let before = read(&path)?;
         let after = replace_block(&before, opts.uninstall)?;
         edits.push(Edit {
@@ -563,4 +574,19 @@ fn plugin_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>>
         _ => unreachable!(),
     }
     Ok(edits)
+}
+
+fn native_path(base: &Path, relative: &str, agent: &str, global: bool) -> PathBuf {
+    if global {
+        let variable = match agent {
+            "codex" => Some("CODEX_HOME"),
+            "claude" => Some("CLAUDE_CONFIG_DIR"),
+            _ => None,
+        };
+        if let Some(directory) = variable.and_then(std::env::var_os) {
+            return PathBuf::from(directory)
+                .join(relative.split_once('/').map_or(relative, |(_, tail)| tail));
+        }
+    }
+    base.join(relative)
 }

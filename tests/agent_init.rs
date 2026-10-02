@@ -16,6 +16,8 @@ fn rules_clients_dry_run_install_uninstall_in_isolated_home() {
         let run = |extra: &[&str]| {
             let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
                 .env("HOME", root.path())
+                .env_remove("CODEX_HOME")
+                .env_remove("CLAUDE_CONFIG_DIR")
                 .current_dir(root.path())
                 .args(["init", "--agent", agent])
                 .args(extra)
@@ -67,6 +69,8 @@ fn native_clients_merge_preserve_and_remove_only_owned_hooks() {
         let run = |args: &[&str]| {
             let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
                 .env("HOME", root.path())
+                .env_remove("CODEX_HOME")
+                .env_remove("CLAUDE_CONFIG_DIR")
                 .current_dir(root.path())
                 .args(["init", "--agent", agent, "--global"])
                 .args(args)
@@ -102,6 +106,8 @@ fn malformed_config_aborts_without_writing_guidance() {
     std::fs::write(&path, "{broken").unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
         .env("HOME", root.path())
+        .env_remove("CODEX_HOME")
+        .env_remove("CLAUDE_CONFIG_DIR")
         .current_dir(root.path())
         .args(["init", "--gemini"])
         .output()
@@ -123,6 +129,8 @@ fn plugin_clients_install_and_preserve_foreign_files() {
         let run = |extra: &[&str]| {
             Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
                 .env("HOME", root.path())
+                .env_remove("CODEX_HOME")
+                .env_remove("CLAUDE_CONFIG_DIR")
                 .env_remove("XDG_CONFIG_HOME")
                 .env_remove("HERMES_HOME")
                 .current_dir(root.path())
@@ -159,6 +167,8 @@ fn legacy_guidance_and_additive_opencode_flags_have_distinct_effects() {
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
             .env("HOME", root.path())
+            .env_remove("CODEX_HOME")
+            .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("XDG_CONFIG_HOME")
             .current_dir(root.path())
             .args(args)
@@ -173,4 +183,52 @@ fn legacy_guidance_and_additive_opencode_flags_have_distinct_effects() {
     assert!(root.path().join(".opencode/plugins/lm-resizer.ts").exists());
     assert!(run(&["init", "--opencode", "--uninstall"]).status.success());
     assert!(!root.path().join(".opencode/plugins/lm-resizer.ts").exists());
+}
+
+#[test]
+fn vibe_toml_install_and_uninstall_preserve_personal_content() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join(".vibe")).unwrap();
+    let path = root.path().join(".vibe/hooks.toml");
+    std::fs::write(&path, "# personal comment\n").unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+            .env("HOME", root.path())
+            .current_dir(root.path())
+            .args(["init", "--agent", "vibe", "--global"])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert!(run(&[]).status.success());
+    let content = std::fs::read_to_string(&path).unwrap();
+    let parsed: toml::Value = toml::from_str(&content).unwrap();
+    assert_eq!(
+        parsed["hooks"][0]["command"].as_str(),
+        Some("lm-resizer hook vibe")
+    );
+    assert!(run(&[]).status.success());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
+    assert!(run(&["--uninstall"]).status.success());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "# personal comment\n"
+    );
+}
+
+#[test]
+fn codex_global_install_respects_explicit_home_override() {
+    let root = tempfile::tempdir().unwrap();
+    let custom = root.path().join("custom-codex");
+    let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+        .env("HOME", root.path())
+        .env("CODEX_HOME", &custom)
+        .current_dir(root.path())
+        .args(["init", "--codex", "--global"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(custom.join("hooks.json").exists());
+    assert!(custom.join("AGENTS.md").exists());
+    assert!(!root.path().join(".codex").exists());
 }
