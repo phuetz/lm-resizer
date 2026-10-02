@@ -45,6 +45,7 @@ mod mcp_proxy;
 mod parity_filters;
 mod provider_usage;
 mod rtk_filters;
+mod session_audit;
 mod shared_context;
 mod token_metrics;
 
@@ -468,8 +469,9 @@ enum Commands {
     },
     /// Analyze logs/session files for commands that lm-resizer exec can reduce.
     Discover {
+        #[command(flatten)]
+        selection: session_audit::Options,
         /// Files or directories to scan.
-        #[arg(required = true)]
         paths: Vec<PathBuf>,
         /// Recurse into directories.
         #[arg(short, long)]
@@ -480,6 +482,14 @@ enum Commands {
         /// Emit a Markdown audit summary.
         #[arg(long)]
         markdown: bool,
+    },
+    /// Show command adoption and missed opportunities across agent sessions.
+    Session {
+        #[command(flatten)]
+        selection: session_audit::Options,
+        paths: Vec<PathBuf>,
+        #[arg(long)]
+        json: bool,
     },
     /// Discover compressible command output in known Claude/Codex session stores.
     DiscoverSessions {
@@ -1848,12 +1858,30 @@ async fn run(cli: Cli) -> Result<()> {
                 );
             }
         }
+        Commands::Session {
+            selection,
+            paths,
+            json,
+        } => {
+            session_audit::print_report(
+                &session_audit::scan(&paths, &selection)?,
+                json || selection.format.as_deref() == Some("json"),
+            )?;
+        }
         Commands::Discover {
+            selection,
             paths,
             recursive,
             json,
             markdown,
         } => {
+            if paths.is_empty() || selection.active() {
+                session_audit::print_report(
+                    &session_audit::scan(&paths, &selection)?,
+                    json || selection.format.as_deref() == Some("json"),
+                )?;
+                return Ok(());
+            }
             let report = discover_exec_savings(&paths, recursive)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
