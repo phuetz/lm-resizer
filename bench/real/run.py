@@ -81,9 +81,10 @@ def capture(args):
 def expand(output):
     """Independent decoder for the lossless line-prefix view (no LMR import)."""
     output = re.sub(r"\n?\[raw: [0-9a-f]+\]\n?$", "", output)
-    if not output.startswith("LMR-LINES/1\n"):
+    version2 = output.startswith("LMR-LINES/2\n")
+    if not version2 and not output.startswith("LMR-LINES/1\n"):
         return output
-    lines = output.splitlines()[1:]
+    lines = output.split("\n")[1:]
     prefix = ""
     decoded = []
     for line in lines:
@@ -91,11 +92,13 @@ def expand(output):
             prefix = json.loads(line[1:])
         elif line.startswith("="):
             decoded.extend([decoded[-1]] * int(line[1:]))
+        elif line.startswith("&"):
+            decoded.append(decoded[int(line[1:])])
         elif line.startswith("!"):
             # Final newline is part of the reversible representation.
             return "\n".join(decoded) + ("\n" if line == "!1" else "")
         else:
-            decoded.append(prefix + json.loads(line))
+            decoded.append(prefix + (line.removeprefix("\\") if version2 else json.loads(line)))
     raise ValueError("missing end record")
 
 

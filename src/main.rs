@@ -39,6 +39,7 @@ use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use walkdir::WalkDir;
 
 mod advice_cli;
+mod lossless_filters;
 mod mcp_proxy;
 mod parity_filters;
 mod provider_usage;
@@ -2155,10 +2156,12 @@ fn run_exec_command(
         filter_command_output(command, &raw)
     };
 
-    let mut compressed = if matches!(
-        filter.as_str(),
-        "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
-    ) {
+    let mut compressed = if filter == "raw_on_failure"
+        || filter.starts_with("lossless:")
+        || matches!(
+            filter.as_str(),
+            "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
+        ) {
         CompressReport {
             tokens: TokenCounts::measure(&filtered, &filtered),
             content_type: if matches!(filter.as_str(), "json-passthrough" | "aws-json") {
@@ -2240,10 +2243,12 @@ fn process_captured_output(
     };
     let (mut output, mut steps, mut keys) = if keep_raw {
         (raw.to_string(), Vec::new(), Vec::new())
-    } else if matches!(
-        filter.as_str(),
-        "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
-    ) {
+    } else if filter.starts_with("lossless:")
+        || matches!(
+            filter.as_str(),
+            "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
+        )
+    {
         (filtered.clone(), Vec::new(), Vec::new())
     } else {
         let result = compress_text_with_pipeline_gate(
@@ -2636,6 +2641,9 @@ fn shell_join(args: &[String]) -> String {
 }
 
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
+    if let Some((name, output)) = lossless_filters::filter(command, raw) {
+        return (format!("lossless:{name}"), output);
+    }
     let (name, output) = route_command_filter(command, raw);
     // Filters are also a possible source of lost diagnostics. The later
     // pipeline gate only compares its input with its output, so it cannot
@@ -9544,11 +9552,11 @@ command = "node"
     fn exec_filter_dispatches_known_commands() {
         let (filter, _text) =
             filter_command_output(&["git".into(), "status".into()], "On branch main\n");
-        assert_eq!(filter, "git_status");
+        assert_eq!(filter, "lossless:git");
 
         let (filter, _text) =
             filter_command_output(&["cargo".into(), "test".into()], "test result: ok\n");
-        assert_eq!(filter, "cargo_test");
+        assert_eq!(filter, "lossless:cargo");
 
         let (filter, _text) =
             filter_command_output(&["rg".into(), "needle".into()], "src/main.rs:1:needle\n");
@@ -9559,7 +9567,7 @@ command = "node"
     fn rewrite_reports_supported_command() {
         let report = rewrite_command_report(&["git".into(), "status".into()]);
         assert!(report.supported);
-        assert_eq!(report.filter, "git_status");
+        assert_eq!(report.filter, "lossless:git");
         assert_eq!(
             report.rewritten.as_deref(),
             Some("lm-resizer exec -- git status")
@@ -10542,7 +10550,7 @@ expected = "error: bad\n"
     #[test]
     fn exec_cargo_test_filter_summarizes_passes() {
         let raw =
-            "Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n";
+            "Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_four ... ok\ntest result: ok. 4 passed; 0 failed\n";
         let filtered = filter_cargo_test(raw);
         assert!(filtered.contains("test result: ok"));
         assert!(!filtered.contains("Compiling demo"));
@@ -11095,13 +11103,13 @@ Successfully tagged localhost/app:latest\n";
     }
 
     #[test]
-    fn git_diff_capture_omits_redundant_file_headers_without_losing_patch_facts() {
+    fn git_diff_capture_keeps_complete_patch_including_file_headers() {
         let raw = include_str!("../bench/corpus/git_diff.txt");
         let (name, output) = filter_command_output(&["git".into(), "diff".into()], raw);
-        assert_eq!(name, "diff_summary");
+        assert_eq!(name, "lossless:git");
         assert!(
-            !output.contains("diff --git"),
-            "duplicate path headers remain"
+            output.contains("diff --git"),
+            "patch file headers must survive"
         );
         for fact in [
             "--- a/src/billing.py",
@@ -11131,7 +11139,7 @@ Successfully tagged localhost/app:latest\n";
     fn git_show_keeps_commit_author_and_subject() {
         let raw = "commit abc123\nAuthor: Example <example@example.org>\nDate:   Mon Sep 28 2026\n\n    Repair error handling\n\ndiff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n";
         let (name, output) = filter_command_output(&["git".into(), "show".into()], raw);
-        assert_eq!(name, "git_show");
+        assert_eq!(name, "lossless:git");
         for fact in [
             "commit abc123",
             "Author: Example",
@@ -11231,13 +11239,13 @@ Successfully tagged localhost/app:latest\n";
     #[test]
     fn discover_pairs_jsonl_command_and_output() {
         let content = r#"{"command":"cargo test"}
-{"output":"Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n"}
+{"output":"Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_four ... ok\ntest result: ok. 4 passed; 0 failed\n"}
 "#;
         let report = discover_in_content(content, "session.jsonl");
         assert_eq!(report.command_outputs, 1);
         assert_eq!(report.rewritable_commands, 1);
         assert_eq!(report.candidates.len(), 1);
-        assert_eq!(report.candidates[0].filter, "cargo_test");
+        assert_eq!(report.candidates[0].filter, "lossless:cargo");
         assert!(report.filtered_bytes < report.original_bytes);
     }
 
@@ -11249,24 +11257,24 @@ Successfully tagged localhost/app:latest\n";
         let report = discover_in_content(content, "claude.jsonl");
         assert_eq!(report.command_outputs, 1);
         assert_eq!(report.rewritable_commands, 1);
-        assert_eq!(report.candidates[0].filter, "git_status");
+        assert_eq!(report.candidates[0].filter, "lossless:git");
     }
 
     #[test]
     fn discover_extracts_codex_style_arguments() {
         let content = r#"{"tool_name":"exec_command","arguments":"{\"command\":\"cargo test\"}"}
-{"tool_output":"Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n"}
+{"tool_output":"Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_four ... ok\ntest result: ok. 4 passed; 0 failed\n"}
 "#;
         let report = discover_in_content(content, "codex.jsonl");
         assert_eq!(report.command_outputs, 1);
         assert_eq!(report.rewritable_commands, 1);
-        assert_eq!(report.candidates[0].filter, "cargo_test");
+        assert_eq!(report.candidates[0].filter, "lossless:cargo");
     }
 
     #[test]
     fn discover_markdown_summarizes_candidates() {
         let content = r#"{"command":"cargo test"}
-{"output":"Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n"}
+{"output":"Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_four ... ok\ntest result: ok. 4 passed; 0 failed\n"}
 "#;
         let mut report = discover_in_content(content, "session.jsonl");
         report.files_scanned = 1;
@@ -11274,7 +11282,7 @@ Successfully tagged localhost/app:latest\n";
         report.estimated_tokens_saved = report.tokens.tokens_saved;
         let markdown = format_discover_markdown(&report);
         assert!(markdown.contains("# lm-resizer Discover Audit"));
-        assert!(markdown.contains("| `cargo test` | `cargo_test` |"));
+        assert!(markdown.contains("| `cargo test` | `lossless:cargo` |"));
     }
 
     #[test]
@@ -11320,7 +11328,7 @@ Successfully tagged localhost/app:latest\n";
     #[test]
     fn learn_recommends_rewrite_for_compressible_sessions() {
         let content = r#"{"command":"cargo test"}
-{"output":"Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n"}
+{"output":"Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_four ... ok\ntest result: ok. 4 passed; 0 failed\n"}
 "#;
         let mut discover = discover_in_content(content, "session.jsonl");
         discover.files_scanned = 1;
@@ -11380,7 +11388,7 @@ Successfully tagged localhost/app:latest\n";
         std::fs::write(
             &path,
             r#"{"command":"cargo test"}
-{"output":"Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n"}
+{"output":"Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_four ... ok\ntest result: ok. 4 passed; 0 failed\n"}
 "#,
         )
         .unwrap();
@@ -12155,6 +12163,11 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
                 continue;
             }
             let path = entry.path();
+            // Python is a benchmark dependency, never a product runtime dependency.
+            // The real-token benchmark explicitly requires Python tiktoken.
+            if path.starts_with(root.join("bench/real")) {
+                continue;
+            }
             let file_name = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -12500,5 +12513,5 @@ fn pytest_filter_keeps_failing_statement_and_test_header() {
     assert!(filtered.contains(">       assert check(data)"));
     assert!(filtered.contains("___ test_x ___"));
     assert!(filtered.contains("tests/test_a.py:9"));
-    assert!(!filtered.contains("data = load()"));
+    assert!(filtered.contains("data = load()"));
 }

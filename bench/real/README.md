@@ -79,3 +79,20 @@ Un oracle incomplet est signalé séparément : jamais remplacé par une économ
 Les checks de conservation ne démontrent pas que tout utilisateur jugera la
 vue aussi lisible que le brut. Les fichiers sans motif répétitif peuvent
 rester identiques. Aucun résultat ne justifie une promesse universelle.
+
+## Vue réversible
+
+`LMR-LINES/2` conserve l'ordre et chaque octet UTF-8 des lignes : `@` suivi
+d'un préfixe JSON définit le préfixe des lignes littérales suivantes; `&N`
+réutilise la ligne décodée N (indice zéro); `=N` répète N fois la dernière
+ligne; `!1`/`!0` indique la présence/absence du saut final. Les lignes
+littérales commençant par `@`, `&`, `=`, `!` ou `\` sont échappées avec `\`.
+Les références désignent des lignes intégrales, jamais des erreurs omises.
+Le décodeur indépendant est `expand()` dans `run.py`; il accepte aussi la
+version 1 de la première session. Le brut est conservé dans tee dès que la
+vue change. La sélection exige un gain mesuré o200k supérieur au coût prévu
+du marqueur de récupération. Une sortie peu répétitive peut rester brute.
+
+Les lignes de tests Cargo réussis peuvent être remplacées par les compteurs
+de la suite, mais les blocs de diagnostic restent intégraux et reconstructibles.
+La comparaison stricte de toutes les lignes Git garde les dates et les hunks.
