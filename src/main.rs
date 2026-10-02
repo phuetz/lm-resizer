@@ -727,6 +727,8 @@ struct ExecHistoryRecord {
     filtered_bytes: usize,
     compressed_bytes: usize,
     bytes_saved: usize,
+    #[serde(skip_deserializing)]
+    bytes_delta: isize,
     duration_ms: u128,
 }
 
@@ -4419,6 +4421,7 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
         filtered_bytes: report.filtered_bytes,
         compressed_bytes: report.compressed_bytes,
         bytes_saved: report.bytes_saved,
+        bytes_delta: (report.original_bytes as isize) - (report.compressed_bytes as isize),
         duration_ms: elapsed.as_millis(),
     };
     let mut file = std::fs::OpenOptions::new()
@@ -4751,12 +4754,14 @@ fn summarize_exec_history() -> Result<Value> {
         add_history_bucket(&mut by_command, command, saved);
     }
 
+    let net_bytes_saved = (original_bytes as isize) - (compressed_bytes as isize);
     Ok(json!({
         "commands": commands,
         "original_bytes": original_bytes,
         "compressed_bytes": compressed_bytes,
         "bytes_saved": bytes_saved,
-        "estimated_tokens_saved": bytes_saved / 4,
+        "net_bytes_saved": net_bytes_saved,
+        "estimated_tokens_saved": (net_bytes_saved.max(0) as usize) / 4,
         "by_filter": history_bucket_json(by_filter),
         "by_command": history_bucket_json(by_command),
     }))
@@ -9201,6 +9206,96 @@ impl axum::response::IntoResponse for HttpError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stats_net() {
+        struct EnvGuard {
+            key: &'static str,
+            previous: Option<String>,
+        }
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                match self.previous.take() {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+        fn replace_env(key: &'static str, value: &str) -> EnvGuard {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            EnvGuard { key, previous }
+        }
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("lm-resizer-stats-net-{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let _state_dir = replace_env("LM_RESIZER_STATE_DIR", temp_dir.to_str().unwrap());
+        let _home = replace_env("HOME", temp_dir.to_str().unwrap());
+
+        let history_path = temp_dir.join("exec-history.jsonl");
+        let record1 = serde_json::json!({
+            "timestamp_unix": 1000,
+            "command": "cmd1",
+            "exit_code": 2,
+            "filter": "f1",
+            "original_bytes": 752,
+            "filtered_bytes": 752,
+            "compressed_bytes": 866,
+            "bytes_saved": 0,
+            "duration_ms": 10
+        });
+        let record2 = serde_json::json!({
+            "timestamp_unix": 1001,
+            "command": "cmd2",
+            "exit_code": 2,
+            "filter": "f1",
+            "original_bytes": 752,
+            "filtered_bytes": 752,
+            "compressed_bytes": 866,
+            "bytes_saved": 0,
+            "duration_ms": 10
+        });
+        let record3 = serde_json::json!({
+            "timestamp_unix": 1002,
+            "command": "cmd3",
+            "exit_code": 0,
+            "filter": "f2",
+            "original_bytes": 13893,
+            "filtered_bytes": 962,
+            "compressed_bytes": 962,
+            "bytes_saved": 12931,
+            "duration_ms": 10
+        });
+
+        let content = format!(
+            "{}\n{}\n{}\n",
+            record1.to_string(),
+            record2.to_string(),
+            record3.to_string()
+        );
+        std::fs::write(&history_path, content).unwrap();
+
+        let stats = crate::summarize_exec_history().unwrap();
+
+        let original = stats.get("original_bytes").unwrap().as_u64().unwrap();
+        let compressed = stats.get("compressed_bytes").unwrap().as_u64().unwrap();
+        let net_saved = stats.get("net_bytes_saved").unwrap().as_i64().unwrap();
+        let clipped = stats.get("bytes_saved").unwrap().as_u64().unwrap();
+        let tokens = stats
+            .get("estimated_tokens_saved")
+            .unwrap()
+            .as_u64()
+            .unwrap();
+
+        assert_eq!(original, 15397);
+        assert_eq!(compressed, 2694);
+        assert_eq!(net_saved, 12703);
+        assert_eq!(net_saved, (original as i64) - (compressed as i64));
+        // Somme écrêtée (les deux croissances de 114 octets comptent 0) : 12931.
+        // L'estimation de jetons suit le net, pas cette somme.
+        assert_eq!(clipped, 12931);
+        assert_eq!(tokens, (net_saved.max(0) as u64) / 4);
+    }
     use super::*;
     use lm_resizer_core::ccr::InMemoryCcrStore;
 
