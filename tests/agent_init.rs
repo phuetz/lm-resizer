@@ -152,3 +152,25 @@ fn plugin_clients_install_and_preserve_foreign_files() {
         assert!(!path.exists());
     }
 }
+
+#[test]
+fn legacy_guidance_and_additive_opencode_flags_have_distinct_effects() {
+    let root = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+            .env("HOME", root.path())
+            .env_remove("XDG_CONFIG_HOME")
+            .current_dir(root.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert!(run(&["init", "--claude-md"]).status.success());
+    assert!(root.path().join("CLAUDE.md").exists());
+    assert!(!root.path().join(".claude/settings.json").exists());
+    assert!(run(&["init", "--opencode"]).status.success());
+    assert!(root.path().join(".claude/settings.json").exists());
+    assert!(root.path().join(".opencode/plugins/lm-resizer.ts").exists());
+    assert!(run(&["init", "--opencode", "--uninstall"]).status.success());
+    assert!(!root.path().join(".opencode/plugins/lm-resizer.ts").exists());
+}

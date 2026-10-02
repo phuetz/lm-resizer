@@ -9,7 +9,7 @@ const START: &str = "\n<!-- lm-resizer integration -->\n";
 const END: &str = "\n<!-- /lm-resizer integration -->\n";
 const GUIDANCE: &str = "Use `lm-resizer exec --raw-on-failure -- <command>` for verbose command output. Recover complete output with `lm-resizer tee read <reference>` or `lm-resizer retrieve <key>`. Inspect savings with `lm-resizer gain --history`. Preserve the command's exit status and never hide failures. Use `lm-resizer rewrite-shell '<command>'` to preview a rewrite without execution.";
 
-#[derive(Args, Default)]
+#[derive(Args, Default, Clone)]
 pub struct Options {
     #[arg(long, default_value = "claude", value_parser = ["claude", "codex", "gemini", "cursor", "trae", "copilot", "droid", "vibe", "opencode", "pi", "omp", "hermes", "windsurf", "cline", "roo", "kilocode", "antigravity", "kimi"])]
     pub agent: String,
@@ -25,7 +25,7 @@ pub struct Options {
     pub opencode: bool,
     #[arg(long, conflicts_with = "claude_md")]
     pub hook_only: bool,
-    #[arg(long, conflicts_with = "no_trust_filters")]
+    #[arg(long, conflicts_with_all = ["no_trust_filters", "uninstall"])]
     pub trust_filters: bool,
     #[arg(long)]
     pub no_trust_filters: bool,
@@ -92,7 +92,6 @@ pub fn run(mut opts: Options) -> Result<()> {
         (opts.codex, "codex"),
         (opts.gemini, "gemini"),
         (opts.copilot, "copilot"),
-        (opts.opencode, "opencode"),
     ] {
         if selected {
             opts.agent = agent.into();
@@ -100,7 +99,14 @@ pub fn run(mut opts: Options) -> Result<()> {
     }
     let project = opts.project_dir.clone().unwrap_or(std::env::current_dir()?);
     let home = crate::user_home_dir().context("cannot determine home directory")?;
-    let edits = plan(&opts, &project, &home)?;
+    let mut edits = plan(&opts, &project, &home)?;
+    if opts.opencode && opts.agent != "opencode" {
+        let plugin_opts = Options {
+            agent: "opencode".into(),
+            ..opts.clone()
+        };
+        edits.extend(plan(&plugin_opts, &project, &home)?);
+    }
     let preview = opts.dry_run || opts.show || opts.no_patch;
     let report: Vec<Value> = edits
         .iter()
@@ -234,6 +240,24 @@ mod tests {
 
 fn native_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>> {
     let agent = opts.agent.as_str();
+    if opts.claude_md {
+        if agent != "claude" {
+            bail!("--claude-md requires --agent claude");
+        }
+        let path = if opts.global {
+            home.join(".claude/CLAUDE.md")
+        } else {
+            project.join("CLAUDE.md")
+        };
+        let before = read(&path)?;
+        let after = replace_block(&before, opts.uninstall)?;
+        return Ok(vec![Edit {
+            path,
+            before,
+            after,
+            delete: false,
+        }]);
+    }
     if matches!(agent, "cursor" | "vibe") && !opts.global {
         bail!("{agent} native hooks require --global");
     }
