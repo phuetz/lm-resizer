@@ -149,14 +149,17 @@ without executing anything.
 ```bash
 lm-resizer stats --markdown
 lm-resizer tee list --json
-lm-resizer tee read <tee-file-name>
+tee_listing=$(lm-resizer tee list)
+tee_file=${tee_listing%% *}
+lm-resizer tee read "$tee_file"
 ```
 
 Use `tee` only when you need the original raw output that was compressed out of
 the agent-facing response.
 
-`stats` records bytes saved by `exec` and MCP proxy output filtering. Its `estimated_tokens_saved` values are
-the heuristic **bytes saved / 4**, not a tokenizer measurement or an API billing
-measurement. JSON includes this method in `exec_history.token_estimation`;
-Markdown explains it beside the estimate. The benchmark's `o200k_base` token
-counts are separate measurements.
+`stats` reports exact text token counts using **tiktoken-rs / o200k_base** for
+new `exec` and MCP proxy records. JSON separates `tokens_saved` and
+`measured_commands` from unmeasured historical records; only those historical
+records retain `estimated_tokens_saved` with the explicit legacy bytes / 4
+method. These reference counts do not measure provider billing. See
+[the counting method](TOKEN-STATISTICS.md).

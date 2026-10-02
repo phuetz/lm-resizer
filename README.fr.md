@@ -48,13 +48,20 @@ La compilation native par défaut a été vérifiée sur Debian 13 avec Rust 1.8
 
 Si Rust manque ou est trop ancien, exécutez les étapes d’installation de rustup au début du bloc de votre plateforme. Si rustup est déjà installé et son dossier bin dans le PATH, vous pouvez les omettre : il installera la toolchain indiquée par le dépôt. L’installeur ci-dessous sélectionne 1.86.0 par défaut dans votre compte ; `--no-modify-path` laisse vos fichiers de profil et le PATH permanent intacts. Les commandes suivantes règlent seulement le PATH du terminal courant. [Instructions officielles Rust](https://www.rust-lang.org/tools/install/).
 
+Avant publication, partez d’un checkout de la candidate `release/v0.2.4-preparation-2026-10-02` fourni par le mainteneur. Cette branche locale n’est pas nécessairement disponible sur GitHub. **Après publication seulement**, téléchargez les sources du tag public (Bash ou PowerShell) :
+
+~~~sh
+git clone --branch v0.2.4 https://github.com/phuetz/lm-resizer.git
+cd lm-resizer
+~~~
+
+Les blocs Rust ci-dessous s’exécutent depuis la racine de ce checkout. Si vous êtes déjà dans un checkout, ne le clonez pas une deuxième fois.
+
 Linux/macOS (Bash) :
 
 ~~~bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.86.0
 . "$HOME/.cargo/env"
-git clone --branch release/v0.2.4-recette-2026-10-01 https://github.com/phuetz/lm-resizer.git
-cd lm-resizer
 cargo --version
 cargo install --quiet --path . --locked --root "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
@@ -68,14 +75,14 @@ $rustupInstaller = Join-Path $env:TEMP 'rustup-init.exe'
 Invoke-WebRequest -Uri 'https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe' -OutFile $rustupInstaller
 & $rustupInstaller -y --no-modify-path --profile minimal --default-toolchain 1.86.0
 $env:Path = "$(Join-Path $env:USERPROFILE '.cargo\bin');$env:Path"
-git clone --branch release/v0.2.4-recette-2026-10-01 https://github.com/phuetz/lm-resizer.git
-cd lm-resizer
 cargo --version
 $installRoot = Join-Path $env:USERPROFILE '.local'
 cargo install --quiet --path . --locked --root "$installRoot"
 $env:Path = "$installRoot\bin;$env:Path"
 lm-resizer --version
 ~~~
+
+Avec le Rust de la distribution déjà installé, rustup peut afficher `cannot install while Rust is installed`, puis `continuing (because the -y flag is set and the error is ignorable)`. Dans la commande ci-dessus, cet avertissement est non bloquant : vérifiez le code de sortie et `cargo --version` après activation de `.cargo/env` ; il doit afficher 1.86.0. Le Rust système reste installé.
 
 Cargo télécharge ses dépendances dans `~/.cargo` (`%USERPROFILE%\.cargo` sous Windows) même si une compilation échoue ; rustup conserve les compilateurs dans `.rustup`. Ces caches sont distincts du préfixe `.local`. Si Cargo n’est pas en 1.86.0 dans ce checkout, vérifiez le PATH (`command -v cargo` sous Bash, `Get-Command cargo` sous PowerShell), `rustup show active-toolchain` et toute surcharge `RUSTUP_TOOLCHAIN`. Arrêtez-vous si `cargo install` échoue : les exemples et la désinstallation ci-dessous nécessitent un binaire effectivement installé.
 
@@ -122,6 +129,23 @@ lm-resizer exec -- git rev-parse --short HEAD
 
 La première commande lit 20 vrais commits Git et retire leurs lignes de date de la vue de l'agent. Quand la sortie est raccourcie, `exec` peut afficher un identifiant `[raw: …]`. Donnez cet identifiant à `tee read` pour retrouver le texte original. La récupération concerne le texte UTF-8 : les octets non UTF-8 sont remplacés au décodage, et stdout/stderr sont combinés. Les fichiers tee restent locaux jusqu’à leur suppression ou purge. Les entrées CCR expirent après **30 minutes par défaut**, même si la base est conservée ; récupérez-les et exportez-les avant expiration pour garder une preuve durable. La sortie peut aussi rester intacte si la compression n'apporte rien.
 
+Depuis Bash, récupérer le premier original listé (dans cette installation neuve, celui de la commande Git ci-dessus) :
+
+~~~bash
+tee_listing=$(lm-resizer tee list)
+tee_file=${tee_listing%% *}
+lm-resizer tee read "$tee_file"
+~~~
+
+Sous PowerShell, choisir le fichier dans la liste JSON :
+
+~~~powershell
+$teeFiles = lm-resizer tee list --json | ConvertFrom-Json
+lm-resizer tee read $teeFiles.files[0].name
+~~~
+
+Si plusieurs fichiers sont listés, utilisez le nom ou l’identifiant `[raw: …]` correspondant à la commande recherchée.
+
 Pour retirer un binaire installé avec Cargo :
 
 ~~~bash
@@ -135,6 +159,23 @@ cargo uninstall --root "$installRoot" lm-resizer
 ~~~
 
 Le CLI propose aussi `compress` pour les fichiers ou l'entrée standard, `tool-output` pour une sortie déjà capturée, et des intégrations MCP, HTTP et hooks d'agents activées sur demande. `install --client all --scope project` écrit aussi la configuration utilisateur Codex et remplace une table `mcp_servers.lm_resizer` existante sans sauvegarde ; conservez-en une copie avant installation. Voir le [guide des intégrations agents](docs/CLAUDE_CODEX.md) et le [guide de release](docs/RELEASE.md) pour ces usages.
+
+Exemples à copier depuis ce checkout (Bash) :
+
+~~~bash
+printf 'hello world\n' | lm-resizer compress
+git log -20 '--format=Date: %ad%n%h %s' --date=short | lm-resizer tool-output --command 'git log -20'
+~~~
+
+`compress` lit le texte de stdin ; `tool-output` filtre une sortie déjà capturée. Son argument `--command` décrit la commande et ne l’exécute pas. Une petite sortie peut rester intacte.
+
+Pour configurer les quatre clients depuis la racine du projet, après avoir sauvegardé toute configuration Codex existante :
+
+~~~bash
+lm-resizer install --client all --scope project
+~~~
+
+Cette commande écrit les fichiers du projet et la configuration Codex de votre compte, y compris avec `--scope project`.
 
 ## Statistiques de jetons reproductibles
 

@@ -88,15 +88,18 @@ fn assert_stats_legacy(cli: &IsolatedCli, commands: u64, bytes: u64) {
     assert_eq!(history["measured_commands"], 0);
     assert_eq!(history["unmeasured_commands"], commands);
     assert_eq!(history["tokens_saved"], 0);
-    assert_eq!(history["estimation_method"], "legacy bytes_saved / 4; unmeasured records only");
+    assert_eq!(
+        history["estimation_method"],
+        "legacy bytes_saved / 4; unmeasured records only"
+    );
 
     let markdown = cli.run(&["stats", "--markdown"]);
     assert!(markdown.status.success());
     let text = String::from_utf8(markdown.stdout).unwrap();
-    assert!(text.contains("bytes saved / 4"), "{text}");
-    assert!(text.contains("no tokenizer"), "{text}");
     assert!(
-        text.contains("not measured tokens or billing savings"),
+        text.contains("Legacy estimated tokens saved (bytes / 4, unmeasured records only)"),
         "{text}"
     );
+    assert!(text.contains("exact text count"), "{text}");
+    assert!(text.contains("0 measured"), "{text}");
 }
