@@ -1365,20 +1365,55 @@ async fn main() -> Result<()> {
         }
         Commands::Stats { store, markdown } => {
             let store = open_store(store)?;
-            let exec_history = summarize_exec_history().unwrap_or_default();
-            let retrieval_feedback = summarize_retrieval_feedback().unwrap_or_default();
-            let proxy_history = summarize_proxy_history().unwrap_or_default();
-            let report = json!({
-                "entries": store.len(),
-                "empty": store.is_empty(),
-                "exec_history": exec_history,
-                "retrieval_feedback": retrieval_feedback,
-                "proxy_history": proxy_history,
-            });
+            let exec_history = summarize_exec_history();
+            let retrieval_feedback = summarize_retrieval_feedback();
+            let proxy_history = summarize_proxy_history();
+
+            let exec_path = default_state_dir()?.join("exec-history.jsonl");
+            let ret_path = default_state_dir()?.join("retrieval-feedback.jsonl");
+            let proxy_path = default_state_dir()?.join("proxy-history.jsonl");
+
+            let (report, has_errors) = build_stats_report(
+                exec_history,
+                retrieval_feedback,
+                proxy_history,
+                store.len(),
+                store.is_empty(),
+            );
+
+            if let Some(err) = report.get("exec_history_error").and_then(Value::as_str) {
+                eprintln!(
+                    "stats: historique illisible ({}) : {}",
+                    exec_path.display(),
+                    err
+                );
+            }
+            if let Some(err) = report
+                .get("retrieval_feedback_error")
+                .and_then(Value::as_str)
+            {
+                eprintln!(
+                    "stats: historique illisible ({}) : {}",
+                    ret_path.display(),
+                    err
+                );
+            }
+            if let Some(err) = report.get("proxy_history_error").and_then(Value::as_str) {
+                eprintln!(
+                    "stats: historique illisible ({}) : {}",
+                    proxy_path.display(),
+                    err
+                );
+            }
+
             if markdown {
                 print!("{}", format_stats_markdown(&report));
             } else {
                 println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+
+            if has_errors {
+                std::process::exit(1);
             }
         }
         Commands::Image {
@@ -4697,19 +4732,23 @@ fn find_string_by_key(value: &Value, keys: &[&str]) -> Option<String> {
 
 fn summarize_exec_history() -> Result<Value> {
     let path = default_state_dir()?.join("exec-history.jsonl");
-    if !path.exists() {
-        return Ok(json!({
-            "commands": 0,
-            "original_bytes": 0,
-            "compressed_bytes": 0,
-            "bytes_saved": 0,
-            "estimated_tokens_saved": 0,
-            "by_filter": [],
-            "by_command": [],
-        }));
-    }
 
-    let content = std::fs::read_to_string(path)?;
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(json!({
+                "commands": 0,
+                "original_bytes": 0,
+                "compressed_bytes": 0,
+                "bytes_saved": 0,
+                "net_bytes_saved": 0,
+                "estimated_tokens_saved": 0,
+                "by_filter": [],
+                "by_command": [],
+            }));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let mut commands = 0usize;
     let mut original_bytes = 0usize;
     let mut compressed_bytes = 0usize;
@@ -4790,16 +4829,20 @@ fn record_retrieval_feedback(hash: &str, bytes: usize, source: &str) -> Result<(
 
 fn summarize_retrieval_feedback() -> Result<Value> {
     let path = default_state_dir()?.join("retrieval-feedback.jsonl");
-    if !path.exists() {
-        return Ok(json!({
-            "retrievals": 0,
-            "bytes": 0,
-            "unique_hashes": 0,
-            "duplicate_retrievals": 0,
-            "by_source": [],
-        }));
-    }
-    let content = std::fs::read_to_string(path)?;
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(json!({
+                "retrievals": 0,
+                "bytes": 0,
+                "unique_hashes": 0,
+                "duplicate_retrievals": 0,
+                "by_source": [],
+            }));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let mut retrievals = 0usize;
     let mut bytes = 0usize;
     let mut by_source = std::collections::BTreeMap::<String, (usize, usize)>::new();
@@ -4867,6 +4910,46 @@ fn history_bucket_json(buckets: std::collections::BTreeMap<String, (usize, usize
     rows
 }
 
+fn build_stats_report(
+    exec_history: Result<Value>,
+    retrieval_feedback: Result<Value>,
+    proxy_history: Result<Value>,
+    entries: usize,
+    empty: bool,
+) -> (Value, bool) {
+    let mut report = json!({
+        "entries": entries,
+        "empty": empty,
+    });
+    let mut has_errors = false;
+
+    match exec_history {
+        Ok(val) => report["exec_history"] = val,
+        Err(e) => {
+            report["exec_history_error"] = Value::String(e.to_string());
+            has_errors = true;
+        }
+    }
+
+    match retrieval_feedback {
+        Ok(val) => report["retrieval_feedback"] = val,
+        Err(e) => {
+            report["retrieval_feedback_error"] = Value::String(e.to_string());
+            has_errors = true;
+        }
+    }
+
+    match proxy_history {
+        Ok(val) => report["proxy_history"] = val,
+        Err(e) => {
+            report["proxy_history_error"] = Value::String(e.to_string());
+            has_errors = true;
+        }
+    }
+
+    (report, has_errors)
+}
+
 fn format_stats_markdown(report: &Value) -> String {
     let history = report.get("exec_history").unwrap_or(&Value::Null);
     let retrieval_feedback = report.get("retrieval_feedback").unwrap_or(&Value::Null);
@@ -4876,38 +4959,57 @@ fn format_stats_markdown(report: &Value) -> String {
         "- CCR entries: {}\n",
         report.get("entries").and_then(Value::as_u64).unwrap_or(0)
     ));
-    out.push_str(&format!(
-        "- Exec commands: {}\n",
-        history.get("commands").and_then(Value::as_u64).unwrap_or(0)
-    ));
-    out.push_str(&format!(
-        "- Bytes saved: {}\n",
-        history
-            .get("bytes_saved")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-    ));
-    out.push_str(&format!(
-        "- Estimated tokens saved: {}\n\n",
-        history
-            .get("estimated_tokens_saved")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-    ));
-    out.push_str(&format!(
-        "- CCR retrievals: {}\n",
-        retrieval_feedback
-            .get("retrievals")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-    ));
-    out.push_str(&format!(
-        "- Retrieved bytes: {}\n\n",
-        retrieval_feedback
-            .get("bytes")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-    ));
+
+    if let Some(err) = report.get("exec_history_error").and_then(Value::as_str) {
+        out.push_str(&format!(
+            "⚠️ Erreur lors de la lecture de l'historique d'exécution : {}\n\n",
+            err
+        ));
+    } else {
+        out.push_str(&format!(
+            "- Exec commands: {}\n",
+            history.get("commands").and_then(Value::as_u64).unwrap_or(0)
+        ));
+        out.push_str(&format!(
+            "- Bytes saved: {}\n",
+            history
+                .get("bytes_saved")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        ));
+        out.push_str(&format!(
+            "- Estimated tokens saved: {}\n\n",
+            history
+                .get("estimated_tokens_saved")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        ));
+    }
+
+    if let Some(err) = report
+        .get("retrieval_feedback_error")
+        .and_then(Value::as_str)
+    {
+        out.push_str(&format!(
+            "⚠️ Erreur lors de la lecture des retours de récupération : {}\n\n",
+            err
+        ));
+    } else {
+        out.push_str(&format!(
+            "- CCR retrievals: {}\n",
+            retrieval_feedback
+                .get("retrievals")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        ));
+        out.push_str(&format!(
+            "- Retrieved bytes: {}\n\n",
+            retrieval_feedback
+                .get("bytes")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        ));
+    }
 
     if let Some(filters) = history.get("by_filter").and_then(Value::as_array) {
         out.push_str("## Top Filters\n\n");
@@ -6368,21 +6470,25 @@ fn record_proxy_history(
 
 fn summarize_proxy_history() -> Result<Value> {
     let path = default_state_dir()?.join("proxy-history.jsonl");
-    if !path.exists() {
-        return Ok(json!({
-            "requests": 0,
-            "provider_reported": {
-                "requests_with_usage": 0,
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cache_read_input_tokens": 0,
-                "cache_creation_input_tokens": 0,
-                "streams_incomplete": 0,
-                "conventions": [],
-            },
-        }));
-    }
-    let content = std::fs::read_to_string(path)?;
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(json!({
+                "requests": 0,
+                "provider_reported": {
+                    "requests_with_usage": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "streams_incomplete": 0,
+                    "conventions": [],
+                }
+            }));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let mut requests = 0usize;
     let mut reported = json!({
         "requests_with_usage": 0u64, "input_tokens": 0u64, "output_tokens": 0u64,
@@ -11368,6 +11474,48 @@ Successfully tagged localhost/app:latest\n";
         assert!(markdown.contains("# lm-resizer Stats"));
         assert!(markdown.contains("| `cargo_test` | 2 | 100 | 25 |"));
         assert!(markdown.contains("- CCR retrievals: 4"));
+    }
+
+    #[test]
+    fn stats_markdown_includes_exec_error() {
+        let (report, has_errors) = build_stats_report(
+            Err(anyhow::anyhow!("Permission denied (os error 13)")),
+            Ok(json!({"retrievals": 0})),
+            Ok(json!({})),
+            0,
+            true,
+        );
+        assert!(has_errors);
+        assert!(report.get("exec_history_error").is_some());
+
+        let markdown = format_stats_markdown(&report);
+        assert!(markdown.contains("⚠️ Erreur lors de la lecture de l'historique d'exécution : Permission denied (os error 13)"));
+        assert!(!markdown.contains("Exec commands:"));
+    }
+
+    #[test]
+    fn stats_markdown_missing_file_is_not_an_error() {
+        let (report, has_errors) = build_stats_report(
+            Ok(json!({
+                "commands": 0,
+                "original_bytes": 0,
+                "compressed_bytes": 0,
+                "bytes_saved": 0,
+                "estimated_tokens_saved": 0,
+                "by_filter": [],
+                "by_command": [],
+            })),
+            Ok(json!({"retrievals": 0})),
+            Ok(json!({})),
+            0,
+            true,
+        );
+        assert!(!has_errors);
+        assert!(report.get("exec_history_error").is_none());
+
+        let markdown = format_stats_markdown(&report);
+        assert!(!markdown.contains("⚠️"));
+        assert!(markdown.contains("Exec commands: 0"));
     }
 
     #[test]
