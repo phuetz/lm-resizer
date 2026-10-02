@@ -608,7 +608,7 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
         /// Agent client name.
-        #[arg(long, default_value = "unknown")]
+        #[arg(long, visible_alias = "agent", default_value = "unknown")]
         client: String,
         /// Hook event name.
         #[arg(long, default_value = "unknown")]
@@ -1543,7 +1543,20 @@ async fn run(cli: Cli) -> Result<()> {
             let view = read_input(input.as_deref()).await?;
             print!("{}", lossless_filters::expand(&view)?);
         }
-        Commands::Native(command) => {
+        Commands::Native(mut command) => {
+            let mut literal = false;
+            command.retain(|arg| {
+                if arg == "--" {
+                    literal = true;
+                    return true;
+                }
+                if !literal && arg == "--skip-env" {
+                    std::env::set_var("SKIP_ENV_VALIDATION", "1");
+                    false
+                } else {
+                    true
+                }
+            });
             let program = command.first().context("missing native command")?;
             if !NATIVE_TOOLS.contains(&program.as_str()) {
                 anyhow::bail!("unknown command '{program}'; use --help or exec -- <program>");
