@@ -2446,7 +2446,39 @@ fn split_trailing_redirects(segment: &str) -> (&str, &str) {
             '\\' if !in_single => escaped = true,
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
-            '>' | '<' if !in_single && !in_double => return segment.split_at(idx),
+            '>' | '<' if !in_single && !in_double => {
+                let mut start_idx = idx;
+                if idx > 0 {
+                    let before = &segment[..idx];
+                    let last_char = before.chars().last().unwrap();
+                    if last_char.is_ascii_digit() {
+                        let mut all_digits = true;
+                        let mut digits_start = idx - last_char.len_utf8();
+                        for (i, c) in before.char_indices().rev() {
+                            if c.is_whitespace() {
+                                digits_start = i + c.len_utf8();
+                                break;
+                            } else if !c.is_ascii_digit() {
+                                all_digits = false;
+                                break;
+                            }
+                            if i == 0 {
+                                digits_start = 0;
+                            }
+                        }
+                        if all_digits {
+                            start_idx = digits_start;
+                        }
+                    }
+                }
+                return segment.split_at(start_idx);
+            }
+            '&' if !in_single && !in_double => {
+                let after = &segment[idx + ch.len_utf8()..];
+                if after.starts_with('>') {
+                    return segment.split_at(idx);
+                }
+            }
             _ => {}
         }
     }
@@ -2480,14 +2512,33 @@ fn split_shell_operators(command: &str) -> Vec<ShellToken> {
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
             '&' | '|' if !in_single && !in_double => {
-                if i + 1 < chars.len() && chars[i + 1].1 == ch {
+                let is_redirect = if ch == '&' {
+                    let mut prev_char = None;
+                    if idx > 0 {
+                        let before = &command[..idx];
+                        prev_char = before.chars().last();
+                    }
+                    let next_char = if i + 1 < chars.len() {
+                        Some(chars[i + 1].1)
+                    } else {
+                        None
+                    };
+
+                    prev_char == Some('>') || prev_char == Some('<') || next_char == Some('>')
+                } else {
+                    false
+                };
+
+                if is_redirect {
+                    // Part of a redirection (e.g. 2>&1, >&2, &> /dev/null), not a command separator.
+                } else if i + 1 < chars.len() && chars[i + 1].1 == ch {
                     push_shell_segment(&mut tokens, &command[start..idx]);
                     tokens.push(ShellToken::Operator(format!("{ch}{ch}")));
                     start = chars[i + 1].0 + chars[i + 1].1.len_utf8();
                     i += 1;
-                } else if ch == '|' {
+                } else if ch == '|' || ch == '&' {
                     push_shell_segment(&mut tokens, &command[start..idx]);
-                    tokens.push(ShellToken::Operator("|".to_string()));
+                    tokens.push(ShellToken::Operator(ch.to_string()));
                     start = idx + ch.len_utf8();
                 }
             }
@@ -9371,6 +9422,42 @@ command = "node"
             report.rewritten,
             "lm-resizer exec -- git status > status.txt"
         );
+    }
+
+    #[test]
+    fn rewrite_shell_handles_redirect_with_descriptor() {
+        let report = rewrite_shell_report("cargo test 2>&1 | tail -5");
+        assert_eq!(
+            report.rewritten,
+            "lm-resizer exec -- cargo test 2>&1 | tail -5"
+        );
+
+        let report2 = rewrite_shell_report("git status 2>/dev/null");
+        assert_eq!(
+            report2.rewritten,
+            "lm-resizer exec -- git status 2>/dev/null"
+        );
+
+        let report3 = rewrite_shell_report("git status 2>&1");
+        assert_eq!(report3.rewritten, "lm-resizer exec -- git status 2>&1");
+
+        let report4 = rewrite_shell_report("git diff >out.txt 2>&1");
+        assert_eq!(
+            report4.rewritten,
+            "lm-resizer exec -- git diff >out.txt 2>&1"
+        );
+
+        let report5 = rewrite_shell_report("git status &> /dev/null");
+        assert_eq!(
+            report5.rewritten,
+            "lm-resizer exec -- git status &> /dev/null"
+        );
+
+        let report6 = rewrite_shell_report("git log &");
+        assert_eq!(report6.rewritten, "lm-resizer exec -- git log &");
+
+        let report7 = rewrite_shell_report("git status >&2");
+        assert_eq!(report7.rewritten, "lm-resizer exec -- git status >&2");
     }
 
     #[test]

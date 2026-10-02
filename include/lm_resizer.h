@@ -8,12 +8,18 @@ extern "C" {
 #endif
 
 #define LM_RESIZER_ABI_VERSION 1
+#define LM_RESIZER_ABI_HAS_RETRIEVE 1
 
 char *lm_resizer_compress_json(
     const unsigned char *content_ptr,
     size_t content_len,
     const unsigned char *query_ptr,
     size_t query_len
+);
+
+char *lm_resizer_retrieve_json(
+    const unsigned char *hash_ptr,
+    size_t hash_len
 );
 
 void lm_resizer_string_free(char *ptr);

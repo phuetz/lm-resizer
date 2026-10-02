@@ -31,6 +31,11 @@ char *lm_resizer_compress_json(
     uintptr_t query_len
 );
 
+char *lm_resizer_retrieve_json(
+    const unsigned char *hash_ptr,
+    uintptr_t hash_len
+);
+
 void lm_resizer_string_free(char *ptr);
 
 unsigned char *lm_resizer_alloc(uintptr_t len);
@@ -43,6 +48,17 @@ the returned JSON is:
 
 ```json
 { "error": "..." }
+```
+
+`lm_resizer_retrieve_json` retrieves the original content for a given hash from the in-memory store.
+The memory is process-local: entries expire after the default TTL (`DEFAULT_TTL`), and are lost on shutdown.
+It returns a null-terminated JSON string. On success:
+```json
+{ "hash": "...", "content": "..." }
+```
+On failure (e.g. entry not found or expired):
+```json
+{ "error": "CCR entry not found: ..." }
 ```
 
 Always release returned strings with `lm_resizer_string_free`.
