@@ -1593,6 +1593,15 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Commands::Rewrite { json, command } => {
+            if command.len() == 1 && command[0].contains(char::is_whitespace) {
+                let report = rewrite_shell_report(&command[0]);
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    println!("{}", report.rewritten);
+                }
+                return Ok(());
+            }
             let report = rewrite_command_report(&command);
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
@@ -2845,7 +2854,10 @@ fn rewrite_shell_segment(segment: &str) -> Option<(String, String)> {
     }
     let args = split_shell_words(body.trim())?;
     let report = rewrite_command_report(&args);
-    let rewritten = report.rewritten?;
+    if !report.supported {
+        return None;
+    }
+    let rewritten = format!("lm-resizer exec -- {}", body.trim());
     let suffix = suffix.trim();
     if suffix.is_empty() {
         Some((rewritten, report.filter))
@@ -3034,12 +3046,19 @@ fn shell_join(args: &[String]) -> String {
         .map(|arg| {
             if arg.is_empty() {
                 String::from("\"\"")
-            } else if arg.chars().all(|c| {
-                c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '\\' | ':')
-            }) {
+            } else if arg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':'))
+            {
                 arg.clone()
             } else {
-                format!("\"{}\"", arg.replace('"', "\\\""))
+                format!(
+                    "\"{}\"",
+                    arg.replace('\\', "\\\\")
+                        .replace('"', "\\\"")
+                        .replace('$', "\\$")
+                        .replace('`', "\\`")
+                )
             }
         })
         .collect::<Vec<_>>()
@@ -5111,6 +5130,11 @@ fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
     if !rewrite_command_report(&words).supported {
         return None;
     }
+    let exe = exe
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('`', "\\`");
     Some(format!("\"{exe}\" exec -- {seg}"))
 }
 
