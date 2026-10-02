@@ -31,6 +31,8 @@ fn update_installs_verified_local_release_and_rejects_corruption() {
         } else {
             "darwin-x86_64"
         }
+    } else if cfg!(target_arch = "aarch64") {
+        "linux-aarch64"
     } else {
         "linux-x86_64"
     };

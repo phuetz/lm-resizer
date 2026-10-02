@@ -11,6 +11,7 @@ os="$(uname -s)"
 arch="$(uname -m)"
 case "$os:$arch" in
   Linux:x86_64) platform=linux-x86_64 ;;
+  Linux:aarch64|Linux:arm64) platform=linux-aarch64 ;;
   Darwin:x86_64) platform=darwin-x86_64 ;;
   Darwin:arm64) platform=darwin-arm64 ;;
   *) echo "unsupported platform: $os/$arch" >&2; exit 2 ;;
