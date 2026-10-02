@@ -142,6 +142,9 @@ pub fn plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>> {
     {
         return native_plan(opts, project, home);
     }
+    if ["opencode", "pi", "omp", "hermes"].contains(&opts.agent.as_str()) {
+        return plugin_plan(opts, project, home);
+    }
     let relative = match opts.agent.as_str() {
         "windsurf" => ".windsurfrules",
         "cline" => ".clinerules",
@@ -409,4 +412,107 @@ fn patch_vibe(text: &str, uninstall: bool) -> Result<String> {
     } else {
         Ok(format!("{text}{BLOCK}"))
     }
+}
+
+fn owned_file(path: PathBuf, content: &str, uninstall: bool) -> Result<Edit> {
+    let before = read(&path)?;
+    if !before.is_empty() && before != content {
+        bail!(
+            "modified or unowned plugin {}; left untouched",
+            path.display()
+        );
+    }
+    let after = if uninstall {
+        String::new()
+    } else {
+        content.into()
+    };
+    Ok(Edit {
+        path,
+        before,
+        after,
+    })
+}
+
+fn plugin_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>> {
+    let agent = opts.agent.as_str();
+    let base = if opts.global { home } else { project };
+    let mut edits = Vec::new();
+    match agent {
+        "opencode" => {
+            let path = if opts.global {
+                std::env::var_os("XDG_CONFIG_HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| home.join(".config"))
+                    .join("opencode/plugins/lm-resizer.ts")
+            } else {
+                project.join(".opencode/plugins/lm-resizer.ts")
+            };
+            edits.push(owned_file(
+                path,
+                include_str!("../integrations/opencode.ts"),
+                opts.uninstall,
+            )?);
+        }
+        "pi" | "omp" => {
+            let relative = if opts.global {
+                format!(".{agent}/agent/extensions/lm-resizer.ts")
+            } else {
+                format!(".{agent}/extensions/lm-resizer.ts")
+            };
+            edits.push(owned_file(
+                base.join(relative),
+                include_str!("../integrations/pi.ts"),
+                opts.uninstall,
+            )?);
+        }
+        "hermes" => {
+            if !opts.global {
+                bail!("Hermes plugins require --global");
+            }
+            let dir = std::env::var_os("HERMES_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".hermes"));
+            edits.push(owned_file(
+                dir.join("plugins/lm-resizer-rewrite/__init__.py"),
+                include_str!("../integrations/hermes.py"),
+                opts.uninstall,
+            )?);
+            edits.push(owned_file(dir.join("plugins/lm-resizer-rewrite/plugin.yaml"),"name: lm-resizer-rewrite\nversion: '0.1.0'\ndescription: LM Resizer command rewriting\nhooks: [pre_tool_call]\nprovides_hooks: [pre_tool_call]\n",opts.uninstall)?);
+            let path = dir.join("config.yaml");
+            let before = read(&path)?;
+            let mut root: serde_yaml::Value = if before.trim().is_empty() {
+                serde_yaml::from_str("plugins: {enabled: []}")?
+            } else {
+                serde_yaml::from_str(&before)?
+            };
+            let mapping = root
+                .as_mapping_mut()
+                .context("Hermes config must be a YAML mapping")?;
+            let plugins = mapping
+                .entry(serde_yaml::Value::String("plugins".into()))
+                .or_insert(serde_yaml::from_str("enabled: []")?)
+                .as_mapping_mut()
+                .context("Hermes plugins must be a mapping")?;
+            let enabled = plugins
+                .entry(serde_yaml::Value::String("enabled".into()))
+                .or_insert(serde_yaml::Value::Sequence(vec![]))
+                .as_sequence_mut()
+                .context("Hermes plugins.enabled must be a list")?;
+            let name = serde_yaml::Value::String("lm-resizer-rewrite".into());
+            if opts.uninstall {
+                enabled.retain(|e| e != &name);
+            } else if !enabled.contains(&name) {
+                enabled.push(name);
+            }
+            let after = serde_yaml::to_string(&root)?;
+            edits.push(Edit {
+                path,
+                before,
+                after,
+            });
+        }
+        _ => unreachable!(),
+    }
+    Ok(edits)
 }

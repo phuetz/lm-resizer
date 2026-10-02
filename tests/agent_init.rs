@@ -110,3 +110,45 @@ fn malformed_config_aborts_without_writing_guidance() {
     assert_eq!(std::fs::read_to_string(path).unwrap(), "{broken");
     assert!(!root.path().join("GEMINI.md").exists());
 }
+
+#[test]
+fn plugin_clients_install_and_preserve_foreign_files() {
+    for (agent, file) in [
+        ("opencode", ".config/opencode/plugins/lm-resizer.ts"),
+        ("pi", ".pi/agent/extensions/lm-resizer.ts"),
+        ("omp", ".omp/agent/extensions/lm-resizer.ts"),
+        ("hermes", ".hermes/plugins/lm-resizer-rewrite/__init__.py"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let run = |extra: &[&str]| {
+            Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+                .env("HOME", root.path())
+                .env_remove("XDG_CONFIG_HOME")
+                .env_remove("HERMES_HOME")
+                .current_dir(root.path())
+                .args(["init", "--agent", agent, "--global"])
+                .args(extra)
+                .output()
+                .unwrap()
+        };
+        assert!(run(&["--dry-run"]).status.success());
+        let path = root.path().join(file);
+        assert!(!path.exists());
+        let out = run(&[]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!bytes.is_empty());
+        assert!(run(&[]).status.success());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::write(&path, "user changes").unwrap();
+        assert!(!run(&["--uninstall"]).status.success());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "user changes");
+        std::fs::write(&path, bytes).unwrap();
+        assert!(run(&["--uninstall"]).status.success());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "");
+    }
+}

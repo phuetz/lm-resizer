@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+const load = async (file) => import('data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../' + file, import.meta.url), 'utf8')).toString('base64'));
+const { default: pi } = await load('pi.ts');
+let handler;
+let result = { code: 0, stdout: JSON.stringify({ changed: true, rewritten: 'lm-resizer exec -- git status' }) };
+pi({ on: (name, callback) => { assert.equal(name, 'tool_call'); handler = callback; }, exec: async (exe, args, opts) => { assert.equal(exe, 'lm-resizer'); assert.deepEqual(args, ['hook', 'check', 'git status']); assert.equal(opts.timeout, 2000); return result; } });
+let event = { toolName: 'bash', input: { command: 'git status', timeout: 7 } };
+await handler(event, {}); assert.equal(event.input.command, 'lm-resizer exec -- git status'); assert.equal(event.input.timeout, 7);
+result = { code: 1, stdout: 'broken' }; event.input.command = 'git status'; await handler(event, {}); assert.equal(event.input.command, 'git status');
+const { LmResizerPlugin } = await load('opencode.ts');
+const plugin = await LmResizerPlugin({ $: (parts, command) => { assert.equal(command, 'git status'); return { quiet() { return this; }, nothrow: async () => ({ exitCode: 0, stdout: JSON.stringify({ changed: true, rewritten: 'wrapped' }) }) }; } });
+const out = { args: { command: 'git status', timeout: 8 } }; await plugin['tool.execute.before']({ tool: 'bash' }, out); assert.equal(out.args.command, 'wrapped'); assert.equal(out.args.timeout, 8);
+console.log('Pi/OMP and OpenCode adapter contracts: OK');
