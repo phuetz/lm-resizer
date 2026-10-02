@@ -48,6 +48,7 @@ mod learning_cli;
 mod lossless_filters;
 mod mcp_proxy;
 mod parity_filters;
+mod privacy_cli;
 mod provider_usage;
 mod raw_proxy;
 mod recovery_cli;
@@ -154,6 +155,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Inspect privacy and control local counters; no remote collection exists.
+    Telemetry(privacy_cli::Options),
     /// Inspect or explicitly authorize project-local filters.
     Trust(trust_cli::Options),
     /// Run a shell command without filtering or usage tracking.
@@ -1364,6 +1367,7 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
     match cli.command {
+        Commands::Telemetry(options) => privacy_cli::run(options)?,
         Commands::Trust(options) => trust_cli::run(options)?,
         Commands::Run(options) => {
             let code = shell_cli::run(options)?;
