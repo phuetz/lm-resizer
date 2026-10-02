@@ -1,0 +1,11 @@
+{
+  "os": "Linux",
+  "architecture": "x86_64",
+  "python": "3.11.15",
+  "tiktoken": "0.14.0",
+  "baseline_commit": "b39f1d55",
+  "rtk_version": "0.50.0",
+  "rtk_commit": "1d87b8e719ce0a50c223cd93ca64dd16921f9aec",
+  "capture_origin": "previous session; immutable stdout/stderr SHA-256 checked on replay",
+  "test_environment": "Python dependencies in python-freeze.txt; FastAPI 457 collection errors, not a passing suite; npm without node_modules; Cargo dependencies prepared before capture"
+}

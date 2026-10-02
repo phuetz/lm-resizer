@@ -1,0 +1,1237 @@
+{
+  "label": "before-astra",
+  "tokenizer": "0.14.0",
+  "summary": {
+    "cl100k_base": {
+      "median": 0.0,
+      "mean": 7.940607144185551,
+      "cases": 30
+    },
+    "o200k_base": {
+      "median": 0.0,
+      "mean": 7.95947201854331,
+      "cases": 30
+    }
+  },
+  "cases": [
+    {
+      "id": "ripgrep-log",
+      "repo": "ripgrep",
+      "kind": "log",
+      "command": [
+        "git",
+        "log",
+        "-20"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0028282940038479865,
+      "stdout_sha256": "d96edfde732a2f98573ec41f57951cbb30ed926cc4d4cdc25ed589e6e2a73563",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 9532,
+      "output_bytes": 8073,
+      "replay_seconds": 0.02801943101803772,
+      "exec_seconds": 0.2896065829845611,
+      "added_seconds": 0.2615871519665234,
+      "filter": "git_log",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2982,
+          "output": 2479
+        },
+        "o200k_base": {
+          "raw": 2973,
+          "output": 2468
+        }
+      },
+      "facts": 183,
+      "missing_count": 20,
+      "missing_sample": [
+        "Date:   Tue Aug 4 10:00:08 2026 -0400",
+        "Date:   Tue Aug 4 09:59:57 2026 -0400",
+        "Date:   Tue Aug 4 07:46:42 2026 -0400"
+      ],
+      "exit_preserved": true
+    },
+    {
+      "id": "ripgrep-diff",
+      "repo": "ripgrep",
+      "kind": "diff",
+      "command": [
+        "git",
+        "diff",
+        "HEAD~1"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.021439547999762,
+      "stdout_sha256": "8097c54fc84106a3c297a69361930ab841e97a87b0f390089be8cc5bbbfe363e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 668,
+      "output_bytes": 271,
+      "replay_seconds": 0.017497371009085327,
+      "exec_seconds": 0.18117089799488895,
+      "added_seconds": 0.16367352698580362,
+      "filter": "diff_summary",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 227,
+          "output": 114
+        },
+        "o200k_base": {
+          "raw": 228,
+          "output": 115
+        }
+      },
+      "facts": 24,
+      "missing_count": 14,
+      "missing_sample": [
+        "diff --git a/Cargo.lock b/Cargo.lock",
+        "index f617d14..7c44b29 100644",
+        "[[package]]"
+      ],
+      "exit_preserved": true
+    },
+    {
+      "id": "ripgrep-status",
+      "repo": "ripgrep",
+      "kind": "status",
+      "command": [
+        "git",
+        "status"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0114809509832412,
+      "stdout_sha256": "768047aea8b2e058dfe4712117ed0ac8eac2ac0a254b0691ddabc5e3fd5bfddd",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 104,
+      "output_bytes": 104,
+      "replay_seconds": 0.0260389769973699,
+      "exec_seconds": 0.19016707700211555,
+      "added_seconds": 0.16412810000474565,
+      "filter": "git_status",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 23,
+          "output": 23
+        },
+        "o200k_base": {
+          "raw": 23,
+          "output": 23
+        }
+      },
+      "facts": 3,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "ripgrep-show",
+      "repo": "ripgrep",
+      "kind": "show",
+      "command": [
+        "git",
+        "show",
+        "--stat",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0023836299951653928,
+      "stdout_sha256": "8671ead19bb4cfc3997f86f21694cf6ec06a28e0aec1a4008a2e4b619ef3b538",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 265,
+      "output_bytes": 265,
+      "replay_seconds": 0.018382850976195186,
+      "exec_seconds": 0.16181206601322629,
+      "added_seconds": 0.1434292150370311,
+      "filter": "git_show",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 103,
+          "output": 103
+        },
+        "o200k_base": {
+          "raw": 104,
+          "output": 104
+        }
+      },
+      "facts": 7,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "ripgrep-ls",
+      "repo": "ripgrep",
+      "kind": "ls",
+      "command": [
+        "ls",
+        "-la"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0014828109997324646,
+      "stdout_sha256": "0317d3b6d77be3c492b674f48d058821dda6b8d422918d314a888b1e7890b4a3",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 1769,
+      "output_bytes": 1769,
+      "replay_seconds": 0.026442133996170014,
+      "exec_seconds": 0.19592310997541063,
+      "added_seconds": 0.1694809759792406,
+      "filter": "listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 837,
+          "output": 837
+        },
+        "o200k_base": {
+          "raw": 837,
+          "output": 837
+        }
+      },
+      "facts": 31,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "ripgrep-recursive",
+      "repo": "ripgrep",
+      "kind": "recursive",
+      "command": [
+        "ls",
+        "-R"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0026287800283171237,
+      "stdout_sha256": "aa1d6fcc645c8a22e62d0fa565be98ee88e54a8202c7b1244faf9e6e09af90df",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 4670,
+      "output_bytes": 4664,
+      "replay_seconds": 0.015113470988580957,
+      "exec_seconds": 0.1284538540057838,
+      "added_seconds": 0.11334038301720284,
+      "filter": "listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 1599,
+          "output": 1619
+        },
+        "o200k_base": {
+          "raw": 1639,
+          "output": 1659
+        }
+      },
+      "facts": 343,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "ripgrep-find",
+      "repo": "ripgrep",
+      "kind": "find",
+      "command": [
+        "find",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.003066030010813847,
+      "stdout_sha256": "2f10dfa42ac2fbb3430caba910ee61a915b777b1a99e541d7b1472b7b77d333d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 10353,
+      "output_bytes": 10353,
+      "replay_seconds": 0.022390906990040094,
+      "exec_seconds": 0.14565792397479527,
+      "added_seconds": 0.12326701698475517,
+      "filter": "listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 3600,
+          "output": 3600
+        },
+        "o200k_base": {
+          "raw": 3695,
+          "output": 3695
+        }
+      },
+      "facts": 351,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "ripgrep-grep",
+      "repo": "ripgrep",
+      "kind": "grep",
+      "command": [
+        "grep",
+        "-rn",
+        "--exclude-dir=.git",
+        "TODO",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.005619798990665004,
+      "stdout_sha256": "5742a2fec5576ea7fc3691de6e6546614539e73666f669b293306f8f807bd6be",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 929,
+      "output_bytes": 929,
+      "replay_seconds": 0.023150190012529492,
+      "exec_seconds": 0.15493453000090085,
+      "added_seconds": 0.13178433998837136,
+      "filter": "search_results",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 243,
+          "output": 243
+        },
+        "o200k_base": {
+          "raw": 243,
+          "output": 243
+        }
+      },
+      "facts": 9,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "ripgrep-cat",
+      "repo": "ripgrep",
+      "kind": "cat",
+      "command": [
+        "cat",
+        "crates/core/flags/defs.rs"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0024061120057012886,
+      "stdout_sha256": "779953a821d814ba7f66877d0e581f2a7d7b44099b2cd5c6c7a7271b517ebd1f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 246353,
+      "output_bytes": 246353,
+      "replay_seconds": 0.016448273992864415,
+      "exec_seconds": 0.16662794700823724,
+      "added_seconds": 0.15017967301537283,
+      "filter": "file-read",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 63962,
+          "output": 63962
+        },
+        "o200k_base": {
+          "raw": 63937,
+          "output": 63937
+        }
+      },
+      "facts": 1,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "ripgrep-test",
+      "repo": "ripgrep",
+      "kind": "test",
+      "command": [
+        "cargo",
+        "test"
+      ],
+      "exit_code": 101,
+      "command_seconds": 0.9743359279818833,
+      "stdout_sha256": "c36d631b17472e70b59066afa383b158c6ca7d903892fa0f411ebd1b8df4bc89",
+      "stderr_sha256": "2a8f4a6c3c66506f77683512cfbafe33d4bff0b07e8cb00c0ea8cce9103992c6",
+      "raw_bytes": 19055,
+      "output_bytes": 19065,
+      "replay_seconds": 0.022665362019324675,
+      "exec_seconds": 0.13502520599286072,
+      "added_seconds": 0.11235984397353604,
+      "filter": "cargo_test_diagnostics",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 5064,
+          "output": 5064
+        },
+        "o200k_base": {
+          "raw": 5081,
+          "output": 5081
+        }
+      },
+      "facts": 20,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "fastapi-log",
+      "repo": "fastapi",
+      "kind": "log",
+      "command": [
+        "git",
+        "log",
+        "-20"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.00317285000346601,
+      "stdout_sha256": "18b955abb4dab8ab9cb3a1d5fb3b2bd59b6fc537a11123cfb2eee32a319e5d2c",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 5884,
+      "output_bytes": 4837,
+      "replay_seconds": 0.016209435008931905,
+      "exec_seconds": 0.13604957700590603,
+      "added_seconds": 0.11984014199697413,
+      "filter": "git_log",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2190,
+          "output": 1750
+        },
+        "o200k_base": {
+          "raw": 2172,
+          "output": 1732
+        }
+      },
+      "facts": 110,
+      "missing_count": 20,
+      "missing_sample": [
+        "Date:   Fri Oct 2 11:36:36 2026 +0000",
+        "Date:   Fri Oct 2 11:36:32 2026 +0000",
+        "Date:   Fri Oct 2 11:15:48 2026 +0000"
+      ],
+      "exit_preserved": true
+    },
+    {
+      "id": "fastapi-diff",
+      "repo": "fastapi",
+      "kind": "diff",
+      "command": [
+        "git",
+        "diff",
+        "HEAD~1"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.21036999201169237,
+      "stdout_sha256": "2c4c567c8cd64671746355e5d93179ca3195c28e01190d7a4f08d0b93c6e96c5",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 887,
+      "output_bytes": 282,
+      "replay_seconds": 0.02582006700686179,
+      "exec_seconds": 0.17917760999989696,
+      "added_seconds": 0.15335754299303517,
+      "filter": "diff_summary",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 259,
+          "output": 93
+        },
+        "o200k_base": {
+          "raw": 279,
+          "output": 100
+        }
+      },
+      "facts": 10,
+      "missing_count": 6,
+      "missing_sample": [
+        "diff --git a/docs/en/docs/release-notes.md b/docs/en/docs/release-notes.md",
+        "index 7019404..70ba094 100644",
+        "### Translations"
+      ],
+      "exit_preserved": true
+    },
+    {
+      "id": "fastapi-status",
+      "repo": "fastapi",
+      "kind": "status",
+      "command": [
+        "git",
+        "status"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.08164793401374482,
+      "stdout_sha256": "768047aea8b2e058dfe4712117ed0ac8eac2ac0a254b0691ddabc5e3fd5bfddd",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 104,
+      "output_bytes": 104,
+      "replay_seconds": 0.0182159079995472,
+      "exec_seconds": 0.14020385697949678,
+      "added_seconds": 0.12198794897994958,
+      "filter": "git_status",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 23,
+          "output": 23
+        },
+        "o200k_base": {
+          "raw": 23,
+          "output": 23
+        }
+      },
+      "facts": 3,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "fastapi-show",
+      "repo": "fastapi",
+      "kind": "show",
+      "command": [
+        "git",
+        "show",
+        "--stat",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.005924791999859735,
+      "stdout_sha256": "ebadf0c67a882de172e8104f80c5b23b697327d4e11202d764707a582d0d8e02",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 291,
+      "output_bytes": 291,
+      "replay_seconds": 0.0164610669889953,
+      "exec_seconds": 0.16652525498648174,
+      "added_seconds": 0.15006418799748644,
+      "filter": "git_show",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 106,
+          "output": 106
+        },
+        "o200k_base": {
+          "raw": 107,
+          "output": 107
+        }
+      },
+      "facts": 7,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "fastapi-ls",
+      "repo": "fastapi",
+      "kind": "ls",
+      "command": [
+        "ls",
+        "-la"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.002882325992686674,
+      "stdout_sha256": "83fd635e2b8c39f503801c750aa4e89c65092bf3dbaa73bc18e8db1340a64a8a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 1144,
+      "output_bytes": 1144,
+      "replay_seconds": 0.015924661012832075,
+      "exec_seconds": 0.14947936098906212,
+      "added_seconds": 0.13355469997623004,
+      "filter": "listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 528,
+          "output": 528
+        },
+        "o200k_base": {
+          "raw": 529,
+          "output": 529
+        }
+      },
+      "facts": 20,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "fastapi-recursive",
+      "repo": "fastapi",
+      "kind": "recursive",
+      "command": [
+        "ls",
+        "-R"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.005611264001345262,
+      "stdout_sha256": "3ef05164905325a202bd3adbddba7ec2da7a16e87baeed586c4383d6fb3aaf2f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 117867,
+      "output_bytes": 117381,
+      "replay_seconds": 0.014691178017528728,
+      "exec_seconds": 0.2411064270127099,
+      "added_seconds": 0.22641524899518117,
+      "filter": "listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 35089,
+          "output": 35108
+        },
+        "o200k_base": {
+          "raw": 35310,
+          "output": 35329
+        }
+      },
+      "facts": 4885,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "fastapi-find",
+      "repo": "fastapi",
+      "kind": "find",
+      "command": [
+        "find",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.007476602011593059,
+      "stdout_sha256": "b3803f58837179b3780c8d38ee2e9590b463a62b394db3cc350d26ebe0170557",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 225728,
+      "output_bytes": 225728,
+      "replay_seconds": 0.02507415899890475,
+      "exec_seconds": 0.3310460410139058,
+      "added_seconds": 0.30597188201500103,
+      "filter": "listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 61190,
+          "output": 61190
+        },
+        "o200k_base": {
+          "raw": 61723,
+          "output": 61723
+        }
+      },
+      "facts": 4449,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "fastapi-grep",
+      "repo": "fastapi",
+      "kind": "grep",
+      "command": [
+        "grep",
+        "-rn",
+        "--exclude-dir=.git",
+        "TODO",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.18952638100017793,
+      "stdout_sha256": "b416a38d89b481d108f56bfab263f68a1f705faa9d95ae5c7a766af06fcf33f6",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 2882,
+      "output_bytes": 2674,
+      "replay_seconds": 0.0250420980155468,
+      "exec_seconds": 0.19312642599106766,
+      "added_seconds": 0.16808432797552086,
+      "filter": "search_results",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 753,
+          "output": 742
+        },
+        "o200k_base": {
+          "raw": 759,
+          "output": 747
+        }
+      },
+      "facts": 26,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "fastapi-cat",
+      "repo": "fastapi",
+      "kind": "cat",
+      "command": [
+        "cat",
+        "docs/en/docs/release-notes.md"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0034293009957764298,
+      "stdout_sha256": "967b9544fb7215df3bf425bbf7d8b766a27f387902df8085a7f7a3226bc0b375",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 709704,
+      "output_bytes": 709704,
+      "replay_seconds": 0.028500383981736377,
+      "exec_seconds": 0.6443628149863798,
+      "added_seconds": 0.6158624310046434,
+      "filter": "file-read",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 210240,
+          "output": 210240
+        },
+        "o200k_base": {
+          "raw": 223103,
+          "output": 223103
+        }
+      },
+      "facts": 1,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "fastapi-test",
+      "repo": "fastapi",
+      "kind": "test",
+      "command": [
+        "pytest",
+        "-q"
+      ],
+      "exit_code": 2,
+      "command_seconds": 5.908245054015424,
+      "stdout_sha256": "5aefa93ca6b595daefecdd0f5a04aae34f3088d1d9496e265323dd3ff118ab70",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 415245,
+      "output_bytes": 415245,
+      "replay_seconds": 0.034730765997665,
+      "exec_seconds": 0.3003815289994236,
+      "added_seconds": 0.2656507630017586,
+      "filter": "pytest:diagnostic-guard",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 101036,
+          "output": 101036
+        },
+        "o200k_base": {
+          "raw": 100772,
+          "output": 100772
+        }
+      },
+      "facts": 6324,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "TypeScript-log",
+      "repo": "TypeScript",
+      "kind": "log",
+      "command": [
+        "git",
+        "log",
+        "-20"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.005251900001894683,
+      "stdout_sha256": "903a3bf986ebf197129686441363774c3ff5e2494be4ecf9d38ea30fb23a68b2",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 4516,
+      "output_bytes": 3661,
+      "replay_seconds": 0.02587645300081931,
+      "exec_seconds": 0.1581196729966905,
+      "added_seconds": 0.1322432199958712,
+      "filter": "git_log",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 1632,
+          "output": 1229
+        },
+        "o200k_base": {
+          "raw": 1628,
+          "output": 1226
+        }
+      },
+      "facts": 82,
+      "missing_count": 20,
+      "missing_sample": [
+        "Date:   Thu Oct 1 23:56:38 2026 +0000",
+        "Date:   Thu Oct 1 23:32:08 2026 +0000",
+        "Date:   Thu Oct 1 20:41:56 2026 +0000"
+      ],
+      "exit_preserved": true
+    },
+    {
+      "id": "TypeScript-diff",
+      "repo": "TypeScript",
+      "kind": "diff",
+      "command": [
+        "git",
+        "diff",
+        "HEAD~1"
+      ],
+      "exit_code": 0,
+      "command_seconds": 1.4788324609980918,
+      "stdout_sha256": "a3c98e918bcc12cedc65dcbfb59731614e53546daa5f5f4cabb8e958ef40ff5c",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 5989,
+      "output_bytes": 4559,
+      "replay_seconds": 0.017286535003222525,
+      "exec_seconds": 0.1696950189943891,
+      "added_seconds": 0.15240848399116658,
+      "filter": "diff_summary",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2152,
+          "output": 1778
+        },
+        "o200k_base": {
+          "raw": 2174,
+          "output": 1790
+        }
+      },
+      "facts": 200,
+      "missing_count": 20,
+      "missing_sample": [
+        "diff --git a/tsc/internal/transformers/tstransforms/typeeraser.go b/tsc/internal/transformers/tstransforms/typeeraser.go",
+        "index 0951065f6..0cf768b9d 100644",
+        "}"
+      ],
+      "exit_preserved": true
+    },
+    {
+      "id": "TypeScript-status",
+      "repo": "TypeScript",
+      "kind": "status",
+      "command": [
+        "git",
+        "status"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.12171710099210031,
+      "stdout_sha256": "09be446dbc2620ee4a90fc59fa9005e726ac3b4c0e8f2939a9aaccc11575dad4",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 100,
+      "output_bytes": 100,
+      "replay_seconds": 0.02371367800515145,
+      "exec_seconds": 0.14132222399348393,
+      "added_seconds": 0.11760854598833248,
+      "filter": "git_status",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 23,
+          "output": 23
+        },
+        "o200k_base": {
+          "raw": 23,
+          "output": 23
+        }
+      },
+      "facts": 3,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "TypeScript-show",
+      "repo": "TypeScript",
+      "kind": "show",
+      "command": [
+        "git",
+        "show",
+        "--stat",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.009597047988791019,
+      "stdout_sha256": "00ae5a998564f6dbe6a3525798bc6aa591120974ab012a8e7b656567ea7cadff",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 706,
+      "output_bytes": 706,
+      "replay_seconds": 0.01692752298549749,
+      "exec_seconds": 0.16497342399088666,
+      "added_seconds": 0.14804590100538917,
+      "filter": "git_show",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 207,
+          "output": 207
+        },
+        "o200k_base": {
+          "raw": 205,
+          "output": 205
+        }
+      },
+      "facts": 11,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "TypeScript-ls",
+      "repo": "TypeScript",
+      "kind": "ls",
+      "command": [
+        "ls",
+        "-la"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0028388140199240297,
+      "stdout_sha256": "8e757ab1b79129b9f1ce5c9dc06569804aa73e6a2f0c057b9cdd53a0404e1521",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 1607,
+      "output_bytes": 1607,
+      "replay_seconds": 0.022514429001603276,
+      "exec_seconds": 0.1453470520209521,
+      "added_seconds": 0.12283262301934883,
+      "filter": "listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 744,
+          "output": 744
+        },
+        "o200k_base": {
+          "raw": 745,
+          "output": 745
+        }
+      },
+      "facts": 27,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "TypeScript-recursive",
+      "repo": "TypeScript",
+      "kind": "recursive",
+      "command": [
+        "ls",
+        "-R"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.042700802005128935,
+      "stdout_sha256": "86326f7f74450781adff0d71614a0eb06892be8b4b3a14adfe809c43aafac8eb",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 2650550,
+      "output_bytes": 2649848,
+      "replay_seconds": 0.026310015993658453,
+      "exec_seconds": 43.62751334998757,
+      "added_seconds": 43.60120333399391,
+      "filter": "listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 621835,
+          "output": 621856
+        },
+        "o200k_base": {
+          "raw": 616572,
+          "output": 616593
+        }
+      },
+      "facts": 68412,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "TypeScript-find",
+      "repo": "TypeScript",
+      "kind": "find",
+      "command": [
+        "find",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.04954853397794068,
+      "stdout_sha256": "c5bb9e594490269c0ede5624f2490f9e54e636b7061c061575f62a826a18ef1e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 5678963,
+      "output_bytes": 5678963,
+      "replay_seconds": 0.028971446998184547,
+      "exec_seconds": 65.01110566701391,
+      "added_seconds": 64.98213422001572,
+      "filter": "listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 1368105,
+          "output": 1368105
+        },
+        "o200k_base": {
+          "raw": 1361069,
+          "output": 1361069
+        }
+      },
+      "facts": 67761,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "TypeScript-grep",
+      "repo": "TypeScript",
+      "kind": "grep",
+      "command": [
+        "grep",
+        "-rn",
+        "--exclude-dir=.git",
+        "TODO",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 3.6494877389923204,
+      "stdout_sha256": "2d177b24ee99202f559df895e6307ca1a029f44fb8079623692a63b18920fab4",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 103655,
+      "output_bytes": 103655,
+      "replay_seconds": 0.03434320099768229,
+      "exec_seconds": 1.8884808569855522,
+      "added_seconds": 1.85413765598787,
+      "filter": "search_results:diagnostic-guard",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 25694,
+          "output": 25694
+        },
+        "o200k_base": {
+          "raw": 25868,
+          "output": 25868
+        }
+      },
+      "facts": 677,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "TypeScript-cat",
+      "repo": "TypeScript",
+      "kind": "cat",
+      "command": [
+        "cat",
+        "tsc/testdata/fixtures/compiler/checker.ts"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0033025140000972897,
+      "stdout_sha256": "ffe288edd0eae68f65e4b81b5bbfd4fe5fbed62b55246dc140813078555050fb",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 3151774,
+      "output_bytes": 3151774,
+      "replay_seconds": 0.030426776997046545,
+      "exec_seconds": 2.2154864439798985,
+      "added_seconds": 2.185059666982852,
+      "filter": "file-read",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 593089,
+          "output": 593089
+        },
+        "o200k_base": {
+          "raw": 597267,
+          "output": 597267
+        }
+      },
+      "facts": 1,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "TypeScript-test",
+      "repo": "TypeScript",
+      "kind": "test",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "exit_code": 127,
+      "command_seconds": 0.5146150890213903,
+      "stdout_sha256": "36cf49c25ed6627fe73de330ff5c271a21372db9f98c8fbd787e8acb45df66ca",
+      "stderr_sha256": "3cb2fc505271a7802f80b579867c47aeac7871bf6605dc693e6c427f4122e061",
+      "raw_bytes": 71,
+      "output_bytes": 42,
+      "replay_seconds": 0.03869488200871274,
+      "exec_seconds": 0.2950674149906263,
+      "added_seconds": 0.25637253298191354,
+      "filter": "toml:js-quality",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 31,
+          "output": 17
+        },
+        "o200k_base": {
+          "raw": 31,
+          "output": 17
+        }
+      },
+      "facts": 3,
+      "missing_count": 3,
+      "missing_sample": [
+        "> @typescript/repo@0.0.0 test",
+        "> hereby test",
+        "sh: 1: hereby: not found"
+      ],
+      "exit_preserved": true
+    },
+    {
+      "id": "compare-log",
+      "repo": "ripgrep",
+      "kind": "log",
+      "command": [
+        "git",
+        "log",
+        "-n",
+        "40"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.001993298006709665,
+      "stdout_sha256": "eb07352621e942990fc65fda3763277f1a97f93209a17d3a13807dff8900f20d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 9932,
+      "output_bytes": 8402,
+      "replay_seconds": 0.029864993004593998,
+      "exec_seconds": 0.3499924410134554,
+      "added_seconds": 0.3201274480088614,
+      "filter": "git_log",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 3090,
+          "output": 2560
+        },
+        "o200k_base": {
+          "raw": 3083,
+          "output": 2552
+        }
+      },
+      "facts": 191,
+      "missing_count": 21,
+      "missing_sample": [
+        "Date:   Tue Aug 4 10:00:08 2026 -0400",
+        "Date:   Tue Aug 4 09:59:57 2026 -0400",
+        "Date:   Tue Aug 4 07:46:42 2026 -0400"
+      ],
+      "exit_preserved": true
+    },
+    {
+      "id": "compare-diff",
+      "repo": "ripgrep",
+      "kind": "diff",
+      "command": [
+        "git",
+        "diff",
+        "HEAD~20"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.010303212999133393,
+      "stdout_sha256": "430339376d59822a6a5a92dc24d0adacd903a47b5903c91bf6f516dc8e967d00",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 155164,
+      "output_bytes": 148059,
+      "replay_seconds": 0.0246969019935932,
+      "exec_seconds": 6.704339071002323,
+      "added_seconds": 6.67964216900873,
+      "filter": "diff_summary:diagnostic-guard",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 43282,
+          "output": 40350
+        },
+        "o200k_base": {
+          "raw": 43405,
+          "output": 40470
+        }
+      },
+      "facts": 4544,
+      "missing_count": 217,
+      "missing_sample": [
+        "@@ -4,18 +4,18 @@ version = 4",
+        "[[package]]",
+        "name = \"aho-corasick\""
+      ],
+      "exit_preserved": true
+    },
+    {
+      "id": "compare-grep",
+      "repo": "fastapi",
+      "kind": "grep",
+      "command": [
+        "grep",
+        "-rn",
+        "async def",
+        "fastapi"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.006781307980418205,
+      "stdout_sha256": "3bcc85ee414a0239773a01eee988b39d9c6ded0ccdc08b2b2c613ae8a32cb132",
+      "stderr_sha256": "adf004b3088d2728ffbcd735f15a9a8f53b2ca0a4e41d0c12c800a81aa529200",
+      "raw_bytes": 11037,
+      "output_bytes": 11047,
+      "replay_seconds": 0.03272317300434224,
+      "exec_seconds": 0.3482320609909948,
+      "added_seconds": 0.31550888798665255,
+      "filter": "search_results:diagnostic-guard",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2867,
+          "output": 2867
+        },
+        "o200k_base": {
+          "raw": 2966,
+          "output": 2966
+        }
+      },
+      "facts": 128,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "compare-find",
+      "repo": "fastapi",
+      "kind": "find",
+      "command": [
+        "find",
+        ".",
+        "-name",
+        "*.py"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.00637108800583519,
+      "stdout_sha256": "eacc0c4f9fb358d3fd26668696ae25ca8ba67df8b49babeb1730cb817a74b8df",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 58888,
+      "output_bytes": 58888,
+      "replay_seconds": 0.03389608298311941,
+      "exec_seconds": 0.3479419570066966,
+      "added_seconds": 0.3140458740235772,
+      "filter": "listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 14042,
+          "output": 14042
+        },
+        "o200k_base": {
+          "raw": 14203,
+          "output": 14203
+        }
+      },
+      "facts": 1166,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    },
+    {
+      "id": "compare-cat",
+      "repo": "TypeScript",
+      "kind": "cat",
+      "command": [
+        "cat",
+        "tsc/internal/bundled/libs/lib.dom.d.ts"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.002793509018374607,
+      "stdout_sha256": "d6b1eba8496bdd0eed6fc8a685768fe01b2da4a0388b5fe7df558290bffcf32f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 2349483,
+      "output_bytes": 2349483,
+      "replay_seconds": 0.06035724299727008,
+      "exec_seconds": 0.7078639699902851,
+      "added_seconds": 0.647506726993015,
+      "filter": "file-read",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 530260,
+          "output": 530260
+        },
+        "o200k_base": {
+          "raw": 535949,
+          "output": 535949
+        }
+      },
+      "facts": 1,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true
+    }
+  ]
+}
