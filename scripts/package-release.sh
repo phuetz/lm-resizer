@@ -23,11 +23,11 @@ mkdir -p "$stage"
 cp "$bin" "$stage/lm-resizer"
 # Only what an end user needs: the binary, its documentation and the agent skills.
 # Development material (workflows, fixtures, examples, build scripts, WASM package) stays in the repository.
-for f in LICENSE README.md README.fr.md CHANGELOG.md CONTRIBUTING.md SECURITY.md; do
+for f in LICENSE THIRD-PARTY-NOTICES README.md README.fr.md CHANGELOG.md CONTRIBUTING.md SECURITY.md; do
   cp "$root/$f" "$stage/"
 done
 mkdir -p "$stage/docs" "$stage/scripts"
-for f in FAQ.md FAQ.fr.md KNOWN-MISSES.md KNOWN-MISSES.fr.md CLAUDE_CODEX.md TOKEN-STATISTICS.md PROXY-MCP.md lm-resizer-hero.png; do
+for f in FAQ.md FAQ.fr.md KNOWN-MISSES.md KNOWN-MISSES.fr.md CLAUDE_CODEX.md TOKEN-STATISTICS.md PARITE-HORS-FILTRES.md PROXY-MCP.md lm-resizer-hero.png; do
   cp "$root/docs/$f" "$stage/docs/"
 done
 cp -R "$root/skills" "$stage/"

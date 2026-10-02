@@ -1,4 +1,7 @@
-//! Host-specific wire formats; never execute commands or grant permission here.
+//! Protocol reference: rtk-ai/rtk v0.50.0, commit
+//! 1d87b8e719ce0a50c223cd93ca64dd16921f9aec, src/hooks/{init,hook_cmd}.rs.
+//! Independent implementation; see THIRD-PARTY-NOTICES.
+//! Host-specific wire formats; execution and final approval remain with the host.
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::{Read, Write};

@@ -26,11 +26,11 @@ New-Item -ItemType Directory -Force -Path $stage | Out-Null
 Copy-Item $target (Join-Path $stage "lm-resizer.exe")
 # Only what an end user needs: the binary, its documentation and the agent skills.
 # Development material (workflows, fixtures, examples, build scripts, WASM package) stays in the repository.
-foreach ($f in @("LICENSE", "README.md", "README.fr.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md")) {
+foreach ($f in @("LICENSE", "THIRD-PARTY-NOTICES", "README.md", "README.fr.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md")) {
   Copy-Item (Join-Path $root $f) $stage
 }
 New-Item -ItemType Directory -Force -Path (Join-Path $stage "docs") | Out-Null
-foreach ($f in @("FAQ.md", "FAQ.fr.md", "KNOWN-MISSES.md", "KNOWN-MISSES.fr.md", "CLAUDE_CODEX.md", "TOKEN-STATISTICS.md", "PROXY-MCP.md", "lm-resizer-hero.png")) {
+foreach ($f in @("FAQ.md", "FAQ.fr.md", "KNOWN-MISSES.md", "KNOWN-MISSES.fr.md", "CLAUDE_CODEX.md", "TOKEN-STATISTICS.md", "PARITE-HORS-FILTRES.md", "PROXY-MCP.md", "lm-resizer-hero.png")) {
   Copy-Item (Join-Path $root "docs\$f") (Join-Path $stage "docs")
 }
 Copy-Item (Join-Path $root "skills") (Join-Path $stage "skills") -Recurse
