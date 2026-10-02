@@ -123,27 +123,43 @@ fn bad_local_config_and_shell_substitution_leave_hook_input_unchanged() {
     assert_eq!(v["changed"], false);
 }
 
-#[test]
-fn native_and_preview_hooks_defer_to_allow_deny_and_unreadable_policies() {
-    for (agent, directory, tool) in [
-        ("claude", ".claude", "Bash"),
-        ("codex", ".codex", "Bash"),
-        ("copilot", ".copilot", "bash"),
-        ("vibe", ".vibe", "bash"),
-    ] {
-        for content in [
-            r#"{"permissions":{"allow":["Bash(git status)"]}}"#,
-            r#"{"permissions":{"deny":["Bash(git status)"]}}"#,
-            "{invalid",
-        ] {
-            let root = tempfile::tempdir().unwrap();
-            let dir = root.path().join(directory);
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("settings.json"), content).unwrap();
-            assert_policy_abstention(root.path(), agent, tool);
+macro_rules! policy_test {
+    ($name:ident, $agent:literal, $directory:literal, $tool:literal) => {
+        #[test]
+        fn $name() {
+            for content in [
+                r#"{"permissions":{"allow":["Bash(git status)"]}}"#,
+                r#"{"permissions":{"deny":["Bash(git status)"]}}"#,
+                "{invalid",
+            ] {
+                let root = tempfile::tempdir().unwrap();
+                let dir = root.path().join($directory);
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("settings.json"), content).unwrap();
+                assert_policy_abstention(root.path(), $agent, $tool);
+            }
         }
-    }
+    };
 }
+policy_test!(
+    claude_native_and_preview_constraints,
+    "claude",
+    ".claude",
+    "Bash"
+);
+policy_test!(
+    codex_native_and_preview_constraints,
+    "codex",
+    ".codex",
+    "Bash"
+);
+policy_test!(
+    copilot_native_and_preview_constraints,
+    "copilot",
+    ".copilot",
+    "bash"
+);
+policy_test!(vibe_native_and_preview_constraints, "vibe", ".vibe", "bash");
 
 fn assert_policy_abstention(root: &std::path::Path, agent: &str, tool: &str) {
     let command = || {
@@ -162,7 +178,7 @@ fn assert_policy_abstention(root: &std::path::Path, agent: &str, tool: &str) {
         .unwrap();
     assert!(out.status.success());
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(value["changed"], false, "preview {agent}");
+
     let payload = serde_json::json!({"permission_mode":"default", "hook_event_name":"PreToolUse",
         "tool_name":tool,"tool_input":{"command":"git status","timeout":7}});
     let mut child = command()
@@ -180,8 +196,8 @@ fn assert_policy_abstention(root: &std::path::Path, agent: &str, tool: &str) {
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success());
     assert!(
-        out.stdout.is_empty(),
-        "native {agent}: {}",
+        out.stdout.is_empty() && value["changed"] == false,
+        "{agent}: preview {value}; native {}",
         String::from_utf8_lossy(&out.stdout)
     );
 }
