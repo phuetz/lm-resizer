@@ -6489,6 +6489,11 @@ keep_lines_matching = [
   "ERR!",
   "error",
   "failed",
+  "ERR_PNPM_",
+  "ERR_",
+  "ELIFECYCLE",
+  "EACCES",
+  "E404",
 ]
 max_lines = 120
 on_empty = "package install: completed"
@@ -10265,6 +10270,41 @@ expected = "error: bad\n"
         assert_eq!(filter, "toml:brew-install");
         assert!(text.contains("Warning: already installed"));
         assert!(!text.contains("Downloading demo"));
+    }
+    #[test]
+    fn package_install_keeps_pnpm_err_codes() {
+        let (filter, text) = filter_command_output(
+            &["pnpm".into(), "add".into(), "-D".into(), "vitest".into()],
+            "ERR_PNPM_FETCH_404 GET https://x: Not Found - 404\n",
+        );
+        assert_eq!(filter, "toml:package-install");
+        assert!(
+            text.contains("ERR_PNPM_FETCH_404"),
+            "should keep pnpm error codes"
+        );
+    }
+
+    #[test]
+    fn package_install_keeps_yarn_and_npm_errors() {
+        let (_, text1) =
+            filter_command_output(&["npm".into(), "install".into()], "npm ERR! code E404\n");
+        assert!(text1.contains("npm ERR! code E404"));
+        let (_, text2) = filter_command_output(
+            &["yarn".into(), "add".into(), "x".into()],
+            "error An unexpected error occurred\n",
+        );
+        assert!(text2.contains("error An unexpected error occurred"));
+    }
+
+    #[test]
+    fn package_install_still_collapses_clean_install() {
+        let (filter, text) = filter_command_output(
+            &["npm".into(), "install".into()],
+            "Progress: something\nadded 120 packages in 3s\n",
+        );
+        assert_eq!(filter, "toml:package-install");
+        assert!(text.contains("added 120 packages"));
+        assert!(!text.contains("Progress:"));
     }
 
     #[test]
