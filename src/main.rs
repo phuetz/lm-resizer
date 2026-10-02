@@ -42,6 +42,7 @@ mod advice_cli;
 mod agent_hooks;
 mod agent_init;
 mod analytics_cli;
+mod integration_doctor;
 mod lossless_filters;
 mod mcp_proxy;
 mod parity_filters;
@@ -147,6 +148,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Verify installed agent hooks, plugins and guidance without modifying files.
+    Verify(integration_doctor::Options),
     /// Show, create or edit persistent local settings.
     Config(settings_cli::Options),
     /// Execute without filtering while recording usage and preserving exit status.
@@ -1351,6 +1354,7 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
     match cli.command {
+        Commands::Verify(options) => integration_doctor::run(options)?,
         Commands::Config(options) => settings_cli::run(options)?,
         Commands::Proxy { command } => {
             let code = raw_proxy::run(&command)?;

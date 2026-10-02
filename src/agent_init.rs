@@ -9,7 +9,7 @@ const START: &str = "\n<!-- lm-resizer integration -->\n";
 const END: &str = "\n<!-- /lm-resizer integration -->\n";
 const GUIDANCE: &str = "Use `lm-resizer exec --raw-on-failure -- <command>` for verbose command output. Recover complete output with `lm-resizer tee read <reference>` or `lm-resizer retrieve <key>`. Inspect savings with `lm-resizer gain --history`. Preserve the command's exit status and never hide failures. Use `lm-resizer rewrite-shell '<command>'` to preview a rewrite without execution.";
 
-#[derive(Args)]
+#[derive(Args, Default)]
 pub struct Options {
     #[arg(long, default_value = "claude", value_parser = ["claude", "codex", "gemini", "cursor", "trae", "copilot", "droid", "vibe", "opencode", "pi", "omp", "hermes", "windsurf", "cline", "roo", "kilocode", "antigravity", "kimi"])]
     pub agent: String,
@@ -100,7 +100,7 @@ pub fn run(mut opts: Options) -> Result<()> {
     let report: Vec<Value> = edits
         .iter()
         .map(
-            |edit| json!({"path":edit.path,"changed":edit.before!=edit.after,"content":edit.after}),
+            |edit| json!({"path":edit.path,"changed":edit.before!=edit.after,"content":if opts.show { &edit.before } else { &edit.after }}),
         )
         .collect();
     if !preview {
@@ -127,7 +127,7 @@ pub fn run(mut opts: Options) -> Result<()> {
                 edit.path.display()
             );
             if preview {
-                println!("{}", edit.after);
+                println!("{}", if opts.show { edit.before } else { edit.after });
             }
         }
     }
