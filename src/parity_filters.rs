@@ -1858,10 +1858,7 @@ Actual:   301</Message>
         // 1) Test de la fonction parse_rfc3339_millis directement
         assert_eq!(parse_rfc3339_millis("2026-09-30T10:00:0é"), None);
         assert_eq!(parse_rfc3339_millis("20é6-09-30T10:00:00Z"), None);
-        assert_eq!(
-            parse_rfc3339_millis("2026-09-30T10:00:00.250+02:00").is_some(),
-            true
-        );
+        assert!(parse_rfc3339_millis("2026-09-30T10:00:00.250+02:00").is_some());
 
         // 2) Test de times_attr_millis
         let xml = r#"<TestRun><Times creation="2026-09-30T10:00:0é" /></TestRun>"#;

@@ -248,6 +248,12 @@ unsafe fn ffi_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str, String> {
         .map_err(|err| format!("input is not valid UTF-8: {err}"))
 }
 
+/// Retrieves a CCR entry as an owned, null-terminated JSON string.
+/// Release the returned string with `lm_resizer_string_free`.
+///
+/// # Safety
+/// When `hash_len` is non-zero, `hash_ptr` must point to at least `hash_len`
+/// readable bytes and remain valid for the duration of this call.
 #[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn lm_resizer_retrieve_json(
