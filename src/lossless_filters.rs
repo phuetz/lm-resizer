@@ -3,6 +3,8 @@
 //! rows outside diagnostic blocks. Unknown output is retained verbatim.
 
 pub fn filter(command: &[String], raw: &str) -> Option<(&'static str, String)> {
+    // Inspect wrapper arguments without changing execution or environment.
+    let command = unwrap_runner(command);
     let program = std::path::Path::new(command.first()?)
         .file_stem()?
         .to_str()?;
@@ -11,14 +13,27 @@ pub fn filter(command: &[String], raw: &str) -> Option<(&'static str, String)> {
         // Search routing awaits the independently bisected regression fix.
         ("grep" | "rg", _) => return None,
         ("find" | "fd", _) => ("paths", raw.to_string()),
-        ("ls", _) => ("listing", raw.to_string()),
-        ("cat" | "head" | "tail", _) => ("file", raw.to_string()),
+        ("ls" | "dir" | "tree", _) => ("listing", raw.to_string()),
+        ("cat" | "head" | "tail" | "nl", _) => ("file", raw.to_string()),
         ("git", "log" | "diff" | "show" | "status") => ("git", raw.to_string()),
         ("cargo", "test") => ("cargo", test_view(raw, "cargo")),
         ("pytest", _) => ("pytest", test_view(raw, "pytest")),
         ("npm" | "pnpm" | "yarn", "test") | ("vitest" | "jest", _) => {
             ("npm-test", test_view(raw, "npm"))
         }
+        // Missing RTK ecosystems: exact reversible representation first.
+        // Dedicated success grammars can be added without discarding unknown rows.
+        ("php" | "phpunit" | "phpstan" | "pest" | "paratest" | "ecs" | "pint" | "phpt", _) => {
+            ("php", raw.to_string())
+        }
+        ("deno" | "bun", _) => ("runtime", raw.to_string()),
+        ("sbt", _) => ("scala", raw.to_string()),
+        ("ctest", _) => ("ctest", raw.to_string()),
+        ("sqlfluff", _) => ("sqlfluff", raw.to_string()),
+        ("oc", _) => ("openshift", raw.to_string()),
+        ("glab", _) => ("gitlab", raw.to_string()),
+        ("wget", _) => ("download", raw.to_string()),
+        ("prettier" | "black", _) => ("formatter", raw.to_string()),
         _ => return None,
     };
     let compact = factor_lines(&text);
@@ -31,6 +46,43 @@ pub fn filter(command: &[String], raw: &str) -> Option<(&'static str, String)> {
         raw.to_string()
     };
     Some((name, compact))
+}
+
+fn unwrap_runner(mut command: &[String]) -> &[String] {
+    loop {
+        let Some(first) = command.first() else {
+            return command;
+        };
+        let program = first
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(first)
+            .trim_end_matches(".exe");
+        let skip = match program {
+            "npx" | "bunx" => {
+                let mut index = 1;
+                while command
+                    .get(index)
+                    .is_some_and(|arg| matches!(arg.as_str(), "--yes" | "-y" | "--"))
+                {
+                    index += 1;
+                }
+                index
+            }
+            "bundle" | "npm" | "pnpm" | "yarn"
+                if command.get(1).is_some_and(|arg| arg == "exec") =>
+            {
+                2
+            }
+            "uv" if command.get(1).is_some_and(|arg| arg == "run") => 2,
+            "python" | "python3" if command.get(1).is_some_and(|arg| arg == "-m") => 2,
+            _ => return command,
+        };
+        if skip >= command.len() || command[skip].starts_with('-') {
+            return command;
+        }
+        command = &command[skip..];
+    }
 }
 
 fn test_view(raw: &str, runner: &str) -> String {
@@ -231,6 +283,45 @@ mod tests {
         for raw in ["", "\n", "\r\n", "=2", "LMR-LINES/2\n@\"x\"\n"] {
             assert_eq!(factor_lines(raw), raw);
         }
+    }
+
+    #[test]
+    fn missing_ecosystems_and_wrappers_preserve_all_diagnostic_rows() {
+        let raw = format!(
+            "{}unique failure: path/to/file:92 unexpected value\n",
+            "repeated diagnostic with complete expected and actual values\n".repeat(150)
+        );
+        for command in [
+            "php artisan test",
+            "phpunit",
+            "phpstan analyze",
+            "pest",
+            "paratest",
+            "ecs check",
+            "pint",
+            "phpt",
+            "deno test",
+            "bun test",
+            "sbt test",
+            "ctest",
+            "sqlfluff lint",
+            "oc get pods",
+            "glab mr list",
+            "wget --server-response example.invalid",
+            "prettier --check .",
+            "black --check .",
+            "npx --yes jest",
+            "npm exec vitest",
+            "uv run pytest",
+            "python3 -m pytest",
+        ] {
+            let command: Vec<String> = command.split_whitespace().map(str::to_string).collect();
+            let (_, compact) = filter(&command, &raw).expect("dedicated lossless route");
+            assert_eq!(decode(&compact), raw);
+            assert!(compact.len() < raw.len());
+        }
+        let unsupported = ["uv", "run", "--project", "elsewhere", "pytest"].map(str::to_string);
+        assert!(filter(&unsupported, &raw).is_none());
     }
 
     #[test]

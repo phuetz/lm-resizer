@@ -2683,6 +2683,9 @@ fn shell_join(args: &[String]) -> String {
 }
 
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
+    if command_requests_json(command) && serde_json::from_str::<Value>(raw).is_ok() {
+        return ("json-passthrough".to_string(), raw.to_string());
+    }
     if let Some((name, output)) = lossless_filters::filter(command, raw) {
         return (format!("lossless:{name}"), output);
     }
@@ -11113,9 +11116,9 @@ Successfully tagged localhost/app:latest\n";
             .collect();
         let raw = " Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Duration  10ms\n";
         let (name, filtered) = filter_command_output(&command, raw);
-        assert_eq!(name, "js_test_runner");
+        assert_eq!(name, "lossless:npm-test");
         assert!(filtered.contains("Tests  3 passed (3)"));
-        assert!(!filtered.contains("Duration"));
+        assert!(filtered.contains("Duration"));
     }
 
     #[test]
