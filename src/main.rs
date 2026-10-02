@@ -46,6 +46,7 @@ mod lossless_filters;
 mod mcp_proxy;
 mod parity_filters;
 mod provider_usage;
+mod raw_proxy;
 mod rtk_filters;
 mod session_audit;
 mod shared_context;
@@ -145,6 +146,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Execute without filtering while recording usage and preserving exit status.
+    Proxy {
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
     /// Install or remove a reversible agent integration.
     Init(agent_init::Options),
     /// Filter stdin without executing any command; accepts RTK pipe filter names.
@@ -1339,6 +1345,12 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
     match cli.command {
+        Commands::Proxy { command } => {
+            let code = raw_proxy::run(&command)?;
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
         Commands::Init(options) => agent_init::run(options)?,
         Commands::Compress {
             input,
