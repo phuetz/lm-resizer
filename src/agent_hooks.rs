@@ -250,8 +250,16 @@ fn host_has_constraints(agent: &str) -> bool {
         "trae" => ".trae",
         _ => return false,
     };
-    for root in roots {
-        let dir = root.join(directory);
+    let mut directories: Vec<_> = roots.into_iter().map(|root| root.join(directory)).collect();
+    let variable = match agent {
+        "codex" => Some("CODEX_HOME"),
+        "claude" => Some("CLAUDE_CONFIG_DIR"),
+        _ => None,
+    };
+    if let Some(path) = variable.and_then(std::env::var_os) {
+        directories.push(path.into());
+    }
+    for dir in directories {
         if agent == "codex" && dir.join("rules").is_dir() {
             match std::fs::read_dir(dir.join("rules")) {
                 Ok(mut entries) => {

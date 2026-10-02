@@ -10,7 +10,7 @@ args = {'command': 'git status', 'timeout': 3}
 with patch.object(adapter.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '{"changed":true,"rewritten":"wrapped"}')) as run:
     adapter.rewrite('terminal', args)
     assert args == {'command': 'wrapped', 'timeout': 3}
-    assert run.call_args.args[0] == ['lm-resizer', 'hook', 'check', 'git status']
+    assert run.call_args.args[0] == ['lm-resizer', 'hook', 'check', '--agent', 'hermes', 'git status']
     assert run.call_args.kwargs['shell'] is False
     assert run.call_args.kwargs['timeout'] == 2
 with patch.object(adapter.subprocess, 'run', side_effect=subprocess.TimeoutExpired('lm-resizer', 2)):

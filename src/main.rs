@@ -1357,7 +1357,15 @@ fn run_on_cli_thread() -> Result<()> {
 #[tokio::main]
 async fn run(cli: Cli) -> Result<()> {
     if !matches!(cli.command, Commands::Config(_)) {
-        settings_cli::apply()?;
+        if let Err(error) = settings_cli::apply() {
+            if matches!(cli.command, Commands::Hook { .. }) {
+                eprintln!(
+                    "lm-resizer hook: invalid local configuration; command left unchanged: {error}"
+                );
+                return Ok(());
+            }
+            return Err(error);
+        }
     }
     if cli.skip_env {
         std::env::set_var("SKIP_ENV_VALIDATION", "1");
@@ -5140,6 +5148,9 @@ fn segment_has_redirect(seg: &str) -> bool {
 /// re-tokenized — so quoting/backslash-escaping (e.g. a grep BRE `"\|"`) can't be corrupted the way
 /// a split-and-rejoin would. Compound/piped/redirected commands run raw (safety over coverage).
 fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
+    if command.contains("$(") || command.contains('`') || command.contains('\n') {
+        return None;
+    }
     let tokens = split_shell_operators(command.trim());
     let [ShellToken::Segment(seg)] = tokens.as_slice() else {
         return None; // operators present → don't touch (avoid pipe/&& semantics + re-quoting)

@@ -15,7 +15,7 @@ def rewrite(tool_name=None, args=None, **_kwargs):
         return
     try:
         result = subprocess.run(
-            ["lm-resizer", "hook", "check", command],
+            ["lm-resizer", "hook", "check", "--agent", "hermes", command],
             shell=False, timeout=2, capture_output=True, text=True,
         )
         if result.returncode != 0:

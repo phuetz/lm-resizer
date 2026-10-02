@@ -4,7 +4,7 @@ const load = async (file) => import('data:text/javascript;base64,' + Buffer.from
 const { default: pi } = await load('pi.ts');
 let handler;
 let result = { code: 0, stdout: JSON.stringify({ changed: true, rewritten: 'lm-resizer exec -- git status' }) };
-pi({ on: (name, callback) => { assert.equal(name, 'tool_call'); handler = callback; }, exec: async (exe, args, opts) => { assert.equal(exe, 'lm-resizer'); assert.deepEqual(args, ['hook', 'check', 'git status']); assert.equal(opts.timeout, 2000); return result; } });
+pi({ on: (name, callback) => { assert.equal(name, 'tool_call'); handler = callback; }, exec: async (exe, args, opts) => { assert.equal(exe, 'lm-resizer'); assert.deepEqual(args, ['hook', 'check', '--agent', 'pi', 'git status']); assert.equal(opts.timeout, 2000); return result; } });
 let event = { toolName: 'bash', input: { command: 'git status', timeout: 7 } };
 await handler(event, {}); assert.equal(event.input.command, 'lm-resizer exec -- git status'); assert.equal(event.input.timeout, 7);
 result = { code: 1, stdout: 'broken' }; event.input.command = 'git status'; await handler(event, {}); assert.equal(event.input.command, 'git status');

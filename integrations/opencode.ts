@@ -5,7 +5,7 @@ export const LmResizerPlugin = async ({ $ }) => ({
     const command = output?.args?.command;
     if (typeof command !== "string" || !command) return;
     try {
-      const result = await $`lm-resizer hook check ${command}`.quiet().nothrow();
+      const result = await $`lm-resizer hook check --agent opencode ${command}`.quiet().nothrow();
       if (result.exitCode !== 0) return;
       const report = JSON.parse(String(result.stdout));
       if (report.changed && typeof report.rewritten === "string") output.args.command = report.rewritten;
