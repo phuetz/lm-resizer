@@ -42,6 +42,7 @@ mod advice_cli;
 mod agent_hooks;
 mod agent_init;
 mod analytics_cli;
+mod failure_log;
 mod history_admin;
 mod integration_doctor;
 mod learning_cli;
@@ -908,6 +909,7 @@ struct RewriteShellSegment {
 
 #[derive(Debug, Serialize)]
 struct ExecHistoryRecord {
+    compression_steps: Vec<String>,
     recovery_refs: Vec<String>,
     cwd: String,
     #[serde(flatten)]
@@ -1333,6 +1335,7 @@ fn provider_label(provider: ProviderKind) -> &'static str {
 
 fn main() {
     if let Err(error) = run_on_cli_thread() {
+        let _ = failure_log::record(&error);
         // Keep contextual errors readable even when RUST_BACKTRACE is enabled.
         eprintln!("Error: {error:#}");
         std::process::exit(1);
@@ -5089,6 +5092,7 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
         }
     }
     let record = ExecHistoryRecord {
+        compression_steps: report.compression_steps.clone(),
         recovery_refs,
         cwd: std::env::current_dir()?.to_string_lossy().into_owned(),
         tokens: report.tokens.clone(),

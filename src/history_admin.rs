@@ -29,6 +29,7 @@ pub fn reset(dir: &Path, yes: bool) -> Result<Value> {
         "exec-history.jsonl",
         "retrieval-feedback.jsonl",
         "proxy-history.jsonl",
+        "command-errors.jsonl",
     ];
     let existing: Vec<_> = names.into_iter().filter(|n| dir.join(n).exists()).collect();
     if !existing.is_empty() {

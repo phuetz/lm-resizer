@@ -14,8 +14,11 @@ pub enum Format {
 
 #[derive(Args, Default)]
 pub struct Views {
+    /// Show observable CLI errors and explicit raw fallbacks.
+    #[arg(short = 'F', long)]
+    failures: bool,
     /// Archive statistics and start fresh; recovery originals remain available.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "project")]
     reset: bool,
     #[arg(long, requires = "reset")]
     yes: bool,
@@ -88,6 +91,10 @@ impl Views {
     }
 
     pub fn enrich(&self, report: &mut Value, project: bool) -> Result<()> {
+        if self.failures {
+            let cwd = std::env::current_dir()?.to_string_lossy().into_owned();
+            report["failures"] = crate::failure_log::report(project.then_some(cwd.as_str()))?;
+        }
         if self.recalls {
             let dir = crate::default_state_dir()?;
             let history = crate::history_admin::read(&dir, "exec-history.jsonl")?;
@@ -192,6 +199,9 @@ impl Views {
                 }
                 if let Some(graph) = report["graph"].as_str() {
                     println!("\n{graph}");
+                }
+                if let Some(failures) = report.get("failures") {
+                    println!("\nFailures: {failures}");
                 }
                 if let Some(recalls) = report.get("recalls") {
                     println!("\nRecalls: {recalls}");

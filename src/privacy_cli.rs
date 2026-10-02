@@ -68,6 +68,7 @@ pub fn run(opts: Options) -> Result<()> {
                     "exec-history.jsonl",
                     "retrieval-feedback.jsonl",
                     "proxy-history.jsonl",
+                    "command-errors.jsonl",
                     "hook-audit.jsonl",
                 ] {
                     match std::fs::remove_file(directory.join(name)) {
