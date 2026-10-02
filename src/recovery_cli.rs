@@ -63,7 +63,7 @@ pub fn run(opts: Options) -> Result<()> {
     }
     let hash = opts.hash.unwrap();
     if hash.is_empty() || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-        bail!("recovery reference must be a hexadecimal hash or unique prefix");
+        bail!("CCR entry not found: {hash}; recovery reference must be a hexadecimal hash or unique prefix");
     }
     let ccr: Vec<_> = hashes.iter().filter(|key| key.starts_with(&hash)).collect();
     let files: Vec<_> = tee
