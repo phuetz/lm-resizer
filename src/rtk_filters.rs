@@ -136,9 +136,54 @@ fn apply(raw: &str, rule: Rule) -> String {
             Rule::GoBuild => trim.starts_with("go: downloading "),
             Rule::GoLint => trim.starts_with("level=info msg=\"golangci-lint has version "),
             Rule::Curl => {
-                trim.starts_with("% Total    % Received")
+                if trim.starts_with("% Total    % Received")
                     || trim.starts_with("Dload  Upload   Total")
-                    || trim.starts_with("--:--:--")
+                {
+                    true
+                } else {
+                    let segments: Vec<&str> =
+                        trim.split('\r').filter(|s| !s.trim().is_empty()).collect();
+                    if segments.is_empty() {
+                        false
+                    } else {
+                        segments.into_iter().all(|seg| {
+                            let fields: Vec<&str> = seg.split_whitespace().collect();
+                            if fields.len() < 10 {
+                                return false;
+                            }
+                            let mut has_time = false;
+                            for field in &fields {
+                                let is_time = field.contains(':')
+                                    && field
+                                        .chars()
+                                        .all(|c| c.is_ascii_digit() || c == ':' || c == '-');
+                                let is_numeric = field.chars().all(|c| {
+                                    c.is_ascii_digit()
+                                        || matches!(
+                                            c,
+                                            '.' | ','
+                                                | 'k'
+                                                | 'K'
+                                                | 'm'
+                                                | 'M'
+                                                | 'g'
+                                                | 'G'
+                                                | 't'
+                                                | 'T'
+                                                | 'p'
+                                                | 'P'
+                                        )
+                                });
+                                if is_time {
+                                    has_time = true;
+                                } else if !is_numeric {
+                                    return false;
+                                }
+                            }
+                            has_time && !fields.last().unwrap().contains(':')
+                        })
+                    }
+                }
             }
             Rule::AwsTable => {
                 trim.len() > 2
@@ -289,6 +334,30 @@ mod tests {
             curl,
             &["HTTP/1.1 500", "X-Request-ID: abc123", "body error"],
         );
+    }
+
+    #[test]
+    fn curl_progress_rows_are_removed_but_body_and_headers_kept() {
+        let raw = "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100     2  100     2    0     0  54054      0 --:--:-- --:--:-- --:--:-- 54054\nHTTP/1.1 500 Internal Server Error\nX-Request-ID: abc123\nbody error\n";
+        let out = run(
+            &["curl", "-i", "http://x"],
+            raw,
+            &["HTTP/1.1 500", "X-Request-ID: abc123", "body error"],
+        );
+        assert!(!out.contains("--:--:--"));
+
+        let raw2 = "\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100     2  100     2    0     0  54054      0 --:--:-- --:--:-- --:--:-- 54054\nHTTP/1.1 500 Internal Server Error\nX-Request-ID: abc123\nbody error\n";
+        let out2 = run(
+            &["curl", "-i", "http://x"],
+            raw2,
+            &["HTTP/1.1 500", "X-Request-ID: abc123", "body error"],
+        );
+        assert!(!out2.contains("--:--:--"));
+        assert!(!out2.contains("54054"));
+
+        let raw3 = "100 200 300\n";
+        let out3 = run(&["curl", "-i", "http://x"], raw3, &["100 200 300"]);
+        assert_eq!(out3.trim(), "100 200 300");
     }
 
     #[test]
