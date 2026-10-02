@@ -32,6 +32,7 @@ impl Options {
 pub struct Call {
     pub command: String,
     pub output: Option<String>,
+    pub failed: Option<bool>,
 }
 
 /// Both Claude tool_use/tool_result and Codex function_call/function_call_output.
@@ -41,7 +42,7 @@ pub fn calls(content: &str) -> Vec<Call> {
         v: &Value,
         pending: &mut BTreeMap<String, Call>,
         order: &mut Vec<String>,
-        results: &mut BTreeMap<String, String>,
+        results: &mut BTreeMap<String, (String, Option<bool>)>,
     ) {
         if let Some(obj) = v.as_object() {
             let kind = v["type"].as_str().unwrap_or("");
@@ -75,6 +76,7 @@ pub fn calls(content: &str) -> Vec<Call> {
                             Call {
                                 command: cmd.into(),
                                 output: None,
+                                failed: None,
                             },
                         );
                     }
@@ -95,7 +97,18 @@ pub fn calls(content: &str) -> Vec<Call> {
                             .join("\n"),
                         _ => String::new(),
                     };
-                    results.insert(id.into(), text);
+                    let failed = v["is_error"]
+                        .as_bool()
+                        .or_else(|| v["exit_code"].as_i64().map(|code| code != 0))
+                        .or_else(|| {
+                            text.lines().find_map(|line| {
+                                line.strip_prefix("Process exited with code ")
+                                    .or_else(|| line.strip_prefix("Exit code: "))
+                                    .and_then(|code| code.trim().parse::<i64>().ok())
+                                    .map(|code| code != 0)
+                            })
+                        });
+                    results.insert(id.into(), (text, failed));
                 }
             }
             for child in obj.values().filter(|v| v.is_object() || v.is_array()) {
@@ -119,14 +132,17 @@ pub fn calls(content: &str) -> Vec<Call> {
         .into_iter()
         .filter_map(|id| {
             pending.remove(&id).map(|mut c| {
-                c.output = results.remove(&id);
+                if let Some((text, failed)) = results.remove(&id) {
+                    c.output = Some(text);
+                    c.failed = failed;
+                }
                 c
             })
         })
         .collect()
 }
 
-fn metadata(content: &str) -> (Option<String>, Option<u64>) {
+pub fn metadata(content: &str) -> (Option<String>, Option<u64>) {
     let mut project = None;
     let mut latest = None;
     for line in content.lines() {

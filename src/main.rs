@@ -44,6 +44,7 @@ mod agent_init;
 mod analytics_cli;
 mod history_admin;
 mod integration_doctor;
+mod learning_cli;
 mod lossless_filters;
 mod mcp_proxy;
 mod parity_filters;
@@ -533,8 +534,9 @@ enum Commands {
     },
     /// Mine sessions/history and propose durable AGENTS.md / CLAUDE.md guidance.
     Learn {
+        #[command(flatten)]
+        corrections: learning_cli::Options,
         /// Files or directories to scan.
-        #[arg(required = true)]
         paths: Vec<PathBuf>,
         /// Recurse into directories.
         #[arg(short, long)]
@@ -1991,6 +1993,7 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Commands::Learn {
+            corrections,
             paths,
             recursive,
             project_dir,
@@ -2000,6 +2003,10 @@ async fn run(cli: Cli) -> Result<()> {
             install,
             client,
         } => {
+            if paths.is_empty() || corrections.active() {
+                return learning_cli::run(&paths, &corrections, project_dir, json);
+            }
+
             let report = run_learn(paths, recursive, project_dir, write, install, &client)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
