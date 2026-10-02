@@ -232,3 +232,32 @@ fn codex_global_install_respects_explicit_home_override() {
     assert!(custom.join("AGENTS.md").exists());
     assert!(!root.path().join(".codex").exists());
 }
+
+#[test]
+fn plugin_upgrade_accepts_owned_old_bytes_but_preserves_manual_edits() {
+    use sha2::{Digest, Sha256};
+    let root = tempfile::tempdir().unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+            .env("HOME", root.path())
+            .current_dir(root.path())
+            .args(["init", "--agent", "pi"])
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    let path = root.path().join(".pi/extensions/lm-resizer.ts");
+    let current = std::fs::read(&path).unwrap();
+    let old = "// previous managed version\n";
+    std::fs::write(&path, old).unwrap();
+    std::fs::write(
+        path.with_file_name("lm-resizer.ts.lm-resizer.sha256"),
+        format!("{:x}\n", Sha256::digest(old.as_bytes())),
+    )
+    .unwrap();
+    assert!(run().status.success());
+    assert_eq!(std::fs::read(&path).unwrap(), current);
+    std::fs::write(&path, "manual changes").unwrap();
+    assert!(!run().status.success());
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "manual changes");
+}

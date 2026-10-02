@@ -1,3 +1,6 @@
+//! Protocol reference: rtk-ai/rtk v0.50.0, commit
+//! 1d87b8e719ce0a50c223cd93ca64dd16921f9aec, src/hooks/{init,hook_cmd}.rs.
+//! Independent implementation; see THIRD-PARTY-NOTICES.
 //! Reversible agent integration plans. Paths follow RTK v0.50.0's documented
 //! host conventions; implementation is independent, with no copied RTK code.
 use anyhow::{bail, Context, Result};
@@ -471,9 +474,19 @@ fn patch_vibe(text: &str, uninstall: bool) -> Result<String> {
     }
 }
 
-fn owned_file(path: PathBuf, content: &str, uninstall: bool) -> Result<Edit> {
+fn owned_file(path: PathBuf, content: &str, uninstall: bool) -> Result<Vec<Edit>> {
     let before = read(&path)?;
-    if !before.is_empty() && before != content {
+    let fingerprint_path = path.with_file_name(format!(
+        "{}.lm-resizer.sha256",
+        path.file_name()
+            .context("plugin filename")?
+            .to_string_lossy()
+    ));
+    let fingerprint_before = read(&fingerprint_path)?;
+    if !before.is_empty()
+        && before != content
+        && fingerprint_before.trim() != crate::sha256_hex(before.as_bytes())
+    {
         bail!(
             "modified or unowned plugin {}; left untouched",
             path.display()
@@ -484,12 +497,25 @@ fn owned_file(path: PathBuf, content: &str, uninstall: bool) -> Result<Edit> {
     } else {
         content.into()
     };
-    Ok(Edit {
-        path,
-        before,
-        after,
-        delete: uninstall,
-    })
+    let fingerprint_after = if uninstall {
+        String::new()
+    } else {
+        crate::sha256_hex(content.as_bytes()) + "\n"
+    };
+    Ok(vec![
+        Edit {
+            path,
+            before,
+            after,
+            delete: uninstall,
+        },
+        Edit {
+            path: fingerprint_path,
+            before: fingerprint_before,
+            after: fingerprint_after,
+            delete: uninstall,
+        },
+    ])
 }
 
 fn plugin_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>> {
@@ -506,7 +532,7 @@ fn plugin_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>>
             } else {
                 project.join(".opencode/plugins/lm-resizer.ts")
             };
-            edits.push(owned_file(
+            edits.extend(owned_file(
                 path,
                 include_str!("../integrations/opencode.ts"),
                 opts.uninstall,
@@ -518,7 +544,7 @@ fn plugin_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>>
             } else {
                 format!(".{agent}/extensions/lm-resizer.ts")
             };
-            edits.push(owned_file(
+            edits.extend(owned_file(
                 base.join(relative),
                 include_str!("../integrations/pi.ts"),
                 opts.uninstall,
@@ -531,12 +557,12 @@ fn plugin_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>>
             let dir = std::env::var_os("HERMES_HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| home.join(".hermes"));
-            edits.push(owned_file(
+            edits.extend(owned_file(
                 dir.join("plugins/lm-resizer-rewrite/__init__.py"),
                 include_str!("../integrations/hermes.py"),
                 opts.uninstall,
             )?);
-            edits.push(owned_file(dir.join("plugins/lm-resizer-rewrite/plugin.yaml"),"name: lm-resizer-rewrite\nversion: '0.1.0'\ndescription: LM Resizer command rewriting\nhooks: [pre_tool_call]\nprovides_hooks: [pre_tool_call]\n",opts.uninstall)?);
+            edits.extend(owned_file(dir.join("plugins/lm-resizer-rewrite/plugin.yaml"),"name: lm-resizer-rewrite\nversion: '0.1.0'\ndescription: LM Resizer command rewriting\nhooks: [pre_tool_call]\nprovides_hooks: [pre_tool_call]\n",opts.uninstall)?);
             let path = dir.join("config.yaml");
             let before = read(&path)?;
             let mut root: serde_yaml::Value = if before.trim().is_empty() {
