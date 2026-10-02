@@ -11,6 +11,7 @@ pub struct Options {
     pub project: Option<String>,
     #[arg(short, long)]
     pub all: bool,
+    /// Session lookback in days (default: 30; 0: all dates).
     #[arg(short, long)]
     pub since: Option<u64>,
     #[arg(short, long, default_value_t = 15)]

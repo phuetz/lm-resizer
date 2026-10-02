@@ -49,7 +49,7 @@ lm-resizer learn --write-rules --since 0 path/to/session.jsonl
 Sans chemin explicite, les historiques Claude et Codex sont recherchés dans
 leurs emplacements connus. Le projet courant est sélectionné par défaut ;
 `--project` sélectionne un fragment de chemin, `--all` retire cette restriction,
-`--since 0` retire la limite de date. Un historique sans projet connu n’est pas
+La sélection temporelle vaut 30 jours par défaut ; `--since 0` retire la limite de date. Un historique sans projet connu n’est pas
 attribué au projet courant. En l’absence de timestamp, la date de modification
 du fichier est utilisée et cette méthode est indiquée dans le rapport.
 
@@ -66,6 +66,7 @@ est la proportion de ces corrections observées parmi les échecs de la commande
 Une erreur de test n’est pas une preuve de correction de syntaxe. Les règles
 écrites dans `.claude/rules/cli-corrections.md` sont des observations et ne sont
 jamais exécutées automatiquement. Un fichier différent existant est conservé.
+Les sessions illisibles sont ignorées et comptées dans `unreadable`.
 
 ## Installation des agents
 
@@ -130,8 +131,8 @@ lm-resizer untrust
 L’audit des hooks nécessite `LM_RESIZER_HOOK_AUDIT=1` et reste local. Les hooks
 ne réécrivent pas les commandes composées, redirections ou substitutions shell.
 Ils laissent la commande d’origine à l’hôte en cas d’entrée ou configuration
-invalide. Les contraintes deny/ask détectées dans les configurations connues
-Claude/Codex/Gemini/Cursor/Trae/Droid entraînent une abstention conservatrice,
+invalide. Les contraintes allow/deny/ask et les listes de commandes détectées dans les
+configurations connues Claude/Codex/Gemini/Cursor/Trae/Droid/Copilot/Vibe entraînent une abstention conservatrice,
 pas une tentative d’émuler toutes les politiques de permission de ces hôtes.
 
 Codex exige un acquittement `permissionDecision: allow` pour appliquer
@@ -141,7 +142,9 @@ de décision de l’utilisateur. La conformité des formats est testée sur fixt
 le fonctionnement dans chaque version réelle des clients reste à vérifier.
 
 `--trust-filters` autorise explicitement les filtres locaux après leur vérification
-existante ; `--no-trust-filters` conserve leur état sans nouvelle autorisation.
+(fixtures réussies pour chaque filtre, sans diagnostic restant). Sans cette
+couverture, `trust`, `trust-filters` et `init --trust-filters` refusent la confiance.
+`--no-trust-filters` conserve leur état sans nouvelle autorisation.
 Cette couche ne change ni les filtres ni leur format. `verify` vérifie les
 installations ; `verify-filters` conserve son rôle pour les filtres TOML.
 
@@ -211,3 +214,20 @@ Copilot teste les formats snake_case et CLI camelCase ; les anciens hôtes qui
 n’acceptent pas une entrée modifiée restent sans réécriture. Les permissions
 propres à tous les hôtes ne sont pas réimplémentées. Les filtres, leur présentation
 `--ultra-compact` et leurs échecs silencieux relèvent d’un travail distinct.
+
+## Conservation des configurations et des journaux
+
+Vibe exige un tableau de tables `[[hooks]]`. Une table `[hooks]`, un scalaire
+ou un tableau inline incompatible entraîne un refus sans écriture. Si une ancienne
+installation a ajouté son bloc exact à une telle configuration, `--uninstall`
+retire ce bloc et restitue les octets d’origine. Un bloc modifié ou dupliqué
+reste refusé pour préserver les modifications personnelles.
+
+Hermes utilise une édition de l’arbre syntaxique YAML afin de conserver les
+commentaires et l’ordre des autres clés. Une seconde analyse vérifie que seules
+les entrées attendues de `plugins.enabled` changent ; sinon, le plan est refusé.
+
+Les journaux prennent un verrou exclusif sur le fichier pendant l’écriture
+complète, y compris les reprises d’écriture courte. Tous les producteurs LM Resizer
+utilisent cette voie. Cette garantie suppose un système de fichiers qui respecte
+les verrous consultatifs ; elle ne constitue pas une validation de NFS.

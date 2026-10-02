@@ -55,3 +55,16 @@ fn discover_scopes_projects_dates_and_limits_and_session_measures_adoption() {
     let report = run(&["session", "--all", "--since", "0", "-f", "json"]);
     assert_eq!(report["sessions"].as_array().unwrap().len(), 3);
 }
+
+#[test]
+fn session_selection_help_states_the_date_default() {
+    for subcommand in ["discover", "session", "learn"] {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+            .args([subcommand, "--help"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let help = String::from_utf8_lossy(&out.stdout);
+        assert!(help.contains("default: 30; 0: all dates"), "{help}");
+    }
+}
