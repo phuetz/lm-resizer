@@ -12648,7 +12648,14 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
                 continue;
             }
             let path = entry.path();
-            // Python is a benchmark dependency, never a product runtime dependency.
+            // Hermes executes this optional adapter inside its own Python host;
+            // the Rust binary only installs its embedded text and never runs Python.
+            if path == root.join("integrations/hermes.py")
+                || path == root.join("integrations/tests/test_hermes.py")
+            {
+                continue;
+            }
+            // Python is a benchmark dependency, never a core runtime dependency.
             // The real-token benchmark explicitly requires Python tiktoken.
             if path.starts_with(root.join("bench/real")) {
                 continue;
