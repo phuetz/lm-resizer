@@ -39,6 +39,7 @@ use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use walkdir::WalkDir;
 
 mod advice_cli;
+mod agent_init;
 mod analytics_cli;
 mod lossless_filters;
 mod mcp_proxy;
@@ -143,6 +144,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Install or remove a reversible agent integration.
+    Init(agent_init::Options),
     /// Filter stdin without executing any command; accepts RTK pipe filter names.
     Pipe {
         #[arg(short, long)]
@@ -1326,6 +1329,7 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
     match cli.command {
+        Commands::Init(options) => agent_init::run(options)?,
         Commands::Compress {
             input,
             query,
