@@ -218,6 +218,70 @@ pub fn factor_lines(raw: &str) -> String {
     }
 }
 
+/// Expand a reversible view without needing tee or a running original tool.
+/// Reference validation and an output limit prevent malformed input amplification.
+pub fn expand(view: &str) -> anyhow::Result<String> {
+    use anyhow::{bail, Context};
+    if !view.starts_with("LMR-LINES/2\n") {
+        return Ok(view.to_string());
+    }
+    const LIMIT: usize = 512 * 1024 * 1024;
+    let mut prefix = String::new();
+    let mut rows: Vec<String> = Vec::new();
+    let mut bytes = 0usize;
+    let mut records = view.split_terminator('\n').skip(1);
+    while let Some(record) = records.next() {
+        if let Some(json) = record.strip_prefix('@') {
+            prefix = serde_json::from_str(json).context("invalid prefix record")?;
+            continue;
+        }
+        if record == "!0" || record == "!1" {
+            let rest: Vec<_> = records.collect();
+            if !rest.is_empty()
+                && !(rest.len() == 1 && rest[0].starts_with("[raw: ") && rest[0].ends_with(']'))
+            {
+                bail!("unexpected records after end of reversible view");
+            }
+            return Ok(rows.join("\n") + if record == "!1" { "\n" } else { "" });
+        }
+        let (row, repetitions) = if let Some(index) = record.strip_prefix('&') {
+            let index: usize = index.parse().context("invalid line reference")?;
+            (
+                rows.get(index)
+                    .context("line reference out of range")?
+                    .clone(),
+                1,
+            )
+        } else if let Some(count) = record.strip_prefix('=') {
+            (
+                rows.last().context("repeat without previous line")?.clone(),
+                count.parse::<usize>().context("invalid repeat count")?,
+            )
+        } else {
+            (
+                prefix.clone() + record.strip_prefix('\\').unwrap_or(record),
+                1,
+            )
+        };
+        bytes = (row.len() + 1)
+            .checked_mul(repetitions)
+            .and_then(|n| bytes.checked_add(n))
+            .context("expanded view too large")?;
+        if bytes > LIMIT {
+            bail!("expanded view exceeds 512 MiB");
+        }
+        if rows
+            .len()
+            .checked_add(repetitions)
+            .is_none_or(|n| n > 1_000_000)
+        {
+            bail!("expanded view exceeds one million lines");
+        }
+        rows.extend(std::iter::repeat_n(row, repetitions));
+    }
+    bail!("missing reversible view end record")
+}
+
 fn common_prefix<'a>(a: &'a str, b: &str) -> &'a str {
     let mut size = a.bytes().zip(b.bytes()).take_while(|(a, b)| a == b).count();
     while !a.is_char_boundary(size) {
@@ -283,6 +347,22 @@ pub(crate) mod tests {
         for raw in ["", "\n", "\r\n", "=2", "LMR-LINES/2\n@\"x\"\n"] {
             assert_eq!(factor_lines(raw), raw);
         }
+    }
+
+    #[test]
+    fn public_decoder_rejects_invalid_and_excessive_references() {
+        for text in [
+            "LMR-LINES/2\n&0\n!1\n",
+            "LMR-LINES/2\nx\n=9999999999999999\n!1\n",
+            "LMR-LINES/2\n=3\n!1\n",
+            "LMR-LINES/2\nx\n",
+            "LMR-LINES/2\nx\n!1\nlost text\n",
+        ] {
+            assert!(expand(text).is_err());
+        }
+        let raw = "large repeated diagnostic with paths and values\r\n".repeat(200);
+        let view = factor_lines(&raw);
+        assert_eq!(expand(&(view + "[raw: abc123]\n")).unwrap(), raw);
     }
 
     #[test]

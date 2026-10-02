@@ -51,6 +51,79 @@ use token_metrics::{TokenCounts, TOKENIZER};
 
 use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
 
+// Native flags remain owned by the native program, not reinterpreted by clap.
+const NATIVE_TOOLS: &[&str] = &[
+    "git",
+    "gh",
+    "glab",
+    "gt",
+    "grep",
+    "rg",
+    "ast-grep",
+    "sg",
+    "find",
+    "fd",
+    "ls",
+    "tree",
+    "cat",
+    "head",
+    "tail",
+    "nl",
+    "diff",
+    "wc",
+    "cargo",
+    "pytest",
+    "ruff",
+    "mypy",
+    "pip",
+    "uv",
+    "sqlfluff",
+    "npm",
+    "npx",
+    "pnpm",
+    "yarn",
+    "bun",
+    "bunx",
+    "deno",
+    "jest",
+    "vitest",
+    "tsc",
+    "eslint",
+    "prettier",
+    "playwright",
+    "next",
+    "prisma",
+    "black",
+    "go",
+    "golangci-lint",
+    "dotnet",
+    "mvn",
+    "gradle",
+    "gradlew",
+    "sbt",
+    "ctest",
+    "make",
+    "php",
+    "phpunit",
+    "phpstan",
+    "pest",
+    "paratest",
+    "ecs",
+    "pint",
+    "phpt",
+    "rake",
+    "rspec",
+    "rubocop",
+    "docker",
+    "podman",
+    "kubectl",
+    "oc",
+    "aws",
+    "psql",
+    "curl",
+    "wget",
+];
+
 #[derive(Parser)]
 #[command(name = "lm-resizer")]
 #[command(about = "Rust-native context compression for LLM agents")]
@@ -62,6 +135,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Expand a LMR-LINES/2 view from stdin or a file, without accessing tee.
+    Expand {
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+    },
+    /// Execute a supported native tool directly, preserving every argument.
+    #[command(external_subcommand)]
+    Native(Vec<String>),
     /// Compress stdin or a file and persist originals for CCR retrieval.
     Compress {
         /// Input file. Reads stdin when omitted.
@@ -191,6 +272,7 @@ enum Commands {
         command: String,
     },
     /// Retrieve an original payload by CCR hash.
+    #[command(visible_alias = "recall")]
     Retrieve {
         hash: String,
         /// CCR SQLite database path.
@@ -223,6 +305,7 @@ enum Commands {
         store: Option<PathBuf>,
     },
     /// Show CCR store statistics.
+    #[command(visible_alias = "gain")]
     Stats {
         /// CCR SQLite database path.
         #[arg(long)]
@@ -1304,6 +1387,22 @@ async fn run(cli: Cli) -> Result<()> {
                         );
                     }
                 }
+            }
+        }
+        Commands::Expand { input } => {
+            let view = read_input(input.as_deref()).await?;
+            print!("{}", lossless_filters::expand(&view)?);
+        }
+        Commands::Native(command) => {
+            let program = command.first().context("missing native command")?;
+            if !NATIVE_TOOLS.contains(&program.as_str()) {
+                anyhow::bail!("unknown command '{program}'; use --help or exec -- <program>");
+            }
+            let store = open_store(None)?;
+            let report = run_exec_command(&command, "", false, false, store.as_ref())?;
+            print!("{}", report.output);
+            if report.exit_code != 0 {
+                std::process::exit(report.exit_code);
             }
         }
         Commands::Exec {
