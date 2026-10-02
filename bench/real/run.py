@@ -200,13 +200,17 @@ def replay(args):
         report = json.loads(p.stdout)
         required, lost = missing(case, raw, report["output"])
         good_exit = p.returncode == case["exit_code"] == report["exit_code"]
+        cli_raw = ("[stderr]\n" if report.get("streams") and stderr and not stdout else "") + raw
+        reference = ENCODINGS["o200k_base"]
+        exact_counts = (report["original_tokens"] == len(reference.encode(cli_raw, disallowed_special=()))
+                        and report["compressed_tokens"] == len(reference.encode(report["output"], disallowed_special=())))
         recovery_verified = None
         if report.get("tee_hint"):
             recovery_text = ("[stderr]\n" if report.get("streams") and stderr and not stdout else "") + raw
             digest = hashlib.sha256(recovery_text.encode()).hexdigest()
             tee = outdir / "state" / "tee" / (digest + ".log")
             recovery_verified = tee.exists() and tee.read_bytes() == recovery_text.encode()
-        failed |= bool(lost) or not good_exit or recovery_verified is False
+        failed |= bool(lost) or not good_exit or not exact_counts or recovery_verified is False
         (outdir / (case["id"]+".output")).write_text(report["output"])
         (outdir / (case["id"]+".facts.json")).write_text(json.dumps(required, ensure_ascii=False, indent=2)+"\n")
         # Public metadata excludes local absolute command/state paths and raw content.
@@ -215,7 +219,7 @@ def replay(args):
                    added_seconds=elapsed-replay_seconds, filter=report["filter"],
                    tokens=metrics(raw, report["output"]), facts=len(required),
                    missing_count=len(lost), missing_sample=lost[:3], exit_preserved=good_exit,
-                   recovery_verified=recovery_verified)
+                   recovery_verified=recovery_verified, cli_exact_counts_verified=exact_counts)
         # Tracebacks may contain the capture root; redact it in public samples.
         row["missing_sample"] = json.loads(json.dumps(row["missing_sample"]).replace(str(args.repos), "<repos>"))
         results.append(row)
@@ -226,7 +230,9 @@ def replay(args):
         savings = [100*(1-row["tokens"][name]["output"]/row["tokens"][name]["raw"])
                    for row in main if row["tokens"][name]["raw"]]
         summary[name] = dict(median=statistics.median(savings), mean=statistics.mean(savings), cases=len(savings))
-    artifact = dict(label=args.label, tokenizer=tiktoken.__version__, summary=summary, cases=results)
+    artifact = dict(label=args.label, tokenizer=tiktoken.__version__,
+                    binary_sha256=hashlib.sha256(args.binary.read_bytes()).hexdigest(),
+                    repositories=json.loads((HERE / "repos.json").read_text()), summary=summary, cases=results)
     (outdir / "results.json").write_text(json.dumps(artifact, indent=2, ensure_ascii=False)+"\n")
     print(json.dumps(summary, indent=2))
     raise SystemExit(1 if failed else 0)

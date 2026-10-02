@@ -1,6 +1,6 @@
 //! Reproducible text-only metrics; a reference encoding, not provider billing.
-use std::collections::BTreeMap;
-use std::sync::LazyLock;
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::{LazyLock, Mutex};
 
 use lm_resizer_core::tokenizer::{TiktokenCounter, Tokenizer};
 use serde::Serialize;
@@ -9,6 +9,49 @@ use serde_json::{json, Value};
 pub const TOKENIZER: &str = "tiktoken-rs/o200k_base";
 static COUNTER: LazyLock<TiktokenCounter> =
     LazyLock::new(|| TiktokenCounter::for_model("gpt-4o").expect("reference tokenizer"));
+
+// `exec` first chooses a lossless view, then counts the final view with its
+// recovery marker. Keep at most two texts, <=16 MiB total, for those exact
+// repeated counts. Equality is checked on the full text, never a hash alone.
+static COUNT_CACHE: LazyLock<Mutex<VecDeque<(String, usize)>>> =
+    LazyLock::new(|| Mutex::new(VecDeque::new()));
+
+fn count_cached(text: &str) -> usize {
+    if text.is_empty() {
+        return 0;
+    }
+    let reuse = {
+        let cache = COUNT_CACHE.lock().expect("token count cache");
+        let mut prefix_count = None;
+        for (known, count) in cache.iter().rev() {
+            if known == text {
+                return *count;
+            }
+            // o200k has a proven pre-token boundary after LF and before '[':
+            // punctuation's trailing [\r\n/]* cannot absorb '['. Restrict
+            // reuse to our short recovery trailer, not arbitrary extensions.
+            if known.ends_with('\n') && text.starts_with(known) {
+                let suffix = &text[known.len()..];
+                if suffix.len() <= 100 && suffix.starts_with("[raw: ") && suffix.ends_with("]\n") {
+                    prefix_count = Some((*count, known.len()));
+                }
+            }
+        }
+        prefix_count
+    };
+    let count = match reuse {
+        Some((prefix, offset)) => prefix + COUNTER.count_text(&text[offset..]),
+        None => COUNTER.count_text(text),
+    };
+    if text.len() <= 8 * 1024 * 1024 {
+        let mut cache = COUNT_CACHE.lock().expect("token count cache");
+        if cache.len() == 2 {
+            cache.pop_front();
+        }
+        cache.push_back((text.to_string(), count));
+    }
+    count
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TokenCounts {
@@ -38,15 +81,15 @@ impl TokenCounts {
             return Self::default();
         }
         let started = std::time::Instant::now();
-        let counter = &*COUNTER;
+        let _counter = &*COUNTER;
         crate::perf_stage("tokenizer_init", started.elapsed());
         let started = std::time::Instant::now();
-        let original_tokens = counter.count_text(original);
+        let original_tokens = count_cached(original);
         crate::perf_stage("original_token_count", started.elapsed());
         let compressed_tokens = if original == compressed {
             original_tokens
         } else {
-            counter.count_text(compressed)
+            count_cached(compressed)
         };
         Self {
             original_tokens,
@@ -192,6 +235,31 @@ pub fn select_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_counts_and_recovery_boundary_match_uncached_bpe() {
+        for prefix in [
+            "",
+            "plain\n",
+            "\r\n",
+            "//\n",
+            "!1\n",
+            "with spaces  \n\n",
+            "é漢字\n",
+            "<|endoftext|>\n",
+            "a\t\n",
+            "[raw: literal]\n",
+        ] {
+            for repeats in [1, 17, 1000] {
+                let raw = prefix.repeat(repeats);
+                let trailer = "[raw: abcdef012345]\n";
+                assert_eq!(count_cached(&raw), COUNTER.count_text(&raw));
+                let combined = raw + trailer;
+                assert_eq!(count_cached(&combined), COUNTER.count_text(&combined));
+                assert_eq!(count_cached(&combined), COUNTER.count_text(&combined));
+            }
+        }
+    }
 
     #[test]
     fn project_history_retains_negative_savings_and_excludes_unscoped_rows() {
