@@ -25,6 +25,10 @@ pub struct Options {
     pub opencode: bool,
     #[arg(long, conflicts_with = "claude_md")]
     pub hook_only: bool,
+    #[arg(long, conflicts_with = "no_trust_filters")]
+    pub trust_filters: bool,
+    #[arg(long)]
+    pub no_trust_filters: bool,
     #[arg(long)]
     pub claude_md: bool,
     #[arg(long)]
@@ -104,7 +108,17 @@ pub fn run(mut opts: Options) -> Result<()> {
         )
         .collect();
     if !preview {
+        let filter_path = project.join(".lm-resizer/filters.toml");
+        if opts.trust_filters && filter_path.exists() {
+            let verification = crate::verify_filter_file(&filter_path)?;
+            if verification.failed > 0 {
+                bail!("project filter verification failed; no installation changes applied");
+            }
+        }
         apply(&edits)?;
+        if opts.trust_filters && filter_path.exists() {
+            crate::trust_filter_file(&filter_path)?;
+        }
     }
     if opts.json {
         println!(

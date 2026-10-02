@@ -57,6 +57,7 @@ mod settings_cli;
 mod shared_context;
 mod shell_cli;
 mod token_metrics;
+mod trust_cli;
 mod update_cli;
 
 use token_metrics::{TokenCounts, TOKENIZER};
@@ -153,6 +154,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Inspect or explicitly authorize project-local filters.
+    Trust(trust_cli::Options),
     /// Run a shell command without filtering or usage tracking.
     Run(shell_cli::Options),
     /// Check releases or explicitly install a checksum-verified binary.
@@ -425,6 +428,7 @@ enum Commands {
         json: bool,
     },
     /// Remove a project filter file from the trust registry.
+    #[command(visible_alias = "untrust")]
     UntrustFilters {
         /// Filter file to untrust.
         #[arg(long, default_value = ".lm-resizer/filters.toml")]
@@ -1360,6 +1364,7 @@ async fn run(cli: Cli) -> Result<()> {
         );
     }
     match cli.command {
+        Commands::Trust(options) => trust_cli::run(options)?,
         Commands::Run(options) => {
             let code = shell_cli::run(options)?;
             if code != 0 {
