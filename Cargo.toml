@@ -68,3 +68,7 @@ walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"
+
+[[example]]
+name = "perf"
+path = "bench/perf/run.rs"
