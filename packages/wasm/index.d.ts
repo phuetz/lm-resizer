@@ -8,6 +8,11 @@ export interface CompressionReport {
   output: string;
 }
 
+export interface RetrieveResult {
+  hash: string;
+  content: string;
+}
+
 export interface LmResizerWasm {
   /**
    * Compress a JSON document (string). `query` biases retention towards
@@ -15,6 +20,12 @@ export interface LmResizerWasm {
    * generic pipeline. Returns the compressed text in `output` plus a report.
    */
   compressJson(content: string, query?: string): CompressionReport;
+
+  /**
+   * Retrieve original content for a given `hash` (cache key).
+   * Throws if the key is missing from the instance's in-memory store.
+   */
+  retrieve(hash: string): RetrieveResult;
 }
 
 export function initLmResizerWasm(input: WebAssembly.Module | BufferSource): Promise<LmResizerWasm>;

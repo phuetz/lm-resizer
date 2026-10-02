@@ -49,6 +49,7 @@ const lm = await initLmResizerWasm(bytes);
 - `initLmResizerWasmFromPackage(): Promise<LmResizerWasm>` — Node.js only, loads the bundled wasm.
 - `initLmResizerWasm(input: WebAssembly.Module | BufferSource): Promise<LmResizerWasm>`
 - `lm.compressJson(content: string, query?: string): CompressionReport`
+- `lm.retrieve(hash: string): RetrieveResult` — The memory is that of the instance, without expiration, up to 1000 entries. It is lost with the instance.
 
 `CompressionReport` fields: `content_type`, `original_bytes`, `compressed_bytes`, `bytes_saved`,
 `steps_applied` (e.g. `["json_offload"]`), `cache_keys`, `output`.
