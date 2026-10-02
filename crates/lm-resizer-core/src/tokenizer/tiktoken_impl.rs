@@ -116,7 +116,7 @@ impl Tokenizer for TiktokenCounter {
         // o200k's letter prefixes exclude CR/LF; numbers cannot cross LF.
         // Its whitespace/newline branch ends at the last LF in a whitespace
         // run. Punctuation's trailing [\r\n/]* stops at indentation or a
-        // a non-slash graphic character. Split only at those boundaries, never
+        // non-slash graphic character. Split only at those boundaries, never
         // at arbitrary byte/line offsets (blank lines and slashes can merge).
         #[cfg(not(target_arch = "wasm32"))]
         if self.encoding_name == "o200k_base" && text.len() >= 128 * 1024 {
@@ -338,6 +338,37 @@ mod tests {
             counter.count_text(&text),
             O200K_REFERENCE.encode_ordinary(&text).len()
         );
+    }
+
+    #[test]
+    fn parallel_boundaries_preserve_slash_runs() {
+        // Long enough for multiple 32 KiB cuts to land immediately before '/'.
+        // Removing the slash guard must fail this test (319975 vs 320000).
+        let text = "punctuation!!!\n///\nA\n".repeat(40_000);
+        let counter = TiktokenCounter::for_model("gpt-4o").unwrap();
+        assert_eq!(
+            counter.count_text(&text),
+            O200K_REFERENCE.encode_ordinary(&text).len()
+        );
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(24))]
+        #[test]
+        fn parallel_counts_match_large_random_unicode(
+            lines in proptest::collection::vec(proptest::collection::vec(proptest::char::any(), 0..40), 20..60)
+        ) {
+            let mut seed = String::new();
+            for (index, line) in lines.iter().enumerate() {
+                seed.push_str(["A", "./", "\t/", "/", " ", "🦀"][index % 6]);
+                seed.extend(line.iter());
+                seed.push_str(if index % 2 == 0 { "\r\n" } else { "\n" });
+            }
+            let text = seed.repeat((300_000 / seed.len()) + 1);
+            proptest::prop_assert!(text.len() > 128 * 1024);
+            let counter = TiktokenCounter::for_model("gpt-4o").unwrap();
+            proptest::prop_assert_eq!(counter.count_text(&text), O200K_REFERENCE.encode_ordinary(&text).len());
+        }
     }
 
     #[test]

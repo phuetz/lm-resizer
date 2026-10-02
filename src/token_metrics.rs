@@ -34,19 +34,35 @@ impl Default for TokenCounts {
 
 impl TokenCounts {
     pub fn measure(original: &str, compressed: &str) -> Self {
-        if original.is_empty() && compressed.is_empty() {
+        Self::measure_if(true, original, compressed)
+    }
+
+    pub fn measure_if(enabled: bool, original: &str, compressed: &str) -> Self {
+        Self::measure_with(enabled, original, compressed, |text| {
+            let started = std::time::Instant::now();
+            let counter = &*COUNTER;
+            crate::perf_stage("tokenizer_init", started.elapsed());
+            let started = std::time::Instant::now();
+            let tokens = counter.count_text(text);
+            crate::perf_stage("token_count", started.elapsed());
+            tokens
+        })
+    }
+
+    fn measure_with(
+        enabled: bool,
+        original: &str,
+        compressed: &str,
+        mut count: impl FnMut(&str) -> usize,
+    ) -> Self {
+        if !enabled || (original.is_empty() && compressed.is_empty()) {
             return Self::default();
         }
-        let started = std::time::Instant::now();
-        let counter = &*COUNTER;
-        crate::perf_stage("tokenizer_init", started.elapsed());
-        let started = std::time::Instant::now();
-        let original_tokens = counter.count_text(original);
-        crate::perf_stage("original_token_count", started.elapsed());
+        let original_tokens = count(original);
         let compressed_tokens = if original == compressed {
             original_tokens
         } else {
-            counter.count_text(compressed)
+            count(compressed)
         };
         Self {
             original_tokens,
@@ -159,6 +175,33 @@ pub fn summarize_history(content: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn equal_text_is_counted_once_and_disabled_metrics_never_count() {
+        let mut calls = Vec::new();
+        let same = TokenCounts::measure_with(true, "héllo", "héllo", |text| {
+            calls.push(text.to_string());
+            7
+        });
+        assert_eq!(calls, ["héllo"]);
+        assert_eq!(same.original_tokens, 7);
+        assert_eq!(same.compressed_tokens, 7);
+        assert_eq!(same.tokens_saved, 0);
+        for (enabled, original, compressed) in [(false, "before", "after"), (true, "", "")] {
+            let counts = TokenCounts::measure_with(enabled, original, compressed, |_| {
+                panic!("unneeded tokenizer call")
+            });
+            assert_eq!(counts.original_tokens, 0);
+            assert_eq!(counts.compressed_tokens, 0);
+        }
+        let mut calls = 0;
+        let different = TokenCounts::measure_with(true, "before", "after", |_| {
+            calls += 1;
+            calls
+        });
+        assert_eq!(calls, 2);
+        assert_eq!(different.tokens_saved, -1);
+    }
 
     #[test]
     fn real_counts_are_not_bytes_divided_by_four() {

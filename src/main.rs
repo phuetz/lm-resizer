@@ -1961,13 +1961,7 @@ fn compress_text_with_metrics(
     reinject: bool,
     measure_tokens: bool,
 ) -> Result<CompressReport> {
-    let tokens = |output: &str| {
-        if measure_tokens {
-            TokenCounts::measure(content, output)
-        } else {
-            TokenCounts::default()
-        }
-    };
+    let tokens = |output: &str| TokenCounts::measure_if(measure_tokens, content, output);
     if let Some(output) = compact_json_rows(content) {
         let key = lm_resizer_core::ccr::compute_key(content.as_bytes());
         store.put(&key, content);
@@ -9449,6 +9443,71 @@ command = "node"
         }
     }
 
+    fn original_failure_scan<'a>(before: &'a str, after: &str) -> Option<&'a str> {
+        before
+            .lines()
+            .filter(|l| {
+                let trimmed = l.trim();
+                if trimmed.is_empty() || !FAILURE_SIGNAL.is_match(l) {
+                    return false;
+                }
+                // curl's transfer header contains "% Received"; it is not a
+                // diagnostic even though the generic regex sees Received.
+                if trimmed.starts_with("% Total    % Received") {
+                    return false;
+                }
+                // Git's structural header contains "diff", which the generic
+                // failure regex also matches. It is not a diagnostic.
+                if trimmed.starts_with("diff --git ") {
+                    return false;
+                }
+                if trimmed.starts_with("test result: ok.") {
+                    return false;
+                }
+                // A highlighted source line is context for the real error
+                // directly above it; comments in that frame can say "error".
+                !(l.contains(" | ") && l.contains("//"))
+            })
+            .find(|l| !after.contains(l.trim()))
+    }
+
+    #[test]
+    fn intermediate_metrics_can_be_skipped_without_changing_compression() {
+        let pipeline = build_pipeline();
+        for text in ["aaaaaaaa", "[{\"id\":1},{\"id\":2}]"] {
+            let measured = compress_text_with_metrics(
+                text,
+                "",
+                &InMemoryCcrStore::new(),
+                &pipeline,
+                None,
+                false,
+                true,
+            )
+            .unwrap();
+            let skipped = compress_text_with_metrics(
+                text,
+                "",
+                &InMemoryCcrStore::new(),
+                &pipeline,
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+            assert!(measured.tokens.original_tokens > 0);
+            assert_eq!(skipped.tokens.original_tokens, 0);
+            assert_eq!(skipped.tokens.compressed_tokens, 0);
+            let mut measured_json = serde_json::to_value(measured).unwrap();
+            let mut skipped_json = serde_json::to_value(skipped).unwrap();
+            for key in ["original_tokens", "compressed_tokens", "tokens_saved"] {
+                measured_json.as_object_mut().unwrap().remove(key);
+                skipped_json.as_object_mut().unwrap().remove(key);
+            }
+            assert_eq!(measured_json, skipped_json);
+        }
+    }
+
     #[test]
     fn indispensable_gate_matches_original_scan() {
         // Reference the old scan: trim for listings/search, exact for diff.
@@ -9470,7 +9529,7 @@ command = "node"
                     "git_show",
                     "none",
                 ] {
-                    let reference = first_lost_failure_line(before, after).or_else(|| {
+                    let reference = original_failure_scan(before, after).or_else(|| {
                         if matches!(filter, "listing" | "search_results") {
                             before
                                 .lines()
@@ -9486,6 +9545,10 @@ command = "node"
                             None
                         }
                     });
+                    assert_eq!(
+                        first_lost_failure_line(before, after),
+                        original_failure_scan(before, after)
+                    );
                     assert_eq!(
                         first_lost_indispensable_line(before, after, filter),
                         reference,
