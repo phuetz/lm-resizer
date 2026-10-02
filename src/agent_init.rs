@@ -15,6 +15,18 @@ pub struct Options {
     pub agent: String,
     #[arg(short, long)]
     pub global: bool,
+    #[arg(long, conflicts_with_all = ["gemini", "copilot", "opencode"])]
+    pub codex: bool,
+    #[arg(long, conflicts_with_all = ["codex", "copilot", "opencode"])]
+    pub gemini: bool,
+    #[arg(long, conflicts_with_all = ["codex", "gemini", "opencode"])]
+    pub copilot: bool,
+    #[arg(long, conflicts_with_all = ["codex", "gemini", "copilot"])]
+    pub opencode: bool,
+    #[arg(long, conflicts_with = "claude_md")]
+    pub hook_only: bool,
+    #[arg(long)]
+    pub claude_md: bool,
     #[arg(long)]
     pub project_dir: Option<PathBuf>,
     #[arg(long)]
@@ -70,7 +82,17 @@ fn replace_block(text: &str, uninstall: bool) -> Result<String> {
     }
 }
 
-pub fn run(opts: Options) -> Result<()> {
+pub fn run(mut opts: Options) -> Result<()> {
+    for (selected, agent) in [
+        (opts.codex, "codex"),
+        (opts.gemini, "gemini"),
+        (opts.copilot, "copilot"),
+        (opts.opencode, "opencode"),
+    ] {
+        if selected {
+            opts.agent = agent.into();
+        }
+    }
     let project = opts.project_dir.clone().unwrap_or(std::env::current_dir()?);
     let home = crate::user_home_dir().context("cannot determine home directory")?;
     let edits = plan(&opts, &project, &home)?;
@@ -112,7 +134,14 @@ pub fn run(opts: Options) -> Result<()> {
     Ok(())
 }
 
-pub fn plan(opts: &Options, project: &Path, _home: &Path) -> Result<Vec<Edit>> {
+pub fn plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>> {
+    if [
+        "claude", "codex", "gemini", "cursor", "trae", "copilot", "droid", "vibe",
+    ]
+    .contains(&opts.agent.as_str())
+    {
+        return native_plan(opts, project, home);
+    }
     let relative = match opts.agent.as_str() {
         "windsurf" => ".windsurfrules",
         "cline" => ".clinerules",
@@ -177,5 +206,207 @@ mod tests {
             assert!(replace_block(&installed.replace("verbose", "changed"), true).is_err());
         }
         assert!(replace_block(START, false).is_err());
+    }
+}
+
+fn native_plan(opts: &Options, project: &Path, home: &Path) -> Result<Vec<Edit>> {
+    let agent = opts.agent.as_str();
+    if matches!(agent, "cursor" | "vibe") && !opts.global {
+        bail!("{agent} native hooks require --global");
+    }
+    let base = if opts.global { home } else { project };
+    let (relative, event, matcher, rules) = match agent {
+        "claude" => (
+            ".claude/settings.json",
+            "PreToolUse",
+            "Bash",
+            if opts.global {
+                ".claude/CLAUDE.md"
+            } else {
+                "CLAUDE.md"
+            },
+        ),
+        "codex" => (
+            ".codex/hooks.json",
+            "PreToolUse",
+            "Bash",
+            if opts.global {
+                ".codex/AGENTS.md"
+            } else {
+                "AGENTS.md"
+            },
+        ),
+        "gemini" => (
+            ".gemini/settings.json",
+            "BeforeTool",
+            "run_shell_command",
+            if opts.global {
+                ".gemini/GEMINI.md"
+            } else {
+                "GEMINI.md"
+            },
+        ),
+        "cursor" => (
+            ".cursor/hooks.json",
+            "preToolUse",
+            "Shell",
+            ".cursor/rules/lm-resizer.mdc",
+        ),
+        "trae" => (
+            ".trae/hooks.json",
+            "PreToolUse",
+            "RunCommand",
+            ".trae/rules/lm-resizer.md",
+        ),
+        "copilot" => (
+            if opts.global {
+                ".copilot/hooks/lm-resizer.json"
+            } else {
+                ".github/hooks/lm-resizer.json"
+            },
+            "PreToolUse",
+            "Bash",
+            if opts.global {
+                ".copilot/copilot-instructions.md"
+            } else {
+                ".github/copilot-instructions.md"
+            },
+        ),
+        "droid" => (
+            ".factory/hooks.json",
+            "PreToolUse",
+            "Execute",
+            ".factory/AGENTS.md",
+        ),
+        "vibe" => (
+            ".vibe/hooks.toml",
+            "pre_tool",
+            "bash",
+            ".vibe/prompts/lm-resizer.md",
+        ),
+        _ => unreachable!(),
+    };
+    let path = base.join(relative);
+    let before = read(&path)?;
+    let command = format!("lm-resizer hook {agent}");
+    let after = if agent == "vibe" {
+        patch_vibe(&before, opts.uninstall)?
+    } else {
+        patch_json(
+            &before,
+            event,
+            matcher,
+            &command,
+            matches!(agent, "cursor" | "copilot"),
+            opts.uninstall,
+        )?
+    };
+    let mut edits = vec![Edit {
+        path,
+        before,
+        after,
+    }];
+    if !opts.hook_only {
+        let path = base.join(rules);
+        let before = read(&path)?;
+        let after = replace_block(&before, opts.uninstall)?;
+        edits.push(Edit {
+            path,
+            before,
+            after,
+        });
+    }
+    Ok(edits)
+}
+
+fn patch_json(
+    text: &str,
+    event: &str,
+    matcher: &str,
+    command: &str,
+    flat: bool,
+    uninstall: bool,
+) -> Result<String> {
+    if text.trim().is_empty() && uninstall {
+        return Ok(text.into());
+    }
+    let mut root: Value = if text.trim().is_empty() {
+        json!({})
+    } else {
+        serde_json::from_str(text.trim_start_matches('\u{feff}'))
+            .context("invalid agent JSON; left untouched")?
+    };
+    let original = root.clone();
+    let object = root
+        .as_object_mut()
+        .context("agent config must be an object")?;
+    let hooks = object
+        .entry("hooks")
+        .or_insert(json!({}))
+        .as_object_mut()
+        .context("hooks must be an object")?;
+    let entries = hooks
+        .entry(event)
+        .or_insert(json!([]))
+        .as_array_mut()
+        .context("hook event must be an array")?;
+    let mut found = false;
+    for entry in entries.iter_mut() {
+        if flat {
+            if entry["command"] == command {
+                found = true;
+            }
+        } else if let Some(items) = entry.get_mut("hooks").and_then(Value::as_array_mut) {
+            if items.iter().any(|h| h["command"] == command) {
+                found = true;
+            }
+            if uninstall {
+                items.retain(|h| h["command"] != command);
+            }
+        }
+    }
+    if uninstall {
+        if flat {
+            entries.retain(|e| e["command"] != command);
+        } else {
+            entries.retain(|e| {
+                !e.get("hooks")
+                    .and_then(Value::as_array)
+                    .is_some_and(Vec::is_empty)
+            });
+        }
+    } else if !found {
+        entries.push(if flat {
+            json!({"type":"command","command":command,"matcher":matcher})
+        } else {
+            json!({"matcher":matcher,"hooks":[{"type":"command","command":command}]})
+        });
+    }
+    if flat {
+        object.entry("version").or_insert(json!(1));
+    }
+    if root == original {
+        Ok(text.into())
+    } else {
+        Ok(serde_json::to_string_pretty(&root)? + "\n")
+    }
+}
+
+fn patch_vibe(text: &str, uninstall: bool) -> Result<String> {
+    // Validate TOML, but splice only the owned block to preserve comments.
+    let _: toml::Value = toml::from_str(text).context("invalid Vibe TOML; left untouched")?;
+    const BLOCK:&str="\n# lm-resizer hook begin\n[[hooks]]\nname = \"lm-resizer-rewrite\"\ntype = \"pre_tool\"\nmatch = \"bash\"\ncommand = \"lm-resizer hook vibe\"\n# lm-resizer hook end\n";
+    if text.contains(BLOCK) {
+        Ok(if uninstall {
+            text.replacen(BLOCK, "", 1)
+        } else {
+            text.into()
+        })
+    } else if text.contains("# lm-resizer hook begin") {
+        bail!("modified lm-resizer Vibe hook; left untouched")
+    } else if uninstall {
+        Ok(text.into())
+    } else {
+        Ok(format!("{text}{BLOCK}"))
     }
 }
