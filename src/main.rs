@@ -2220,7 +2220,9 @@ fn run_exec_command(
             .push("diagnostic_gate:kept_filtered".to_string());
         compressed.cache_keys.clear();
     }
-    let tee_hint = tee_raw_output_if_useful(&raw, &filtered)?;
+    // La pipeline peut réduire une sortie que le filtre n'a pas modifiée.
+    // Le tee doit couvrir les omissions de toutes les étapes d'exec.
+    let tee_hint = tee_raw_output_if_useful(&raw, &compressed.output)?;
     let mut final_output = compressed.output;
     if let Some(hint) = &tee_hint {
         if !final_output.ends_with('\n') && !final_output.is_empty() {
@@ -2405,7 +2407,7 @@ fn rewrite_command_report(command: &[String]) -> RewriteReport {
     }
 
     let (filter, _) = filter_command_output(command, "");
-    let supported = filter != "none" && filter != "generic";
+    let supported = !matches!(filter.as_str(), "none" | "generic" | "lossless:generic");
     let mut argv = vec![
         "lm-resizer".to_string(),
         "exec".to_string(),
@@ -2683,6 +2685,23 @@ fn shell_join(args: &[String]) -> String {
 }
 
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
+    // Only unwrap a single simple shell command. Never execute/rewrite the
+    // shell expression, nor guess the producer of pipelines or compound lists.
+    if command.len() == 3
+        && matches!(
+            command_basename(&command[0]).as_str(),
+            "bash" | "sh" | "zsh"
+        )
+        && matches!(command[1].as_str(), "-c" | "-lc")
+    {
+        if let [ShellToken::Segment(segment)] = split_shell_operators(&command[2]).as_slice() {
+            if let Some(words) = split_shell_words(segment) {
+                if !words.is_empty() {
+                    return filter_command_output(&words, raw);
+                }
+            }
+        }
+    }
     if command_requests_json(command) && serde_json::from_str::<Value>(raw).is_ok() {
         return ("json-passthrough".to_string(), raw.to_string());
     }
@@ -2690,6 +2709,9 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
         return (format!("lossless:{name}"), output);
     }
     let (name, output) = route_command_filter(command, raw);
+    if name == "generic" {
+        return ("lossless:generic".to_string(), output);
+    }
     if raw.lines().any(|line| line == "[stderr]") && !output.lines().any(|line| line == "[stderr]")
     {
         return (format!("{name}:stream-guard"), raw.to_string());
@@ -4470,28 +4492,15 @@ fn filter_listing(raw: &str) -> String {
 }
 
 fn filter_generic(raw: &str) -> String {
-    let mut out = Vec::new();
-    let mut skipped = 0usize;
-    let mut last = "";
-    let mut repeat_count = 0usize;
-
-    for line in raw.lines() {
-        if line == last {
-            repeat_count += 1;
-            skipped += 1;
-            continue;
-        }
-        if repeat_count > 0 {
-            out.push(format!("... previous line repeated {repeat_count} times"));
-        }
-        repeat_count = 0;
-        last = line;
-        out.push(line.to_string());
+    // The bisected regression (bb85e73) cancelled a lossy 240-line budget
+    // whenever source text contained failure words. Replacing that budget
+    // with a reversible representation restores savings without omissions.
+    let compact = lossless_filters::factor_lines(raw);
+    if TokenCounts::measure(raw, &compact).tokens_saved > 20 {
+        compact
+    } else {
+        raw.to_string()
     }
-    if repeat_count > 0 {
-        out.push(format!("... previous line repeated {repeat_count} times"));
-    }
-    append_omitted(out, skipped)
 }
 
 fn append_omitted(mut lines: Vec<String>, skipped: usize) -> String {
@@ -4505,8 +4514,8 @@ fn append_omitted(mut lines: Vec<String>, skipped: usize) -> String {
     }
 }
 
-fn tee_raw_output_if_useful(raw: &str, filtered: &str) -> Result<Option<String>> {
-    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") || raw == filtered {
+fn tee_raw_output_if_useful(raw: &str, output: &str) -> Result<Option<String>> {
+    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") || raw == output {
         return Ok(None);
     }
 
@@ -9456,10 +9465,10 @@ command = "node"
 
     #[test]
     fn exec_generic_filter_collapses_repeated_lines() {
-        let filtered = filter_generic("same\nsame\nsame\nnext\n");
-        assert!(filtered.contains("same"));
-        assert!(filtered.contains("... previous line repeated 2 times"));
-        assert!(filtered.contains("next"));
+        let raw = "same\n".repeat(100) + "next\n";
+        let filtered = filter_generic(&raw);
+        assert!(filtered.len() < raw.len());
+        assert_eq!(lossless_filters::tests::decode(&filtered), raw);
     }
 
     #[test]
@@ -9615,7 +9624,7 @@ command = "node"
 
         let (filter, _text) =
             filter_command_output(&["rg".into(), "needle".into()], "src/main.rs:1:needle\n");
-        assert_eq!(filter, "search_results");
+        assert_eq!(filter, "lossless:search");
     }
 
     #[test]
@@ -9633,7 +9642,7 @@ command = "node"
     fn rewrite_leaves_generic_command_unsupported() {
         let report = rewrite_command_report(&["unknown-tool".into(), "arg".into()]);
         assert!(!report.supported);
-        assert_eq!(report.filter, "generic");
+        assert_eq!(report.filter, "lossless:generic");
         assert!(report.rewritten.is_none());
     }
 
@@ -11122,15 +11131,17 @@ Successfully tagged localhost/app:latest\n";
     }
 
     #[test]
-    fn generic_filter_keeps_all_lines_including_late_failure() {
+    fn generic_filter_compacts_without_omitting_any_line() {
         let mut raw = (0..250)
             .map(|n| format!("progress line {n}\n"))
             .collect::<String>();
         raw.push_str("error: src/main.rs:42: missing value\n");
         let command = vec!["unknown-command".to_string()];
         let (name, output) = filter_command_output(&command, &raw);
-        assert_eq!(name, "generic");
-        assert_eq!(output, raw);
+        assert_eq!(name, "lossless:generic");
+        assert!(output.len() < raw.len());
+        assert!(output.contains("error: src/main.rs:42: missing value"));
+        assert_eq!(lossless_filters::tests::decode(&output), raw);
     }
 
     #[test]

@@ -10,8 +10,8 @@ pub fn filter(command: &[String], raw: &str) -> Option<(&'static str, String)> {
         .to_str()?;
     let sub = command.get(1).map(String::as_str).unwrap_or("");
     let (name, text) = match (program, sub) {
-        // Search routing awaits the independently bisected regression fix.
-        ("grep" | "rg", _) => return None,
+        // bb85e73 mistook source matches for diagnostics; encode every match.
+        ("grep" | "rg", _) => ("search", raw.to_string()),
         ("find" | "fd", _) => ("paths", raw.to_string()),
         ("ls" | "dir" | "tree", _) => ("listing", raw.to_string()),
         ("cat" | "head" | "tail" | "nl", _) => ("file", raw.to_string()),
@@ -240,10 +240,10 @@ fn write_json_row(output: &mut String, row: &str) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn decode(view: &str) -> String {
+    pub(crate) fn decode(view: &str) -> String {
         if !view.starts_with("LMR-LINES/2\n") {
             return view.to_string();
         }
