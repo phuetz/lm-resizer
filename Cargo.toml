@@ -48,6 +48,7 @@ magika = ["lm-resizer-core/magika"]
 anyhow = { workspace = true }
 axum = { workspace = true }
 base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 clap = { workspace = true }
 flate2 = "1"
 futures-util = "0.3"

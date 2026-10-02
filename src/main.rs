@@ -39,6 +39,7 @@ use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use walkdir::WalkDir;
 
 mod advice_cli;
+mod analytics_cli;
 mod lossless_filters;
 mod mcp_proxy;
 mod parity_filters;
@@ -320,6 +321,8 @@ enum Commands {
     /// Show CCR store statistics.
     #[command(visible_alias = "gain")]
     Stats {
+        #[command(flatten)]
+        views: analytics_cli::Views,
         /// Include recent executions with exact counts, duration and exit status.
         #[arg(short = 'H', long)]
         history: bool,
@@ -1577,6 +1580,7 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Commands::Stats {
+            views,
             store,
             markdown,
             history,
@@ -1616,6 +1620,10 @@ async fn run(cli: Cli) -> Result<()> {
             });
             if let Some(rows) = recent {
                 report["history"] = json!(rows);
+            }
+            views.enrich(&mut report, project)?;
+            if views.render(&report)? {
+                return Ok(());
             }
             if markdown {
                 print!("{}", format_stats_markdown(&report));
