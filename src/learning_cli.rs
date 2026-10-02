@@ -92,8 +92,15 @@ pub fn run(
         .saturating_sub(opts.selection.since.unwrap_or(30).saturating_mul(86400));
     let mut counts = BTreeMap::<(String, String), usize>::new();
     let mut attempts = BTreeMap::<String, usize>::new();
+    let mut unreadable = 0usize;
     for file in files {
-        let content = std::fs::read_to_string(&file)?;
+        let content = match std::fs::read_to_string(&file) {
+            Ok(content) => content,
+            Err(_) => {
+                unreadable += 1;
+                continue;
+            }
+        };
         let (scope, date) = crate::session_audit::metadata(&content);
         if project.is_some_and(|p| !scope.as_deref().is_some_and(|s| s.contains(p))) {
             continue;
@@ -123,7 +130,7 @@ pub fn run(
         }
     }
     let rows:Vec<_>=counts.into_iter().filter_map(|((from,to),count)|{let confidence=count as f64/attempts[&from] as f64;if count<opts.min_occurrences||confidence<opts.min_confidence{None}else{Some(json!({"failed":from,"corrected":to,"occurrences":count,"confidence":confidence}))}}).collect();
-    let report = json!({"corrections":rows,"method":"adjacent calls to the same program; explicit CLI syntax failure followed by explicit success; observations, not universal rules"});
+    let report = json!({"corrections":rows,"unreadable":unreadable,"method":"adjacent calls to the same program; explicit CLI syntax failure followed by explicit success; observations, not universal rules"});
     if opts.write_rules {
         let path = project_dir
             .unwrap_or(std::env::current_dir()?)
@@ -152,7 +159,10 @@ pub fn run(
     if json_output || opts.selection.format.as_deref() == Some("json") {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!("{} observed CLI corrections", rows.len());
+        println!(
+            "{} observed CLI corrections; {unreadable} unreadable sessions",
+            rows.len()
+        );
         for row in rows {
             println!("{row}");
         }

@@ -47,3 +47,40 @@ fn learn_filters_observations_and_writes_non_destructive_rules() {
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(v["corrections"].as_array().unwrap().is_empty());
 }
+
+#[test]
+fn learn_counts_unreadable_sessions_without_losing_readable_corrections() {
+    let root = tempfile::tempdir().unwrap();
+    let broken = root.path().join("broken.jsonl");
+    std::fs::write(&broken, [0xff, 0xfe]).unwrap();
+    let good = root.path().join("good.jsonl");
+    let rows = [
+        json!({"type":"tool_use","id":"a","name":"Bash","input":{"command":"git status --bad"}}),
+        json!({"type":"tool_result","tool_use_id":"a","content":"unknown option bad","is_error":true}),
+        json!({"type":"tool_use","id":"b","name":"Bash","input":{"command":"git status"}}),
+        json!({"type":"tool_result","tool_use_id":"b","content":"ok","is_error":false}),
+    ];
+    std::fs::write(
+        &good,
+        rows.iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+        .env("HOME", root.path())
+        .current_dir(root.path())
+        .args(["learn", "--all", "--since", "0", "--json"])
+        .arg(root.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["unreadable"], 1);
+    assert_eq!(report["corrections"][0]["corrected"], "git status");
+}
