@@ -5,6 +5,7 @@ Capture once, replay the identical streams through exec before/after. Large
 artifacts stay outside git. A missing fact or exit-code change is a failing run.
 """
 import argparse
+from collections import Counter
 import hashlib
 import json
 import os
@@ -148,16 +149,16 @@ def facts(kind, raw, command):
 
 
 def missing(case, raw, output):
-    output = expand(output)
+    output = output if output == raw else expand(output)
     required = facts(case["kind"], raw, case["command"])
     if case["kind"] in ("recursive", "grep"):
-        present = set(facts(case["kind"], output, case["command"]))
-        lost = [fact for fact in required if fact not in present]
+        present = Counter(facts(case["kind"], output, case["command"]))
+        lost = list((Counter(required) - present).elements())
     elif case["kind"] == "cat":
         lost = [] if output == raw else ["exact file content"]
     else:
-        present = set(line.strip() for line in output.splitlines())
-        lost = [fact for fact in required if fact not in present]
+        present = Counter(line.strip() for line in output.splitlines())
+        lost = list((Counter(required) - present).elements())
     return required, lost
 
 
@@ -199,7 +200,13 @@ def replay(args):
         report = json.loads(p.stdout)
         required, lost = missing(case, raw, report["output"])
         good_exit = p.returncode == case["exit_code"] == report["exit_code"]
-        failed |= bool(lost) or not good_exit
+        recovery_verified = None
+        if report.get("tee_hint"):
+            recovery_text = ("[stderr]\n" if report.get("streams") and stderr and not stdout else "") + raw
+            digest = hashlib.sha256(recovery_text.encode()).hexdigest()
+            tee = outdir / "state" / "tee" / (digest + ".log")
+            recovery_verified = tee.exists() and tee.read_bytes() == recovery_text.encode()
+        failed |= bool(lost) or not good_exit or recovery_verified is False
         (outdir / (case["id"]+".output")).write_text(report["output"])
         (outdir / (case["id"]+".facts.json")).write_text(json.dumps(required, ensure_ascii=False, indent=2)+"\n")
         # Public metadata excludes local absolute command/state paths and raw content.
@@ -207,7 +214,8 @@ def replay(args):
                    replay_seconds=replay_seconds, exec_seconds=elapsed,
                    added_seconds=elapsed-replay_seconds, filter=report["filter"],
                    tokens=metrics(raw, report["output"]), facts=len(required),
-                   missing_count=len(lost), missing_sample=lost[:3], exit_preserved=good_exit)
+                   missing_count=len(lost), missing_sample=lost[:3], exit_preserved=good_exit,
+                   recovery_verified=recovery_verified)
         # Tracebacks may contain the capture root; redact it in public samples.
         row["missing_sample"] = json.loads(json.dumps(row["missing_sample"]).replace(str(args.repos), "<repos>"))
         results.append(row)
