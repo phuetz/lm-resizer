@@ -4888,6 +4888,16 @@ fn tee_raw_output_if_useful(raw: &str, output: &str) -> Result<Option<String>> {
         return Ok(None);
     }
 
+    match std::env::var("LM_RESIZER_RECALL").as_deref() {
+        Ok("disabled") => return Ok(None),
+        Ok("sqlite") => {
+            let key = lm_resizer_core::ccr::compute_key(raw.as_bytes());
+            let store = open_store(None)?;
+            store.put(&key, raw);
+            return Ok(Some(format!("[raw: {key}]")));
+        }
+        _ => {}
+    }
     let tee_dir = default_state_dir()?.join("tee");
     std::fs::create_dir_all(&tee_dir)?;
     let digest = format!("{:x}", Sha256::digest(raw.as_bytes()));

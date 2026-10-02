@@ -1,6 +1,6 @@
 //! Persistent local CLI settings; explicit environment variables take precedence.
 use anyhow::{bail, Context, Result};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::{io::Write, path::PathBuf};
 
@@ -8,6 +8,7 @@ use std::{io::Write, path::PathBuf};
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub tracking: bool,
+    pub recall: RecallMode,
     pub tee: bool,
     pub store: Option<PathBuf>,
 }
@@ -15,8 +16,26 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             tracking: true,
+            recall: RecallMode::Tee,
             tee: true,
             store: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum RecallMode {
+    Sqlite,
+    Tee,
+    Disabled,
+}
+impl RecallMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Sqlite => "sqlite",
+            Self::Tee => "tee",
+            Self::Disabled => "disabled",
         }
     }
 }
@@ -32,6 +51,11 @@ pub struct Options {
 }
 #[derive(Subcommand)]
 enum Action {
+    /// Select raw snapshot storage; CCR compression payloads remain recoverable.
+    Recall {
+        #[arg(value_enum)]
+        mode: Option<RecallMode>,
+    },
     /// Set a local setting: tracking, tee, or store.
     Set { key: String, value: String },
     /// Remove an override and return to its default.
@@ -59,6 +83,9 @@ pub fn load() -> Result<Settings> {
 }
 pub fn apply() -> Result<()> {
     let settings = load()?;
+    if std::env::var_os("LM_RESIZER_RECALL").is_none() {
+        std::env::set_var("LM_RESIZER_RECALL", settings.recall.as_str());
+    }
     for (key, value) in [
         (
             "LM_RESIZER_TRACKING",
@@ -103,6 +130,17 @@ pub fn run(opts: Options) -> Result<()> {
         let (key, value) = match action {
             Action::Set { key, value } => (key, Some(value)),
             Action::Unset { key } => (key, None),
+            Action::Recall { mode } => {
+                if let Some(mode) = mode {
+                    settings.recall = mode;
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&path, toml::to_string_pretty(&settings)?)?;
+                }
+                println!("{}", settings.recall.as_str());
+                return Ok(());
+            }
             Action::Path => unreachable!(),
         };
         match key.as_str() {
