@@ -4,9 +4,32 @@ use serde_json::{json, Value};
 use std::io::{Read, Write};
 
 pub fn response(agent: &str, value: &Value, exe: &str) -> Option<Value> {
+    if agent == "copilot" && value.get("tool_name").is_none() {
+        let tool = value["toolName"].as_str()?;
+        if !matches!(tool, "bash" | "powershell") {
+            return None;
+        }
+        let args: Value = serde_json::from_str(value["toolArgs"].as_str()?).ok()?;
+        let normalized = json!({"tool_name":"Bash","tool_input":args});
+        let output = response(agent, &normalized, exe)?;
+        return Some(json!({"modifiedArgs":output["hookSpecificOutput"]["updatedInput"]}));
+    }
+    if agent == "codex"
+        && (value["hook_event_name"] != "PreToolUse"
+            || !matches!(
+                value["permission_mode"].as_str(),
+                Some("default" | "acceptEdits" | "plan" | "dontAsk" | "bypassPermissions")
+            ))
+    {
+        return None;
+    }
     let name = value["tool_name"].as_str()?;
     let matches = match agent {
-        "claude" | "codex" | "copilot" => matches!(name, "Bash" | "bash"),
+        "claude" | "codex" => matches!(name, "Bash" | "bash"),
+        "copilot" => matches!(
+            name,
+            "Bash" | "bash" | "runTerminalCommand" | "run_in_terminal"
+        ),
         "gemini" => name == "run_shell_command",
         "cursor" => matches!(name, "Shell" | "shell"),
         "trae" => name == "RunCommand",
@@ -27,6 +50,12 @@ pub fn response(agent: &str, value: &Value, exe: &str) -> Option<Value> {
     input.insert("command".into(), json!(rewritten));
     let input = Value::Object(input);
     Some(match agent {
+        // Codex requires protocol-level allow to accept updatedInput. Its
+        // native approval/sandbox checks still run on the replacement. Local
+        // rule configurations are conservatively deferred by run().
+        "codex" => {
+            json!({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":input}})
+        }
         "gemini" => json!({"decision":"ask_user","hookSpecificOutput":{"tool_input":input}}),
         "cursor" => json!({"continue":true,"permission":"ask","updated_input":input}),
         "vibe" => json!({"hook_specific_output":{"tool_input":input}}),
@@ -34,10 +63,22 @@ pub fn response(agent: &str, value: &Value, exe: &str) -> Option<Value> {
     })
 }
 
-pub fn run(agent: &str, command: &[String]) -> Result<()> {
+pub fn run(agent: &str, command: &[String], check_agent: &str) -> Result<()> {
     if agent == "check" {
         let raw = command.join(" ");
-        let rewritten = crate::rewrite_command_for_hook(&raw, "lm-resizer");
+        let client = if check_agent == "unknown" {
+            "claude"
+        } else {
+            check_agent
+        };
+        if !crate::integration_doctor::CLIENTS.contains(&client) {
+            anyhow::bail!("unknown agent {client}");
+        }
+        let rewritten = if host_has_constraints(client) {
+            None
+        } else {
+            crate::rewrite_command_for_hook(&raw, "lm-resizer")
+        };
         println!(
             "{}",
             json!({"command":raw,"rewritten":rewritten,"changed":rewritten.is_some()})
@@ -61,8 +102,14 @@ pub fn run(agent: &str, command: &[String]) -> Result<()> {
         return Ok(());
     }
     let value = serde_json::from_str::<Value>(input.trim_start_matches('\u{feff}')).ok();
-    let exe = std::env::current_exe()?.to_string_lossy().into_owned();
-    let output = value.as_ref().and_then(|v| response(agent, v, &exe));
+    // Installed hook commands already resolve lm-resizer on PATH. A bare name
+    // is valid in both POSIX shells and PowerShell, unlike a quoted path.
+    let exe = "lm-resizer";
+    let output = if host_has_constraints(agent) {
+        None
+    } else {
+        value.as_ref().and_then(|v| response(agent, v, exe))
+    };
     if let Some(ref output) = output {
         println!("{output}");
     }
@@ -113,7 +160,7 @@ pub fn audit_report(since: u64) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn host_contracts_preserve_fields_without_granting_permission() {
+    fn host_contracts_preserve_fields_and_codex_protocol_acknowledgement() {
         for (agent, tool, pointer) in [
             ("claude", "Bash", "/hookSpecificOutput/updatedInput"),
             ("codex", "Bash", "/hookSpecificOutput/updatedInput"),
@@ -128,14 +175,14 @@ mod tests {
             ("cursor", "Shell", "/updated_input"),
             ("vibe", "bash", "/hook_specific_output/tool_input"),
         ] {
-            let v = json!({"tool_name":tool,"tool_input":{"command":"git status","timeout":42}});
+            let v = json!({"permission_mode":"default","hook_event_name":"PreToolUse","tool_name":tool,"tool_input":{"command":"git status","timeout":42}});
             let out = response(agent, &v, "lm-resizer").unwrap();
             assert_eq!(out.pointer(pointer).unwrap()["timeout"], 42);
             assert!(out.pointer(pointer).unwrap()["command"]
                 .as_str()
                 .unwrap()
                 .ends_with("exec -- git status"));
-            assert!(!out.to_string().contains("\"allow\""));
+            assert_eq!(out.to_string().contains("\"allow\""), agent == "codex");
             assert!(response(
                 agent,
                 &json!({"tool_name":"Read","tool_input":{"command":"git status"}}),
@@ -165,4 +212,72 @@ mod tests {
             );
         }
     }
+}
+
+// A wrapper changes the command the host checks. Until every host's permission
+// language can be evaluated exactly, defer if local deny/ask policies exist.
+fn host_has_constraints(agent: &str) -> bool {
+    fn restricted(v: &Value) -> bool {
+        match v {
+            Value::Object(map) => map.iter().any(|(key, value)| {
+                (matches!(
+                    key.as_str(),
+                    "deny" | "ask" | "exclude" | "commandDenylist" | "commandAllowlist"
+                ) && match value {
+                    Value::Array(a) => !a.is_empty(),
+                    Value::Object(o) => !o.is_empty(),
+                    Value::Null => false,
+                    _ => true,
+                }) || restricted(value)
+            }),
+            Value::Array(items) => items.iter().any(restricted),
+            _ => false,
+        }
+    }
+    let mut roots = vec![];
+    if let Some(home) = crate::user_home_dir() {
+        roots.push(home);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.extend(cwd.ancestors().map(std::path::Path::to_path_buf));
+    }
+    let directory = match agent {
+        "claude" => ".claude",
+        "codex" => ".codex",
+        "gemini" => ".gemini",
+        "cursor" => ".cursor",
+        "droid" => ".factory",
+        "trae" => ".trae",
+        _ => return false,
+    };
+    for root in roots {
+        let dir = root.join(directory);
+        if agent == "codex" && dir.join("rules").is_dir() {
+            match std::fs::read_dir(dir.join("rules")) {
+                Ok(mut entries) => {
+                    if entries.next().is_some() {
+                        return true;
+                    }
+                }
+                Err(_) => return true,
+            }
+        }
+        for name in ["settings.json", "settings.local.json", "cli-config.json"] {
+            match std::fs::read_to_string(dir.join(name)) {
+                Ok(text) => {
+                    match serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
+                        Ok(value) => {
+                            if restricted(&value) {
+                                return true;
+                            }
+                        }
+                        Err(_) => return true,
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return true,
+            }
+        }
+    }
+    false
 }

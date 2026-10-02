@@ -2116,7 +2116,7 @@ async fn run(cli: Cli) -> Result<()> {
             json,
         } => {
             if let Some(mode) = mode {
-                return agent_hooks::run(&mode, &command);
+                return agent_hooks::run(&mode, &command, &client);
             }
             // PreToolUse: rewrite a supported Bash command to run through `lm-resizer exec --`
             // (in-place output substitution, the rtk role). PostToolUse: measure-only telemetry.
@@ -5155,6 +5155,9 @@ fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
     }
     if !rewrite_command_report(&words).supported {
         return None;
+    }
+    if exe == "lm-resizer" {
+        return Some(format!("lm-resizer exec -- {seg}"));
     }
     let exe = exe
         .replace('\\', "\\\\")
