@@ -261,3 +261,72 @@ fn plugin_upgrade_accepts_owned_old_bytes_but_preserves_manual_edits() {
     assert!(!run().status.success());
     assert_eq!(std::fs::read_to_string(path).unwrap(), "manual changes");
 }
+
+#[test]
+fn vibe_rejects_incompatible_hooks_without_mutation_and_repairs_legacy_block() {
+    const BLOCK: &str = "\n# lm-resizer hook begin\n[[hooks]]\nname = \"lm-resizer-rewrite\"\ntype = \"pre_tool\"\nmatch = \"bash\"\ncommand = \"lm-resizer hook vibe\"\n# lm-resizer hook end\n";
+    for original in [
+        "# personal\n[hooks]\nenabled = true\n",
+        "hooks = true\n",
+        "hooks = []\n",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join(".vibe/hooks.toml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, original).unwrap();
+        let run = |args: &[&str]| {
+            Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+                .env("HOME", root.path())
+                .current_dir(root.path())
+                .args(["init", "--agent", "vibe", "--global"])
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        let out = run(&[]);
+        assert!(
+            !out.status.success(),
+            "incompatible TOML must be refused: {original}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert!(!root.path().join(".vibe/prompts/lm-resizer.md").exists());
+        std::fs::write(&path, format!("{original}{BLOCK}")).unwrap();
+        assert!(
+            run(&["--uninstall"]).status.success(),
+            "must repair exact legacy block"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        let _: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn vibe_preserves_existing_array_and_refuses_modified_or_duplicate_owned_blocks() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join(".vibe/hooks.toml");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let original = "# audit\n[[hooks]]\nname = 'personal'\ncommand = 'audit'\n";
+    std::fs::write(&path, original).unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+            .env("HOME", root.path())
+            .current_dir(root.path())
+            .args(["init", "--agent", "vibe", "--global"])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert!(run(&[]).status.success());
+    let installed = std::fs::read_to_string(&path).unwrap();
+    let parsed: toml::Value = toml::from_str(&installed).unwrap();
+    assert_eq!(parsed["hooks"].as_array().unwrap().len(), 2);
+    let block = installed.strip_prefix(original).unwrap();
+    for invalid in [
+        installed.replace("lm-resizer hook vibe", "personal command"),
+        format!("{installed}{block}"),
+    ] {
+        std::fs::write(&path, &invalid).unwrap();
+        assert!(!run(&["--uninstall"]).status.success());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), invalid);
+    }
+}

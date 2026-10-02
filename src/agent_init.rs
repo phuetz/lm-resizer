@@ -456,22 +456,29 @@ fn patch_json(
 }
 
 fn patch_vibe(text: &str, uninstall: bool) -> Result<String> {
-    // Validate TOML, but splice only the owned block to preserve comments.
-    let _: toml::Value = toml::from_str(text).context("invalid Vibe TOML; left untouched")?;
     const BLOCK:&str="\n# lm-resizer hook begin\n[[hooks]]\nname = \"lm-resizer-rewrite\"\ntype = \"pre_tool\"\nmatch = \"bash\"\ncommand = \"lm-resizer hook vibe\"\n# lm-resizer hook end\n";
-    if text.contains(BLOCK) {
-        Ok(if uninstall {
-            text.replacen(BLOCK, "", 1)
-        } else {
-            text.into()
-        })
-    } else if text.contains("# lm-resizer hook begin") {
-        bail!("modified lm-resizer Vibe hook; left untouched")
-    } else if uninstall {
-        Ok(text.into())
-    } else {
-        Ok(format!("{text}{BLOCK}"))
+    // Remove only one exact owned block before validation: old versions could
+    // append it to a valid but incompatible [hooks] table. Uninstall must repair
+    // that case without rewriting any user bytes.
+    let count = text.matches("# lm-resizer hook begin").count();
+    if count > 1 || (count == 1 && !text.contains(BLOCK)) {
+        bail!("modified or duplicate lm-resizer Vibe hook; left untouched");
     }
+    let clean = text.replacen(BLOCK, "", 1);
+    let _: toml::Value = toml::from_str(&clean).context("invalid Vibe TOML; left untouched")?;
+    if uninstall {
+        return Ok(clean);
+    }
+    // Validate the proposed document too. Scalars, inline arrays and [hooks]
+    // tables cannot be extended with [[hooks]]; refuse before any plan is applied.
+    let after = format!("{clean}{BLOCK}");
+    let _: toml::Value = toml::from_str(&after)
+        .context("Vibe hooks must support [[hooks]] entries; left untouched")?;
+    Ok(if text.contains(BLOCK) {
+        text.into()
+    } else {
+        after
+    })
 }
 
 fn owned_file(path: PathBuf, content: &str, uninstall: bool) -> Result<Vec<Edit>> {
