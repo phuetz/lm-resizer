@@ -6,7 +6,8 @@ cd "$root"
 
 node scripts/test-source-install-docs.cjs
 cargo fmt --check
-cargo test --release
+# `--workspace` is required to test all members since the root Cargo.toml doesn't define `default-members`.
+cargo test --workspace --release
 cargo check --release
 cargo check --release --examples
 cargo build --release

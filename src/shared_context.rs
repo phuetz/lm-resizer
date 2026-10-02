@@ -19,7 +19,12 @@ fn open(path: &Path) -> Result<Connection> {
     }
     let conn = Connection::open(path)
         .with_context(|| format!("opening shared store: {}", path.display()))?;
+
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    // Handoffs include originals, so retain durability across power loss.
+    conn.pragma_update(None, "synchronous", "FULL")?;
+
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS shared_context (
             key TEXT PRIMARY KEY,
@@ -99,5 +104,17 @@ mod tests {
         assert_eq!(list(&path).unwrap(), vec!["research"]);
         assert!(put(&path, "research", "other", "other").is_err());
         assert!(put(&path, "bad\nkey", "x", "x").is_err());
+
+        // Verify WAL mode was enabled (it's persistent on the file)
+        let check_conn = rusqlite::Connection::open(&path).unwrap();
+        let journal_mode: String = check_conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(journal_mode.to_lowercase(), "wal");
+        let synchronous: i64 = super::open(&path)
+            .unwrap()
+            .query_row("PRAGMA synchronous", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(synchronous, 2);
     }
 }
