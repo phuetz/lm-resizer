@@ -3703,6 +3703,7 @@ fn filter_cargo_test(raw: &str) -> String {
     let mut kept = Vec::new();
     let mut in_failure = false;
     let mut failure_lines = 0usize;
+    let mut keep_following = 0usize;
     let mut skipped = 0usize;
 
     for line in raw.lines() {
@@ -3738,11 +3739,16 @@ fn filter_cargo_test(raw: &str) -> String {
         }
         let lower = line.to_ascii_lowercase();
         if lower.contains("error")
+            || lower.contains("warning:")
             || lower.contains("failed")
             || lower.contains("panic")
             || lower.contains("could not compile")
         {
             kept.push(line.to_string());
+            keep_following = 3;
+        } else if keep_following > 0 {
+            kept.push(line.to_string());
+            keep_following -= 1;
         } else {
             skipped += 1;
         }
@@ -10254,6 +10260,28 @@ expected = "error: bad\n"
         assert!(filtered.contains("TypeScript: 2 diagnostics in 1 files"));
         assert!(filtered.contains("src/a.ts: 2 diagnostics"));
         assert!(filtered.contains("TS2322"));
+    }
+
+    #[test]
+    fn cargo_test_keeps_rustc_error_location() {
+        let raw = "   Compiling foo v0.1.0 (/w)\nerror[E0425]: cannot find value `x` in this scope\n --> src/lib.rs:4:5\n  |\n4 |     x\n  |     ^ not found in this scope\n\nerror: could not compile `foo` (lib test) due to 1 previous error\n";
+        let filtered = filter_cargo_test(raw);
+        assert!(filtered.contains("--> src/lib.rs:4:5"));
+    }
+
+    #[test]
+    fn cargo_test_green_run_still_collapses() {
+        let raw = "   Compiling test v0.1.0\n    Finished test [unoptimized + debuginfo] target(s)\n     Running unittests src/main.rs\n\nrunning 1 test\ntest test_ok ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n";
+        let filtered = filter_cargo_test(raw);
+        assert!(filtered.contains("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"));
+    }
+
+    #[test]
+    fn cargo_test_failure_block_unchanged() {
+        let raw = "running 1 test\ntest my_test ... FAILED\n\nfailures:\n\n---- my_test stdout ----\nthread `my_test` panicked at `assertion failed: false`, src/main.rs:2:5\n\nfailures:\n    my_test\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\n";
+        let filtered = filter_cargo_test(raw);
+        assert!(filtered.contains("---- my_test stdout ----"));
+        assert!(filtered.contains("test result: FAILED."));
     }
 
     #[test]
