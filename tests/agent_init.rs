@@ -360,3 +360,34 @@ fn hermes_preserves_yaml_comments_order_and_other_plugin_entries() {
         }
     }
 }
+
+#[test]
+fn vibe_uninstall_repairs_the_exact_block_left_by_legacy_versions() {
+    const BLOCK: &str = "\n# lm-resizer hook begin\n[[hooks]]\nname = \"lm-resizer-rewrite\"\ntype = \"pre_tool\"\nmatch = \"bash\"\ncommand = \"lm-resizer hook vibe\"\n# lm-resizer hook end\n";
+    for original in [
+        "# personal\n[hooks]\nenabled = true\n",
+        "hooks = true\n",
+        "hooks = []\n",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join(".vibe/hooks.toml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, original).unwrap();
+        let run = |args: &[&str]| {
+            Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+                .env("HOME", root.path())
+                .current_dir(root.path())
+                .args(["init", "--agent", "vibe", "--global"])
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        std::fs::write(&path, format!("{original}{BLOCK}")).unwrap();
+        assert!(
+            run(&["--uninstall"]).status.success(),
+            "must repair exact legacy block"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        let _: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    }
+}
