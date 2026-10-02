@@ -1940,11 +1940,39 @@ fn compress_text_with_pipeline_gate(
     token_budget: Option<usize>,
     reinject: bool,
 ) -> Result<CompressReport> {
+    compress_text_with_metrics(
+        content,
+        query,
+        store,
+        pipeline,
+        token_budget,
+        reinject,
+        true,
+    )
+}
+
+// `exec` only needs the final raw/output count; intermediate counts are unused.
+fn compress_text_with_metrics(
+    content: &str,
+    query: &str,
+    store: &dyn CcrStore,
+    pipeline: &CompressionPipeline,
+    token_budget: Option<usize>,
+    reinject: bool,
+    measure_tokens: bool,
+) -> Result<CompressReport> {
+    let tokens = |output: &str| {
+        if measure_tokens {
+            TokenCounts::measure(content, output)
+        } else {
+            TokenCounts::default()
+        }
+    };
     if let Some(output) = compact_json_rows(content) {
         let key = lm_resizer_core::ccr::compute_key(content.as_bytes());
         store.put(&key, content);
         return Ok(CompressReport {
-            tokens: TokenCounts::measure(content, &output),
+            tokens: tokens(&output),
             content_type: "json".to_string(),
             original_bytes: content.len(),
             compressed_bytes: output.len(),
@@ -1980,7 +2008,7 @@ fn compress_text_with_pipeline_gate(
         steps_applied.push(format!("diagnostic_reinjection:{reinjected}"));
         if output.len() >= content.len() {
             return Ok(CompressReport {
-                tokens: TokenCounts::measure(content, content),
+                tokens: tokens(content),
                 content_type: detection.content_type.as_str().to_string(),
                 original_bytes: content.len(),
                 compressed_bytes: content.len(),
@@ -2008,7 +2036,7 @@ fn compress_text_with_pipeline_gate(
         cache_keys.insert(0, original_key);
     }
     Ok(CompressReport {
-        tokens: TokenCounts::measure(content, &output),
+        tokens: tokens(&output),
         content_type: detection.content_type.as_str().to_string(),
         original_bytes: content.len(),
         compressed_bytes: output.len(),
@@ -2125,6 +2153,12 @@ fn compress_with_optional_advice(
     Ok((report, Some(advice_report)))
 }
 
+fn perf_stage(stage: &str, elapsed: std::time::Duration) {
+    if std::env::var_os("LM_RESIZER_PROFILE").is_some() {
+        eprintln!("profile {stage}: {:.6}s", elapsed.as_secs_f64());
+    }
+}
+
 fn run_exec_command(
     command: &[String],
     query: &str,
@@ -2149,18 +2183,22 @@ fn run_exec_command(
         )
     };
 
+    perf_stage("capture", started.elapsed());
+    let phase = Instant::now();
     let (filter, filtered) = if raw_on_failure && exit_code != 0 {
         ("raw_on_failure".to_string(), raw.clone())
     } else {
         filter_command_output(command, &raw)
     };
 
+    perf_stage("filter", phase.elapsed());
+    let phase = Instant::now();
     let mut compressed = if matches!(
         filter.as_str(),
         "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
     ) {
         CompressReport {
-            tokens: TokenCounts::measure(&filtered, &filtered),
+            tokens: TokenCounts::default(),
             content_type: if matches!(filter.as_str(), "json-passthrough" | "aws-json") {
                 "json"
             } else {
@@ -2175,7 +2213,15 @@ fn run_exec_command(
             output: filtered.clone(),
         }
     } else {
-        compress_text_with_pipeline_gate(&filtered, query, store, &build_pipeline(), None, false)?
+        compress_text_with_metrics(
+            &filtered,
+            query,
+            store,
+            &build_pipeline(),
+            None,
+            false,
+            false,
+        )?
     };
     // Porte de conservation des diagnostics. Le filtre de commande a choisi
     // les lignes qui comptent ; l'étape générique qui suit ne connaît pas la
@@ -2185,6 +2231,8 @@ fn run_exec_command(
     // annoncée et récupérable, mais le diagnostic n'était plus sous les yeux.
     // Une ligne d'échec que le filtre gardait et que la compression perd :
     // on rend la sortie filtrée, qui est déjà réduite.
+    perf_stage("pipeline_and_intermediate_tokens", phase.elapsed());
+    let phase = Instant::now();
     if let Some(lost) = first_lost_indispensable_line(&filtered, &compressed.output, &filter) {
         eprintln!(
             "lm-resizer: compression générique annulée, elle omettait « {} »",
@@ -2196,6 +2244,8 @@ fn run_exec_command(
             .push("diagnostic_gate:kept_filtered".to_string());
         compressed.cache_keys.clear();
     }
+    perf_stage("diagnostic_gate", phase.elapsed());
+    let phase = Instant::now();
     let tee_hint = tee_raw_output_if_useful(&raw, &filtered)?;
     let mut final_output = compressed.output;
     if let Some(hint) = &tee_hint {
@@ -2206,6 +2256,8 @@ fn run_exec_command(
         final_output.push('\n');
     }
 
+    perf_stage("tee", phase.elapsed());
+    let phase = Instant::now();
     let report = ExecReport {
         tokens: TokenCounts::measure(&raw, &final_output),
         command: command.join(" "),
@@ -2220,6 +2272,7 @@ fn run_exec_command(
         tee_hint,
         output: final_output,
     };
+    perf_stage("final_tokens", phase.elapsed());
     record_exec_history(&report, started.elapsed())?;
     Ok(report)
 }
@@ -2246,12 +2299,13 @@ fn process_captured_output(
     ) {
         (filtered.clone(), Vec::new(), Vec::new())
     } else {
-        let result = compress_text_with_pipeline_gate(
+        let result = compress_text_with_metrics(
             &filtered,
             query,
             store,
             &build_pipeline(),
             None,
+            false,
             false,
         )?;
         (result.output, result.steps_applied, result.cache_keys)
@@ -3536,6 +3590,9 @@ fn apply_toml_filter(filter: &CompiledTomlFilter, raw: &str) -> String {
 
 /// A failure line of `before` that `after` no longer shows, if any.
 fn first_lost_failure_line<'a>(before: &'a str, after: &str) -> Option<&'a str> {
+    if before == after {
+        return None;
+    }
     before
         .lines()
         .filter(|l| {
@@ -3568,24 +3625,25 @@ fn first_lost_indispensable_line<'a>(
     after: &str,
     filter: &str,
 ) -> Option<&'a str> {
+    if before == after {
+        return None;
+    }
     first_lost_failure_line(before, after).or_else(|| {
         if matches!(filter, "search_results" | "listing") {
+            let remaining: std::collections::HashSet<&str> = after.lines().map(str::trim).collect();
             return before
                 .lines()
                 .filter(|line| !line.trim().is_empty())
-                .find(|line| {
-                    !after
-                        .lines()
-                        .any(|remaining| remaining.trim() == line.trim())
-                });
+                .find(|line| !remaining.contains(line.trim()));
         }
         if filter != "diff_summary" && filter != "git_show" {
             return None;
         }
+        let remaining: std::collections::HashSet<&str> = after.lines().collect();
         before.lines().find(|line| {
             ((line.starts_with('+') && !line.starts_with("+++"))
                 || (line.starts_with('-') && !line.starts_with("---")))
-                && !after.lines().any(|remaining| remaining == *line)
+                && !remaining.contains(line)
         })
     })
 }
@@ -9388,6 +9446,53 @@ command = "node"
                 .any(|ext| ext.eq_ignore_ascii_case(".exe")));
         } else {
             assert_eq!(extensions, vec![String::new()]);
+        }
+    }
+
+    #[test]
+    fn indispensable_gate_matches_original_scan() {
+        // Reference the old scan: trim for listings/search, exact for diff.
+        let inputs = [
+            "",
+            "a\nb\n",
+            " a \n\tb\n\n",
+            "a\na\nb",
+            "é\r\n中\n",
+            "+x\n-y\n+++z\n---z\n",
+            "ERROR: fail\ncontext\n",
+        ];
+        for before in inputs {
+            for after in inputs {
+                for filter in [
+                    "listing",
+                    "search_results",
+                    "diff_summary",
+                    "git_show",
+                    "none",
+                ] {
+                    let reference = first_lost_failure_line(before, after).or_else(|| {
+                        if matches!(filter, "listing" | "search_results") {
+                            before
+                                .lines()
+                                .filter(|l| !l.trim().is_empty())
+                                .find(|l| !after.lines().any(|r| r.trim() == l.trim()))
+                        } else if matches!(filter, "diff_summary" | "git_show") {
+                            before.lines().find(|l| {
+                                ((l.starts_with('+') && !l.starts_with("+++"))
+                                    || (l.starts_with('-') && !l.starts_with("---")))
+                                    && !after.lines().any(|r| r == *l)
+                            })
+                        } else {
+                            None
+                        }
+                    });
+                    assert_eq!(
+                        first_lost_indispensable_line(before, after, filter),
+                        reference,
+                        "{filter}: {before:?} -> {after:?}"
+                    );
+                }
+            }
         }
     }
 

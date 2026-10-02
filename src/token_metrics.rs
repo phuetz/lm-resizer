@@ -34,8 +34,20 @@ impl Default for TokenCounts {
 
 impl TokenCounts {
     pub fn measure(original: &str, compressed: &str) -> Self {
-        let original_tokens = COUNTER.count_text(original);
-        let compressed_tokens = COUNTER.count_text(compressed);
+        if original.is_empty() && compressed.is_empty() {
+            return Self::default();
+        }
+        let started = std::time::Instant::now();
+        let counter = &*COUNTER;
+        crate::perf_stage("tokenizer_init", started.elapsed());
+        let started = std::time::Instant::now();
+        let original_tokens = counter.count_text(original);
+        crate::perf_stage("original_token_count", started.elapsed());
+        let compressed_tokens = if original == compressed {
+            original_tokens
+        } else {
+            counter.count_text(compressed)
+        };
         Self {
             original_tokens,
             compressed_tokens,
