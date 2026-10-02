@@ -3405,6 +3405,21 @@ fn apply_toml_filter(filter: &CompiledTomlFilter, raw: &str) -> String {
         lines = keep_signal_within(lines, tail, TruncateFrom::Head, &filter.name);
     }
     if let Some(max) = filter.max_lines {
+        if filter.name.contains("test") || filter.name.contains("quality") {
+            if lines.len() > max {
+                static SUCCESS_RE: std::sync::LazyLock<regex::Regex> =
+                    std::sync::LazyLock::new(|| {
+                        regex::Regex::new(r"^(?:\s*[✓✔√]\s|ok\s|passed\b)").unwrap()
+                    });
+                let mut filtered = Vec::new();
+                for line in lines {
+                    if !SUCCESS_RE.is_match(&line) {
+                        filtered.push(line);
+                    }
+                }
+                lines = filtered;
+            }
+        }
         lines = keep_signal_within(lines, max, TruncateFrom::Middle, &filter.name);
     }
 
@@ -12200,6 +12215,47 @@ Prisma CLI Version : 5.15.0
         }
     }
 
+    #[test]
+    fn js_quality_keeps_failure_and_summary_beyond_line_180() {
+        let mut raw = String::new();
+        for i in 1..=200 {
+            raw.push_str(&format!("passed tests/f{i}.test.ts (3 tests) 5ms\n"));
+        }
+        raw.push_str(" FAIL  tests/z.test.ts > adds\n");
+        raw.push_str("AssertionError: expected 1 to be 2\n");
+        raw.push_str("Tests  1 failed (603)\n");
+
+        let (_, output) = filter_command_output(&["vitest".into(), "run".into()], &raw);
+
+        assert!(output.contains("FAIL  tests/z.test.ts"));
+        assert!(output.contains("Tests  1 failed"));
+    }
+
+    #[test]
+    fn go_test_keeps_fail_after_many_ok_packages() {
+        let mut raw = String::new();
+        for i in 1..=200 {
+            raw.push_str(&format!("ok  \tpkg{i}\n"));
+        }
+        raw.push_str("FAIL\texample.com/m/pz\n");
+
+        let (_, output) = filter_command_output(&["go".into(), "test".into()], &raw);
+        assert!(output.contains("FAIL\texample.com/m/pz"));
+    }
+
+    #[test]
+    fn js_quality_all_green_stays_under_cap() {
+        let mut raw = String::new();
+        for i in 1..=200 {
+            raw.push_str(&format!("passed tests/f{i}.test.ts (3 tests) 5ms\n"));
+        }
+        let (_, output) = filter_command_output(&["vitest".into(), "run".into()], &raw);
+        assert!(
+            output.lines().count() <= 10,
+            "too many lines: {}",
+            output.lines().count()
+        );
+    }
     #[test]
     fn ruby_prisma_sans_filtre_generique_le_bruit_reste() {
         let rspec = filter_generic(RSPEC_RAW);
