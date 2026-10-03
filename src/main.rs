@@ -1574,7 +1574,11 @@ async fn main() -> Result<()> {
             json,
             markdown,
         } => {
-            let report = discover_exec_savings(&paths, recursive)?;
+            let expanded_paths: Vec<PathBuf> = paths
+                .into_iter()
+                .map(|p| expand_user_path(&p).unwrap_or(p))
+                .collect();
+            let report = discover_exec_savings(&expanded_paths, recursive)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else if markdown {
@@ -7490,6 +7494,17 @@ fn home_dir() -> Result<PathBuf> {
         .context("could not determine home directory")
 }
 
+fn expand_user_path(path: &Path) -> Result<PathBuf> {
+    let s = path.to_string_lossy();
+    if s == "~" {
+        home_dir()
+    } else if s.starts_with("~/") || s.starts_with("~\\") {
+        Ok(home_dir()?.join(&s[2..]))
+    } else {
+        Ok(path.to_path_buf())
+    }
+}
+
 fn codex_home_dir() -> Result<PathBuf> {
     if let Ok(path) = std::env::var("CODEX_HOME") {
         return Ok(PathBuf::from(path));
@@ -9168,6 +9183,26 @@ impl axum::response::IntoResponse for HttpError {
 mod tests {
     use super::*;
     use lm_resizer_core::ccr::InMemoryCcrStore;
+
+    #[test]
+    fn test_expand_user_path() {
+        let home = home_dir().unwrap();
+
+        let p = expand_user_path(Path::new("~")).unwrap();
+        assert_eq!(p, home);
+
+        let p = expand_user_path(Path::new("~/.codex")).unwrap();
+        assert_eq!(p, home.join(".codex"));
+
+        let p = expand_user_path(Path::new("~/test/dir")).unwrap();
+        assert_eq!(p, home.join("test/dir"));
+
+        let p = expand_user_path(Path::new("/abs/x")).unwrap();
+        assert_eq!(p, PathBuf::from("/abs/x"));
+
+        let p = expand_user_path(Path::new("~autre/x")).unwrap();
+        assert_eq!(p, PathBuf::from("~autre/x"));
+    }
 
     #[test]
     fn codex_config_replaces_existing_table() {
