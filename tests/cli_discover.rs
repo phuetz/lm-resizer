@@ -1,5 +1,5 @@
-use std::process::Command;
 use std::fs;
+use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
@@ -33,5 +33,9 @@ fn test_discover_tilde_expansion() {
 
     // We expect the JSON to be generated and files_scanned to be at least 1.
     // The exact JSON structure contains `files_scanned`.
-    assert!(stdout.contains("\"files_scanned\": 1") || stdout.contains("\"files_scanned\":1"), "Output should show 1 file scanned: {}", stdout);
+    assert!(
+        stdout.contains("\"files_scanned\": 1") || stdout.contains("\"files_scanned\":1"),
+        "Output should show 1 file scanned: {}",
+        stdout
+    );
 }

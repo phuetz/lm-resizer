@@ -4680,6 +4680,7 @@ fn summarize_exec_history() -> Result<Value> {
     if !path.exists() {
         return Ok(json!({
             "commands": 0,
+            "exec_history_invalid_lines": 0,
             "original_bytes": 0,
             "compressed_bytes": 0,
             "bytes_saved": 0,
@@ -4691,6 +4692,7 @@ fn summarize_exec_history() -> Result<Value> {
 
     let content = std::fs::read_to_string(path)?;
     let mut commands = 0usize;
+    let mut invalid_lines = 0usize;
     let mut original_bytes = 0usize;
     let mut compressed_bytes = 0usize;
     let mut bytes_saved = 0usize;
@@ -4698,6 +4700,7 @@ fn summarize_exec_history() -> Result<Value> {
     let mut by_command = std::collections::BTreeMap::<String, (usize, usize)>::new();
     for line in content.lines().filter(|line| !line.trim().is_empty()) {
         let Ok(record) = serde_json::from_str::<Value>(line) else {
+            invalid_lines += 1;
             continue;
         };
         commands += 1;
@@ -4736,6 +4739,7 @@ fn summarize_exec_history() -> Result<Value> {
 
     Ok(json!({
         "commands": commands,
+        "exec_history_invalid_lines": invalid_lines,
         "original_bytes": original_bytes,
         "compressed_bytes": compressed_bytes,
         "bytes_saved": bytes_saved,
@@ -4850,6 +4854,18 @@ fn format_stats_markdown(report: &Value) -> String {
     let retrieval_feedback = report.get("retrieval_feedback").unwrap_or(&Value::Null);
     let mut out = String::new();
     out.push_str("# lm-resizer Stats\n\n");
+
+    if let Some(invalid_lines) = history
+        .get("exec_history_invalid_lines")
+        .and_then(Value::as_u64)
+    {
+        if invalid_lines > 0 {
+            out.push_str(&format!(
+                "Warning: {} invalid line(s) ignored in exec-history.jsonl\n\n",
+                invalid_lines
+            ));
+        }
+    }
     out.push_str(&format!(
         "- CCR entries: {}\n",
         report.get("entries").and_then(Value::as_u64).unwrap_or(0)
@@ -7301,7 +7317,10 @@ fn install_mcp(
 ) -> Result<()> {
     let project_dir = project_dir.unwrap_or(std::env::current_dir()?);
     if scope == "project" && !project_dir.is_dir() {
-        anyhow::bail!("project directory does not exist: {}", project_dir.display());
+        anyhow::bail!(
+            "project directory does not exist: {}",
+            project_dir.display()
+        );
     }
     let exe_path = std::env::current_exe()
         .map(|path| path.display().to_string())
