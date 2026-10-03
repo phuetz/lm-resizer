@@ -7300,6 +7300,9 @@ fn install_mcp(
     store: Option<PathBuf>,
 ) -> Result<()> {
     let project_dir = project_dir.unwrap_or(std::env::current_dir()?);
+    if scope == "project" && !project_dir.is_dir() {
+        anyhow::bail!("project directory does not exist: {}", project_dir.display());
+    }
     let exe_path = std::env::current_exe()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "lm-resizer".to_string());
@@ -7402,7 +7405,8 @@ fn install_json_mcp(
         server["type"] = json!("stdio");
     }
     config[root_key]["lm-resizer"] = server;
-    std::fs::write(&config_path, serde_json::to_string_pretty(&config)?)?;
+    std::fs::write(&config_path, serde_json::to_string_pretty(&config)?)
+        .with_context(|| format!("could not write {}", config_path.display()))?;
     println!(
         "Configured {} MCP server at {}",
         client.name(),
