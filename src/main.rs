@@ -731,6 +731,10 @@ enum Commands {
         /// shown by `--help`, even when taken from the environment.
         #[arg(long, env = "LM_RESIZER_API_KEY", hide_env_values = true)]
         api_key: Option<String>,
+        /// Optional bearer token required by clients to access this server.
+        /// Its value is never shown by `--help`, even when taken from the environment.
+        #[arg(long, env = "LM_RESIZER_SERVE_TOKEN", hide_env_values = true)]
+        auth_token: Option<String>,
         /// Upstream provider header mode: openai, anthropic, bedrock, or vertex.
         #[arg(long, env = "LM_RESIZER_PROVIDER", default_value = "openai")]
         provider: String,
@@ -1312,6 +1316,7 @@ struct AppState {
     store_path: PathBuf,
     upstream: Option<String>,
     api_key: Option<String>,
+    serve_token: Option<String>,
     provider: ProviderKind,
     client: Client,
     dashboard_enabled: bool,
@@ -2292,10 +2297,22 @@ async fn run(cli: Cli) -> Result<()> {
             bind,
             upstream,
             api_key,
+            auth_token,
             provider,
             store,
             dashboard,
-        } => run_http(bind, upstream, api_key, provider.parse()?, store, dashboard).await?,
+        } => {
+            run_http(
+                bind,
+                upstream,
+                api_key,
+                auth_token,
+                provider.parse()?,
+                store,
+                dashboard,
+            )
+            .await?
+        }
         Commands::Wrap {
             agent,
             args,
@@ -8381,20 +8398,41 @@ async fn run_http(
     bind: SocketAddr,
     upstream: Option<String>,
     api_key: Option<String>,
+    auth_token: Option<String>,
     provider: ProviderKind,
     store: Option<PathBuf>,
     dashboard_enabled: bool,
 ) -> Result<()> {
+    if auth_token
+        .as_ref()
+        .is_some_and(|token| token.trim().is_empty())
+    {
+        anyhow::bail!("--auth-token (ou LM_RESIZER_SERVE_TOKEN) ne doit pas être vide");
+    }
+    if !bind.ip().is_loopback() && auth_token.is_none() {
+        anyhow::bail!(
+            "Refus de démarrer : l'écoute sur une adresse non locale ({}) nécessite la configuration de --auth-token (ou LM_RESIZER_SERVE_TOKEN) pour sécuriser l'accès.",
+            bind
+        );
+    }
     let state = AppState {
         store_path: store.unwrap_or(default_store_path()?),
         upstream,
         api_key,
+        serve_token: auth_token,
         provider,
         client: Client::new(),
         dashboard_enabled,
     };
-    let app = Router::new()
-        .route("/health", get(|| async { Json(json!({"ok": true})) }))
+    let app = http_app(Arc::new(state));
+    let listener = tokio::net::TcpListener::bind(bind).await?;
+    println!("lm-resizer listening on http://{bind}");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+fn http_app(state_arc: Arc<AppState>) -> Router {
+    let protected_routes = Router::new()
         .route("/compress", post(http_compress))
         .route("/retrieve/:hash", get(http_retrieve))
         .route("/stats", get(http_stats))
@@ -8419,12 +8457,51 @@ async fn run_http(
             "/v1beta/projects/:project/locations/:location/publishers/:publisher/models/*model_method",
             post(http_provider_original_uri),
         )
-        .with_state(Arc::new(state));
+        .route_layer(axum::middleware::from_fn_with_state(
+            state_arc.clone(),
+            auth_middleware,
+        ));
 
-    let listener = tokio::net::TcpListener::bind(bind).await?;
-    println!("lm-resizer listening on http://{bind}");
-    axum::serve(listener, app).await?;
-    Ok(())
+    Router::new()
+        .route("/health", get(|| async { Json(json!({"ok": true})) }))
+        .merge(protected_routes)
+        .with_state(state_arc)
+}
+
+async fn auth_middleware(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if let Some(expected_token) = &state.serve_token {
+        let auth_header = req.headers().get("Authorization");
+        let api_key_header = req.headers().get("x-api-key");
+        let token_provided = if let Some(auth) = auth_header {
+            auth.to_str()
+                .ok()
+                .and_then(|auth_str| auth_str.strip_prefix("Bearer ").map(|s| s.trim()))
+        } else if let Some(api_key) = api_key_header {
+            api_key.to_str().ok().map(|s| s.trim())
+        } else {
+            None
+        };
+
+        if let Some(token) = token_provided {
+            if constant_time_eq::constant_time_eq(token.as_bytes(), expected_token.as_bytes()) {
+                return next.run(req).await;
+            }
+        }
+
+        let mut res = (
+            axum::http::StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({"error": "unauthorized"})),
+        )
+            .into_response();
+        res.headers_mut()
+            .insert("WWW-Authenticate", "Bearer".parse().unwrap());
+        return res;
+    }
+    next.run(req).await
 }
 
 async fn http_compress(
@@ -9906,6 +9983,78 @@ impl axum::response::IntoResponse for HttpError {
 mod tests {
     use super::*;
     use lm_resizer_core::ccr::InMemoryCcrStore;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn serve_auth_routes_in_memory() {
+        let state = Arc::new(AppState {
+            store_path: PathBuf::from("/tmp/lmr-auth-test-unused"),
+            upstream: None,
+            api_key: None,
+            serve_token: Some("secret-token".to_string()),
+            provider: ProviderKind::OpenAi,
+            client: Client::new(),
+            dashboard_enabled: false,
+        });
+        let app = http_app(state);
+        for (path, method) in [
+            ("/compress", axum::http::Method::POST),
+            ("/retrieve/hash", axum::http::Method::GET),
+            ("/stats", axum::http::Method::GET),
+        ] {
+            let request = axum::http::Request::builder()
+                .method(method.clone())
+                .uri(path)
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::UNAUTHORIZED,
+                "{path}"
+            );
+            let request = axum::http::Request::builder()
+                .method(method)
+                .uri(path)
+                .header("Authorization", "Bearer secret-token")
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_ne!(
+                response.status(),
+                axum::http::StatusCode::UNAUTHORIZED,
+                "{path}"
+            );
+        }
+        let wrong = axum::http::Request::builder()
+            .method(axum::http::Method::POST)
+            .uri("/compress")
+            .header("Authorization", "Bearer wrong-token")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(wrong).await.unwrap().status(),
+            axum::http::StatusCode::UNAUTHORIZED
+        );
+        let api_key = axum::http::Request::builder()
+            .method(axum::http::Method::POST)
+            .uri("/compress")
+            .header("x-api-key", "secret-token")
+            .body(Body::empty())
+            .unwrap();
+        assert_ne!(
+            app.clone().oneshot(api_key).await.unwrap().status(),
+            axum::http::StatusCode::UNAUTHORIZED
+        );
+        let health = axum::http::Request::builder()
+            .uri("/health")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.oneshot(health).await.unwrap().status(),
+            axum::http::StatusCode::OK
+        );
+    }
 
     #[test]
     fn powershell_hook_rewrites_the_actual_cmd_field() {

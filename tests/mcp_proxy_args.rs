@@ -12,9 +12,8 @@ fn proxy(args: &[&str]) -> std::process::Output {
 fn rejects_unknown_option_before_separator() {
     let output = proxy(&["--no-ccr", "--", "/bin/true"]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains(
-        "unknown option '--no-ccr' for mcp-proxy; options go before `--`"
-    ));
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("unknown option '--no-ccr' for mcp-proxy; options go before `--`"));
 }
 
 #[test]

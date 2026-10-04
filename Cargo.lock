@@ -1437,6 +1437,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "clap",
+ "constant_time_eq",
  "flate2",
  "futures-util",
  "image",
@@ -1456,6 +1457,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "toml",
+ "tower",
  "walkdir",
 ]
 

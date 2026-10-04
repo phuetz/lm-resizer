@@ -124,7 +124,9 @@ fn install_all_project_skips_codex() {
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(
-        stdout.contains("Codex skipped: its MCP config is user-scoped (use --client codex --scope global)"),
+        stdout.contains(
+            "Codex skipped: its MCP config is user-scoped (use --client codex --scope global)"
+        ),
         "Missing Codex skipped message in stdout: {}",
         stdout
     );
