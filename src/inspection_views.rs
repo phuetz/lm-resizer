@@ -12,52 +12,89 @@ pub enum Mode {
 }
 
 pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
-    let candidate = match mode {
-        Mode::Raw => return raw.into(),
-        Mode::Tests if raw.contains("test result:") => crate::test_views::cargo(raw),
-        Mode::Tests
-            if raw.contains("test session starts") || raw.contains("short test summary") =>
-        {
-            crate::test_views::pytest(raw)
-        }
-        Mode::Tests => crate::test_views::javascript(raw),
-        Mode::Errors if exit == 0 => raw.into(),
-        Mode::Errors | Mode::Summary => {
-            // Keep complete diagnostic paragraphs, including their context.
-            // If no known signal is found, retain everything instead of
-            // turning an unfamiliar failed command into an empty success.
-            let blocks: Vec<_> = raw.split("\n\n").collect();
-            let selected: Vec<_> = blocks
-                .iter()
-                .copied()
-                .filter(|s| {
-                    let s = s.to_ascii_lowercase();
-                    [
-                        "error",
-                        "failed",
-                        "failure",
-                        "panic",
-                        "fatal",
-                        "exception",
-                        "denied",
-                        "not found",
-                    ]
-                    .iter()
-                    .any(|k| s.contains(k))
-                })
-                .collect();
-            if exit != 0 && !selected.is_empty() && selected.len() < blocks.len() {
-                format!("exit {exit}\n{}", selected.join("\n\n"))
-            } else {
-                crate::container_views::logs(raw)
+    if matches!(mode, Mode::Raw) {
+        return raw.into();
+    }
+    let lines: Vec<&str> = raw.lines().collect();
+    let mut keep = vec![false; lines.len()];
+    for (i, line) in lines.iter().enumerate() {
+        let lower = line.to_ascii_lowercase();
+        let diagnostic = [
+            "error",
+            "fatal",
+            "panic",
+            "traceback",
+            "exception",
+            "fail",
+            "denied",
+            "expected",
+            "received",
+            "assert",
+        ]
+        .iter()
+        .any(|word| lower.contains(word))
+            || file_location(line);
+        let test_signal = diagnostic
+            || [
+                "assert",
+                "expected",
+                "received",
+                "test result:",
+                "tests:",
+                "test suites:",
+                "test files",
+                "short test summary",
+                "= failures =",
+            ]
+            .iter()
+            .any(|word| lower.contains(word));
+        let selected = match mode {
+            Mode::Errors => diagnostic,
+            Mode::Tests => test_signal,
+            Mode::Summary => diagnostic || test_signal,
+            Mode::Raw => false,
+        };
+        if selected {
+            keep[i] = true;
+            if i > 0 {
+                keep[i - 1] = true;
+            }
+            if i + 1 < lines.len() {
+                keep[i + 1] = true;
             }
         }
-    };
-    if crate::token_metrics::TokenCounts::measure(raw, &candidate).tokens_saved > 0 {
-        candidate
-    } else {
-        raw.into()
     }
+    // Preserve final numeric totals even if the producer uses unfamiliar wording.
+    for i in (0..lines.len()).rev().take(8) {
+        if lines[i].chars().any(|c| c.is_ascii_digit()) {
+            keep[i] = true;
+        }
+    }
+    let candidate = lines
+        .iter()
+        .zip(keep)
+        .filter_map(|(line, selected)| selected.then_some(*line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body = if candidate.is_empty()
+        || crate::token_metrics::TokenCounts::measure(raw, &candidate).tokens_saved <= 0
+    {
+        raw.to_owned()
+    } else {
+        format!("{candidate}\n")
+    };
+    if exit != 0 {
+        format!("[FAIL] Command failed (exit code: {exit})\n{body}")
+    } else {
+        body
+    }
+}
+
+fn file_location(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    bytes.windows(2).enumerate().any(|(i, pair)| {
+        pair[0] == b':' && pair[1].is_ascii_digit() && i > 0 && bytes[i - 1] != b'/'
+    })
 }
 
 pub fn json_schema(raw: &str) -> Result<String> {
@@ -246,10 +283,10 @@ mod tests {
         let raw="progress successful\n\nERROR invoice failed\nExpected 42, got 43\n\ncompleted progress\n";
         let out = summarize(Mode::Errors, raw, 7);
         assert!(out.contains("Expected 42, got 43"));
-        assert!(out.contains("exit 7"));
+        assert!(out.starts_with("[FAIL] Command failed (exit code: 7)"));
         assert_eq!(
             summarize(Mode::Errors, "unusual diagnostic", 7),
-            "unusual diagnostic"
+            "[FAIL] Command failed (exit code: 7)\nunusual diagnostic"
         );
     }
     #[test]

@@ -72,7 +72,7 @@ fn gain_alias_reports_exact_tracking_fields() {
     let dir = tempfile::tempdir().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
         .env("LM_RESIZER_STATE_DIR", dir.path())
-        .arg("gain")
+        .args(["gain", "--json"])
         .output()
         .unwrap();
     assert!(output.status.success());

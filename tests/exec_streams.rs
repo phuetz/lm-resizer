@@ -22,7 +22,14 @@ fn mixed_streams_keep_execution_order_and_exit_code_survives() {
         assert_eq!(report["original_bytes"], 14);
         let text = report["output"].as_str().unwrap();
         assert!(text.contains("ok\n"));
-        assert_eq!(text, "ok\ndiagnostic\n");
+        if code == 0 {
+            assert_eq!(text, "ok\ndiagnostic\n");
+        } else {
+            assert_eq!(
+                text,
+                "[FAIL] Command failed (exit code: 37)\nok\ndiagnostic\n"
+            );
+        }
     }
 }
 

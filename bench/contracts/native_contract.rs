@@ -399,10 +399,9 @@ fn direct_failed_exec_reports_launch_errors_and_keeps_an_empty_raw() {
     assert_eq!(code, 127);
     assert!(raw.is_empty());
     assert_eq!(report["original_bytes"], 0);
-    assert!(report["output"]
-        .as_str()
-        .unwrap()
-        .starts_with("lm-resizer: cannot execute pytest:"));
+    let view = report["output"].as_str().unwrap();
+    assert!(view.starts_with("[FAIL] Command failed (exit code: 127)\n"));
+    assert!(view.contains("lm-resizer: cannot execute pytest:"));
 }
 
 #[test]

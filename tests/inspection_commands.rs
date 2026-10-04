@@ -33,6 +33,19 @@ fn arbitrary_wrapper_has_exact_interleaved_tee_and_producer_status() {
     assert!(listed.status.success());
     assert!(!listed.stdout.is_empty());
 }
+
+#[test]
+fn missing_generic_program_reports_real_launch_status_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = cli(dir.path())
+        .args(["err", "--", "lm-resizer-certainly-missing-command"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(127));
+    let view = String::from_utf8(out.stdout).unwrap();
+    assert!(view.starts_with("[FAIL] Command failed (exit code: 127)\n"));
+    assert!(view.contains("command not found"));
+}
 #[test]
 fn dependencies_and_file_read_are_public_commands() {
     let dir = tempfile::tempdir().unwrap();

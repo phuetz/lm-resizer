@@ -391,6 +391,9 @@ enum Commands {
     /// Show CCR store statistics.
     #[command(visible_alias = "gain")]
     Stats {
+        /// Emit machine-readable JSON (the default for stats).
+        #[arg(long)]
+        json: bool,
         /// Include recent executions with exact counts, duration and exit status.
         #[arg(short = 'H', long)]
         history: bool,
@@ -1725,6 +1728,7 @@ async fn run(cli: Cli) -> Result<()> {
             json,
             store,
         } => {
+            let started = Instant::now();
             let raw = read_input(input.as_deref()).await?;
             let parts = split_shell_words(&command).context("invalid --command quoting")?;
             let store = open_store(store)?;
@@ -1737,6 +1741,7 @@ async fn run(cli: Cli) -> Result<()> {
                 store.as_ref(),
             )?;
             attach_report_recovery(&raw, &mut report)?;
+            record_exec_history(&report, started.elapsed())?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -1812,6 +1817,7 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Commands::Stats {
+            json,
             store,
             markdown,
             history,
@@ -1866,6 +1872,8 @@ async fn run(cli: Cli) -> Result<()> {
                         );
                     }
                 }
+            } else if !json && std::env::args().nth(1).as_deref() == Some("gain") {
+                print!("{}", format_gain(&report));
             } else {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
@@ -2630,7 +2638,15 @@ fn run_inspected_command(
     let captured = command_capture::run(command)?;
     let raw = display_captured_bytes(&captured.raw);
     let (filter, mut output) = if let Some(error) = captured.launch_error {
-        ("native:launch-error".to_string(), error)
+        let view = if matches!(mode, Some(inspection_views::Mode::Raw)) {
+            error
+        } else {
+            format!(
+                "[FAIL] Command failed (exit code: {})\n{error}",
+                captured.code
+            )
+        };
+        ("native:launch-error".to_string(), view)
     } else {
         if let Some(mode) = mode {
             (
@@ -2638,7 +2654,19 @@ fn run_inspected_command(
                 inspection_views::summarize(mode, &raw, captured.code),
             )
         } else {
-            filter_command_output(command, &raw)
+            let (filter, view) = filter_command_output(command, &raw);
+            if filter == "lossless:generic" {
+                (
+                    "generic:summary".into(),
+                    inspection_views::summarize(
+                        inspection_views::Mode::Summary,
+                        &raw,
+                        captured.code,
+                    ),
+                )
+            } else {
+                (filter, view)
+            }
         }
     };
     let filter = if filter.starts_with("native:")
@@ -2838,11 +2866,20 @@ fn process_captured_output(
     let (filter, filtered) = if keep_raw {
         ("raw_on_failure".to_string(), raw.to_string())
     } else {
-        filter_command_output(command, raw)
+        let (filter, view) = filter_command_output(command, raw);
+        if filter == "lossless:generic" {
+            (
+                "generic:summary".into(),
+                inspection_views::summarize(inspection_views::Mode::Summary, raw, exit_code),
+            )
+        } else {
+            (filter, view)
+        }
     };
     let (mut output, mut steps, mut keys) = if keep_raw {
         (raw.to_string(), Vec::new(), Vec::new())
     } else if filter.starts_with("native:")
+        || filter.starts_with("generic:")
         || filter.starts_with("code-outline:")
         || filter.starts_with("lossless:")
         || matches!(
@@ -2868,7 +2905,11 @@ fn process_captured_output(
         steps.push("diagnostic_gate:kept_filtered".to_string());
         keys.clear();
     }
-    if !filter.starts_with("native:") && output.len() >= raw.len() && output != raw {
+    if !filter.starts_with("native:")
+        && !filter.starts_with("generic:")
+        && output.len() >= raw.len()
+        && output != raw
+    {
         output = raw.to_string();
         steps.clear();
         keys.clear();
@@ -5535,6 +5576,20 @@ fn format_stats_markdown(report: &Value) -> String {
     out
 }
 
+fn format_gain(report: &Value) -> String {
+    let history = &report["exec_history"];
+    let commands = history["commands"].as_u64().unwrap_or(0);
+    let original = history["original_tokens"].as_u64().unwrap_or(0);
+    let compressed = history["compressed_tokens"].as_u64().unwrap_or(0);
+    let saved = history["tokens_saved"].as_i64().unwrap_or(0);
+    let pct = if original == 0 {
+        0.0
+    } else {
+        saved as f64 * 100.0 / original as f64
+    };
+    format!("LM Resizer gain\nTotal commands: {commands}\nOriginal tokens: {original}\nOutput tokens: {compressed}\nTokens saved: {saved} ({pct:.1}%)\nTokenizer: {TOKENIZER}\n")
+}
+
 fn inspect_image(path: &Path) -> Result<ImageReport> {
     let bytes =
         std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -7893,6 +7948,7 @@ fn handle_mcp_tool_call(id: Value, params: Value, store_path: &Path) -> Value {
             Ok(json!(report))
         }
         "lm_resizer_tool_output" => {
+            let started = Instant::now();
             let content = args
                 .get("content")
                 .and_then(Value::as_str)
@@ -7913,7 +7969,7 @@ fn handle_mcp_tool_call(id: Value, params: Value, store_path: &Path) -> Value {
                 .unwrap_or(true);
             let query = args.get("query").and_then(Value::as_str).unwrap_or("");
             let store = open_store(Some(store_path.to_path_buf()))?;
-            let report = process_captured_output(
+            let mut report = process_captured_output(
                 &parts,
                 content,
                 exit_code,
@@ -7921,6 +7977,8 @@ fn handle_mcp_tool_call(id: Value, params: Value, store_path: &Path) -> Value {
                 query,
                 store.as_ref(),
             )?;
+            attach_report_recovery(content, &mut report)?;
+            record_exec_history(&report, started.elapsed())?;
             Ok(json!(report))
         }
         "lm_resizer_retrieve" => {

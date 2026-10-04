@@ -112,6 +112,10 @@ lm-resizer tee list
 lm-resizer gain --history --project
 ~~~
 
+Pour toute commande, `lm-resizer err|test|summary -- <commande>` garde les diagnostics ou bilans de tests avec une ligne de contexte et le code d’échec en tête. `exec` et `tool-output` résument aussi les commandes sans filtre dédié. Chaque sortie reste récupérable avec `tee read`. `gain` affiche les commandes et jetons mesurés ; `gain --json` donne les compteurs complets. Voir la [référence CLI](docs/CLI-REFERENCE.md).
+
+Pour les scripts, utiliser `lm-resizer gain --json`.
+
 Les vues auditées grep/find/listing/fichier/git/conteneur/linter conservent les nombres, chemins, identifiants, auteurs et diagnostics littéraux. Elles ne produisent plus de références `LMR-LINES` ou `LMR-TEXT`. Les réussites Cargo/pytest reconnues peuvent être résumées par les compteurs de suite; les échecs restent visibles. `lm-resizer expand -i vue.txt` reconstruit les vues réversibles, dont les historiques et diffs `Patch v1` : les en-têtes communs et répétitions sont factorisés sans retirer de ligne de source ni de contexte.
 
 Une vue suffisamment réduite peut afficher `[tee:<id>]`. Le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.

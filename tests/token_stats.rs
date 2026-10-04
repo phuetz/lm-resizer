@@ -78,6 +78,43 @@ fn exec_history_and_stats_count_final_output_including_recovery_hint() {
 }
 
 #[test]
+fn generic_tool_output_and_gain_record_a_failed_command() {
+    let state = tempfile::tempdir().unwrap();
+    let input = state.path().join("captured.txt");
+    std::fs::write(
+        &input,
+        "progress\nERROR invoice failed\n42 tests, 1 failed\n",
+    )
+    .unwrap();
+    let result = cli(
+        state.path(),
+        &[
+            "tool-output",
+            "--json",
+            "--command",
+            "unknown-tool",
+            "--exit-code",
+            "7",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(result.status.success());
+    let report: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert!(report["output"]
+        .as_str()
+        .unwrap()
+        .starts_with("[FAIL] Command failed (exit code: 7)"));
+    assert_eq!(report["exit_code"], 7);
+    let gain = cli(state.path(), &["gain"]);
+    assert!(String::from_utf8_lossy(&gain.stdout).contains("Total commands: 1"));
+    let gain = cli(state.path(), &["gain", "--json"]);
+    let gain: Value = serde_json::from_slice(&gain.stdout).unwrap();
+    assert_eq!(gain["exec_history"]["commands"], 1);
+    assert_eq!(gain["exec_history"]["measured_commands"], 1);
+}
+
+#[test]
 fn discover_and_eval_count_unicode_and_keep_existing_json_fields() {
     let state = tempfile::tempdir().unwrap();
     let raw = format!(
