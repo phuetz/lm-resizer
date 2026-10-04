@@ -7998,7 +7998,11 @@ fn install_mcp(
                 ClientConfig::Claude,
                 &project_dir,
             )?;
-            install_codex("global", &exe_path, store.clone())?;
+            if scope == "global" {
+                install_codex(scope, &exe_path, store.clone())?;
+            } else {
+                println!("Codex skipped: its MCP config is user-scoped (use --client codex --scope global)");
+            }
             install_json_mcp(
                 scope,
                 &exe_path,

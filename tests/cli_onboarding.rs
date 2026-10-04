@@ -103,3 +103,32 @@ fn assert_stats_legacy(cli: &IsolatedCli, commands: u64, bytes: u64) {
     assert!(text.contains("exact text count"), "{text}");
     assert!(text.contains("0 measured"), "{text}");
 }
+
+#[test]
+fn install_all_project_skips_codex() {
+    let cli = IsolatedCli::new();
+    let project_dir = cli.home.path().join("my_project");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    let output = cli.run(&[
+        "install",
+        "--client",
+        "all",
+        "--scope",
+        "project",
+        "--project-dir",
+        project_dir.to_str().unwrap(),
+    ]);
+
+    assert!(output.status.success(), "{:?}", output);
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(
+        stdout.contains("Codex skipped: its MCP config is user-scoped (use --client codex --scope global)"),
+        "Missing Codex skipped message in stdout: {}",
+        stdout
+    );
+
+    let codex_config = cli.home.path().join(".codex/config.toml");
+    assert!(!codex_config.exists(), "Codex config should not be created");
+}
