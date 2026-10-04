@@ -100,10 +100,10 @@ Cargo télécharge ses dépendances dans `~/.cargo` (`%USERPROFILE%\.cargo` sous
 Vérifiez que l'installation fonctionne partout, sans dépôt :
 
 ~~~bash
-lm-resizer exec -- echo bonjour
+lm-resizer exec -- echo hello
 ~~~
 
-Les exemples suivants supposent que ce qu'ils enveloppent est présent : `git` et un répertoire courant dans un dépôt Git (hors dépôt, Git échoue lui-même avec le code 128 et il n'y a rien à raccourcir), et un projet Rust avec Cargo pour `cargo test`. Si une commande enveloppée n'est pas installée, `exec` affiche `command not found: <nom>` et sort avec 127.
+Les exemples suivants supposent que ce qu'ils enveloppent est présent : `git` et un répertoire courant dans un dépôt Git (hors dépôt, Git échoue lui-même avec le code 128 et il n'y a rien à raccourcir), et un projet Rust avec Cargo pour `cargo test`. Si une commande enveloppée n'est pas installée, `exec` affiche `cannot execute <name>: command not found` et sort avec 127.
 
 ~~~bash
 lm-resizer git log -20
@@ -112,7 +112,9 @@ lm-resizer tee list
 lm-resizer gain --history --project
 ~~~
 
-Les vues auditées grep/find/listing/fichier/git/conteneur/linter conservent les nombres, chemins, identifiants, auteurs et diagnostics littéraux. Elles ne produisent plus de références `LMR-LINES` ou `LMR-TEXT`. Les réussites Cargo/pytest reconnues peuvent être résumées par les compteurs de suite; les échecs restent visibles. `lm-resizer expand -i vue.txt` reconstruit les vues réversibles, dont les historiques et diffs `Patch v1` : les en-têtes communs et répétitions sont factorisés sans retirer de ligne de source ni de contexte.
+Les vues auditées grep/find/listing/fichier/git/conteneur/linter conservent les nombres, chemins, identifiants, auteurs et diagnostics littéraux. Elles ne produisent plus de références `LMR-LINES` ou `LMR-TEXT`. Les réussites Cargo/pytest reconnues peuvent être résumées par les compteurs de suite; les échecs restent visibles. `lm-resizer expand -i view.txt` reconstruit les vues réversibles, dont les historiques et diffs `Patch v1` et `Patch v2` : les en-têtes communs et répétitions sont factorisés sans retirer de ligne de source ni de contexte.
+
+Les filtres de commande gardent les lignes qui comptent ; l'étape générique qui suit range les lignes par fréquence. Deux pertes sont surveillées séparément. Quand un filtre de commande laisse lui-même tomber une ligne d'échec (comme une ligne `exit code 2` ou `##[error]`), le brut est rendu et le nom du filtre reçoit le suffixe `:diagnostic-guard`. Ce suffixe n'est pas posé sur tous les chemins : `--raw-on-failure` sur un code non nul saute le filtre et note `raw_on_failure` (ni suffixe, ni étape, ni message). Quand l'étape générique omettrait une ligne que le filtre avait gardée, le corps filtré est conservé — la réduction déjà faite par le filtre l'est aussi — et le rapport note `diagnostic_gate:kept_filtered`. La vue imprimée peut encore gagner une ligne `[tee:<id>]` quand le gain paie cette remorque. `compress` réinjecte les lignes d'échec omises sous un marqueur ; `exec` le fait aussi sur le chemin par défaut, et seulement pour un `lm-resizer` imbriqué. Une vue qui contient un diagnostic peut donc n'afficher presque aucun gain ; relisez l'original conservé avec `lm-resizer tee read <id>`.
 
 Une vue suffisamment réduite peut afficher `[tee:<id>]`. Le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.
 
@@ -147,7 +149,7 @@ Windows (PowerShell) :
 cargo uninstall --root "$installRoot" lm-resizer
 ~~~
 
-Le CLI propose aussi `compress` pour les fichiers ou l'entrée standard, `tool-output` pour une sortie déjà capturée, et des intégrations MCP, HTTP et hooks d'agents activées sur demande. `install --client all --scope project` écrit aussi la configuration utilisateur Codex et remplace une table `mcp_servers.lm_resizer` existante sans sauvegarde ; conservez-en une copie avant installation. Voir le [guide des intégrations agents](docs/CLAUDE_CODEX.md) et le [guide de release](docs/RELEASE.md) pour ces usages.
+Le CLI propose aussi `compress` pour les fichiers ou l'entrée standard, `tool-output` pour une sortie déjà capturée, et des intégrations MCP, HTTP et hooks d'agents activées sur demande. `install --client all --scope project` écrit aussi la configuration utilisateur Codex et remplace une table `mcp_servers.lm_resizer` existante sans sauvegarde ; conservez-en une copie avant installation. Voir le [guide des intégrations agents](docs/CLAUDE_CODEX.md) et le [guide de release](docs/RELEASE.md) pour ces usages. Chaque option, commande et variable affichée par `--help` est listée dans la [référence de la ligne de commande](docs/CLI-REFERENCE.md).
 
 Exemples à copier depuis ce checkout (Bash) :
 
@@ -178,9 +180,11 @@ Les nouvelles entrées d’historique conservent les deux comptes. Les statistiq
 
 Le produit utilise ses propres filtres Rust et TOML. Le chemin normal `exec` archive stdout et stderr entrelacés jusqu’à EOF, sans plafond de 10 Mio. `lm-resizer tee list` et `lm-resizer tee read <id>` retrouvent le brut complet. Les options `--stream` et `--raw-on-failure` conservent une capture séparée des flux.
 
-**Médiane tee compris : 21,74 %, contre 2,17 % avant et 15,81 % pour la référence.** Le format de patch réversible change volontairement les vues de diff ; les 61 bruts et statuts du producteur sont vérifiés. [Mesures actuelles, écarts exacts et limites](bench/native/patch-revision.md).
+**Médiane tee compris : 22,79 %, contre 21,74 % avant et 15,81 % pour la référence.** La moyenne est de 31,78 % ; les 61 récupérations du brut et les codes de sortie du producteur sont tous vérifiés. Les mesures de démarrage entrelacées donnent 7,70 ms (7,68 ms avant). Les rejeux du contrat d'octets Windows réussissent sous Linux ; l'installation réelle sous Windows reste non vérifiée. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
 
 Les commandes explicites `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` et `dedup` complètent les filtres. Les lectures de fichiers restent littérales. Les plis réversibles de chemins et correspondances, tables JSON et répétitions exactes complètent les vues de commandes ; le contour syntaxique et la déduplication de blocs sont explicites. [Hooks supplémentaires](docs/AGENT_HOOKS.md) : configuration Gemini, Copilot et Cursor.
+
+`env` masque les noms contenant `PASSPHRASE` (y compris `PASSPHRASE_FILE`) et un composant de nom `PASS`. Cela masque volontairement aussi des noms inoffensifs comme `PASS_COUNT` ; le filtrage est prudent, fondé sur les noms et les formes d'URL à identifiants.
 
 ## Quand ne pas l'utiliser
 

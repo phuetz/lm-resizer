@@ -224,6 +224,17 @@ enum Commands {
     #[command(external_subcommand)]
     Native(Vec<String>),
     /// Compress stdin or a file and persist originals for CCR retrieval.
+    ///
+    /// Diagnostic guard: `compress` reinjects the failure lines its compression
+    /// dropped. They are appended in their original order under the marker
+    /// `[lm-resizer: N lignes d'échec omises par la compression, réinjectées
+    /// ci-dessous]`, and `steps_applied` records `diagnostic_reinjection:N`.
+    /// If the result is not smaller than the input, the original is returned
+    /// unchanged. `exec` does this on the default capture path only for the
+    /// `native:native_owned` filter (a nested `lm-resizer`). `exec --stream`
+    /// and `tool-output` instead keep the filtered body and record
+    /// `diagnostic_gate:kept_filtered` when that generic pass would drop a
+    /// failure line the filter had kept.
     Compress {
         /// Input file. Reads stdin when omitted.
         #[arg(short, long)]
@@ -232,7 +243,10 @@ enum Commands {
         #[arg(short, long, default_value = "")]
         query: String,
         /// Token budget: force lossy row-dropping so the output fits ~N tokens,
-        /// keeping the rows most relevant to --query. Omit for lossless-first.
+        /// keeping the rows most relevant to --query. Applies to structured row
+        /// data (a JSON array of objects); free text and logs are left as the
+        /// lossless pipeline renders them, whatever the budget. Omit for
+        /// lossless-first.
         #[arg(long)]
         token_budget: Option<usize>,
         /// Emit JSON metadata instead of raw compressed text.
@@ -254,11 +268,15 @@ enum Commands {
     },
     /// Summarize a source file with indexed Code Explorer symbols when available.
     Smart {
+        /// Source file to summarize.
         input: PathBuf,
+        /// User query used by relevance-aware compressors.
         #[arg(short, long, default_value = "")]
         query: String,
+        /// Emit JSON metadata instead of raw compressed text.
         #[arg(long)]
         json: bool,
+        /// CCR SQLite database path.
         #[arg(long)]
         store: Option<PathBuf>,
     },
@@ -290,6 +308,24 @@ enum Commands {
         store: Option<PathBuf>,
     },
     /// Execute a command with the native command view and recoverable raw output.
+    ///
+    /// Diagnostic guard: two losses are watched separately. If a command filter
+    /// itself drops a failure line, the raw output is returned and `filter`
+    /// gains a `:diagnostic-guard` suffix. The default capture path also
+    /// prefixes a non-native name with `native:`. The suffix is not added on
+    /// every path: `--raw-on-failure` on a non-zero exit skips the filter and
+    /// returns the raw output under the name `raw_on_failure` (no suffix, no
+    /// step, no stderr message). On the default capture path, generic
+    /// compression runs only for `native:native_owned` (a nested `lm-resizer`).
+    /// That call reinjects omitted failure lines (`diagnostic_reinjection:N`)
+    /// and keeps the compressed view when none are still missing; it does not
+    /// return that filter's result as is. Every other filter on that path is
+    /// returned as the filter left it. With `--stream`, if the generic pass
+    /// would drop a kept failure line, the filtered body is kept,
+    /// `compression_steps` gains `diagnostic_gate:kept_filtered`, and stderr
+    /// reports `compression générique annulée, elle omettait « … »`. A
+    /// `[tee:<id>]` line may follow when the saving pays for it. `tool-output`
+    /// applies the same pipeline guard silently.
     Exec {
         /// User query used by relevance-aware compressors.
         #[arg(short, long, default_value = "")]
@@ -311,6 +347,21 @@ enum Commands {
         command: Vec<String>,
     },
     /// Filter output already captured by a host or benchmark; never execute the command.
+    ///
+    /// Diagnostic guard: the command filter runs first; a generic pass then
+    /// ranks its lines by frequency. Two distinct losses are guarded. If the
+    /// filter itself dropped a failure line — for example a line containing
+    /// `exit code 2`, `##[error]`, `error`, `panic` or a source `file:line` —
+    /// the raw output is returned and `filter` gains a `:diagnostic-guard`
+    /// suffix. `--raw-on-failure` on a non-zero exit skips that filter
+    /// (`filter` is `raw_on_failure`): no suffix, no step, no message. If the
+    /// generic pass would drop a failure line the filter had kept, the filtered
+    /// body is kept (the filter's own reduction is kept) and
+    /// `compression_steps` records `diagnostic_gate:kept_filtered`. This
+    /// command stays silent; `exec --stream` reports the omitted line on
+    /// stderr. When the view differs from the raw text, the original stays
+    /// recoverable with `retrieve`. A `[tee:<id>]` trailer is added only when
+    /// the saving pays for it, and that trailer is not part of the filtered body.
     ToolOutput {
         /// Command that produced the supplied text.
         #[arg(long)]
@@ -365,26 +416,35 @@ enum Commands {
     },
     /// Save a named, compressed handoff for other agents sharing this store.
     Share {
+        /// Name of the handoff.
         key: String,
+        /// Input file. Reads stdin when omitted.
         #[arg(short, long)]
         input: Option<PathBuf>,
+        /// User query used by relevance-aware compressors.
         #[arg(short, long, default_value = "")]
         query: String,
+        /// CCR SQLite database path (the handoffs live beside it).
         #[arg(long)]
         store: Option<PathBuf>,
+        /// Emit JSON metadata.
         #[arg(long)]
         json: bool,
     },
     /// Read a named handoff, compressed by default or verbatim with --full.
     SharedGet {
+        /// Name of the handoff.
         key: String,
+        /// Print the original text instead of the compressed handoff.
         #[arg(long)]
         full: bool,
+        /// CCR SQLite database path.
         #[arg(long)]
         store: Option<PathBuf>,
     },
     /// List names of handoffs in the shared store.
     SharedList {
+        /// CCR SQLite database path.
         #[arg(long)]
         store: Option<PathBuf>,
     },
@@ -404,17 +464,27 @@ enum Commands {
         #[arg(long)]
         store: Option<PathBuf>,
         /// Emit a Markdown stats summary.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "json")]
         markdown: bool,
+        /// Emit JSON (already the default; accepted for explicitness).
+        #[arg(long)]
+        json: bool,
     },
     /// Inspect image payload size and dimensions for context-budget decisions.
     Image {
         /// Image file to inspect.
         input: PathBuf,
-        /// Write a smaller image in the input format (PNG or JPEG). Never overwrites.
+        /// Write a smaller image in the input format (PNG or JPEG). The file is
+        /// created only when the re-encode is strictly smaller; otherwise the
+        /// command succeeds and writes nothing (no `saved` line). The inspection
+        /// line is still printed: format, byte size, dimensions and a
+        /// recommendation such as `small image: safe to keep inline when the
+        /// model needs visual detail`. The output extension must match the
+        /// input format (`input and output formats must match`; PNG to .jpg is
+        /// refused). Never overwrites (`output already exists`).
         #[arg(long)]
         output: Option<PathBuf>,
-        /// Optional maximum width or height for explicit downscaling.
+        /// Optional maximum width or height for explicit downscaling (minimum 64).
         #[arg(long)]
         max_dimension: Option<u32>,
         /// JPEG quality when writing JPEG (1-100; default 90).
@@ -710,7 +780,9 @@ enum Commands {
         /// Client to configure: claude, codex, cursor, vscode, all.
         #[arg(long, default_value = "claude")]
         client: String,
-        /// Installation scope: project or global.
+        /// Installation scope: project or global. Codex is user-scoped:
+        /// `--client codex` requires `--scope global`, and `--client all` writes
+        /// Codex to `~/.codex/config.toml` even with `project`.
         #[arg(long, default_value = "project")]
         scope: String,
         /// Project directory for project-scoped config files.
@@ -1768,9 +1840,7 @@ async fn run(cli: Cli) -> Result<()> {
             }
             let hash = hash.context("missing recall key")?;
             let store = open_store(store)?;
-            let payload = store
-                .get(&hash)
-                .with_context(|| format!("CCR entry not found: {hash}"))?;
+            let (hash, payload) = get_ccr_entry(store.as_ref(), &hash)?;
             let _ = record_retrieval_feedback(&hash, payload.len(), "cli");
             print!("{payload}");
         }
@@ -1814,6 +1884,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Stats {
             store,
             markdown,
+            json: _,
             history,
             project,
             limit,
@@ -1878,6 +1949,9 @@ async fn run(cli: Cli) -> Result<()> {
             describe,
             json,
         } => {
+            if max_dimension.is_some_and(|limit| limit < 64) {
+                anyhow::bail!("max-dimension must be at least 64");
+            }
             let mut report = inspect_image(&input)?;
             if describe {
                 report.description = Some(describe_image(&input)?);
@@ -2360,6 +2434,91 @@ fn open_store(path: Option<PathBuf>) -> Result<Box<dyn CcrStore>> {
     }
     let cfg = CcrBackendConfig::sqlite_default(path);
     Ok(from_config(&cfg)?)
+}
+
+/// Cle CCR : hexadecimal, rien d'autre.
+fn is_ccr_hash(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Reduit a sa forme nue une cle CCR copiee telle qu'affichee. Seules ces
+/// formes entieres sont reconnues : `<h>`, `ccr:<h>`, `<<ccr:<h>>>`,
+/// `[full output: <<ccr:<h>>>]`, `hash=<h>` et `hash=<h>]` (fin du marqueur
+/// `Retrieve more: hash=<h>]`), ou une vue collee ne portant qu'une cle
+/// distincte. Plusieurs cles sont une erreur : jamais de choix silencieux.
+fn bare_ccr_key(shown: &str) -> Result<String> {
+    let text = shown.trim();
+    let inner = text
+        .strip_prefix("[full output: <<ccr:")
+        .and_then(|rest| rest.strip_suffix(">>]"))
+        .or_else(|| {
+            text.strip_prefix("<<ccr:")
+                .and_then(|rest| rest.strip_suffix(">>"))
+        })
+        .or_else(|| text.strip_prefix("ccr:"))
+        .or_else(|| {
+            text.strip_prefix("hash=")
+                .map(|rest| rest.strip_suffix(']').unwrap_or(rest))
+        })
+        .unwrap_or(text);
+    if is_ccr_hash(inner) {
+        return Ok(inner.to_string());
+    }
+    // Vue collee (plusieurs mots ou lignes) : les reperes `<<ccr:<12 hex>,..>>`
+    // et `<<ccr:<12 hex> N_rows_offloaded>>` ne sont pas des cles du store
+    // (l'etat en memoire de la compression JSON n'est pas la base relue ici) ;
+    // la cle est le `hash=` affiche avec la vue. Une seule cle distincte
+    // restante se resout, plusieurs sont une erreur explicite.
+    if text.contains(char::is_whitespace) {
+        let marker = regex::Regex::new(r"<<ccr:[0-9A-Fa-f]{12}[ ,][^>\n]*>>")?;
+        let stripped = marker.replace_all(text, "");
+        let key = regex::Regex::new(r"(?:^|[^A-Za-z0-9_])(?:ccr:|hash=)([0-9A-Fa-f]+)")?;
+        let mut keys: Vec<&str> = key
+            .captures_iter(&stripped)
+            .filter_map(|c| c.get(1))
+            .filter(|m| {
+                !stripped[m.end()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+            .map(|m| m.as_str())
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        match keys.as_slice() {
+            [one] => return Ok((*one).to_string()),
+            [] => {}
+            many => anyhow::bail!(
+                "ambiguous CCR reference: the input holds {} different keys; pass exactly one hash",
+                many.len()
+            ),
+        }
+    }
+    if text.starts_with("<<ccr:") && inner.contains(',') {
+        anyhow::bail!(
+            "'{text}' is a marker of the compressed view, not a retrieval key; use the `hash=<key>` shown with the view"
+        );
+    }
+    let markers = text.matches("ccr:").count() + text.matches("hash=").count();
+    if markers > 1 {
+        anyhow::bail!(
+            "ambiguous CCR reference: the input holds {markers} keys; pass exactly one hash"
+        );
+    }
+    anyhow::bail!("CCR entry not found: {shown} (not a recognised CCR key form)")
+}
+
+/// Cherche d'abord la cle telle que saisie, puis sa forme nue stricte.
+fn get_ccr_entry(store: &dyn CcrStore, shown: &str) -> Result<(String, String)> {
+    if let Some(payload) = store.get(shown) {
+        return Ok((shown.to_string(), payload));
+    }
+    let bare = bare_ccr_key(shown)?;
+    match store.get(&bare) {
+        Some(payload) => Ok((bare, payload)),
+        None => anyhow::bail!("CCR entry not found: {shown}"),
+    }
 }
 
 fn build_pipeline() -> CompressionPipeline {
@@ -7929,9 +8088,7 @@ fn handle_mcp_tool_call(id: Value, params: Value, store_path: &Path) -> Value {
                 .and_then(Value::as_str)
                 .context("missing hash")?;
             let store = open_store(Some(store_path.to_path_buf()))?;
-            let content = store
-                .get(hash)
-                .with_context(|| format!("CCR entry not found: {hash}"))?;
+            let (hash, content) = get_ccr_entry(store.as_ref(), hash)?;
             Ok(json!({ "hash": hash, "content": content }))
         }
         "lm_resizer_stats" => {
@@ -8440,9 +8597,7 @@ async fn http_retrieve(
     axum::extract::Path(hash): axum::extract::Path<String>,
 ) -> Result<Json<Value>, HttpError> {
     let store = open_store(Some(state.store_path.clone()))?;
-    let content = store
-        .get(&hash)
-        .with_context(|| format!("CCR entry not found: {hash}"))?;
+    let (hash, content) = get_ccr_entry(store.as_ref(), &hash)?;
     let _ = record_retrieval_feedback(&hash, content.len(), "http");
     Ok(Json(json!({ "hash": hash, "content": content })))
 }

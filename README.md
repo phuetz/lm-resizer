@@ -103,7 +103,7 @@ Check the install works anywhere, with no repository needed:
 lm-resizer exec -- echo hello
 ~~~
 
-The next examples assume what they wrap is present: `git` and a current directory inside a Git repository (outside one, Git itself fails with exit 128 and there is nothing to shorten), and a Rust project with Cargo for `cargo test`. If a wrapped command is not installed, `exec` says `command not found: <name>` and exits 127.
+The next examples assume what they wrap is present: `git` and a current directory inside a Git repository (outside one, Git itself fails with exit 128 and there is nothing to shorten), and a Rust project with Cargo for `cargo test`. If a wrapped command is not installed, `exec` says `cannot execute <name>: command not found` and exits 127.
 
 ~~~bash
 lm-resizer git log -20
@@ -113,6 +113,8 @@ lm-resizer gain --history --project
 ~~~
 
 The audited grep/find/listing/file/git/container/linter views retain literal numbers, paths, identifiers, commit authors and diagnostics. They no longer emit `LMR-LINES` or `LMR-TEXT` references. Recognized successful Cargo/pytest progress can be summarized by suite counts; failures remain visible. `lm-resizer expand -i view.txt` reconstructs reversible views, including `Patch v1` and `Patch v2` histories and diffs: shared file headers and identical runs are factored without dropping source or context lines.
+
+The command filters keep the lines that matter; the generic pass that follows ranks lines by frequency. Two losses are guarded separately. When a command filter itself drops a failure line (such as a line with `exit code 2` or `##[error]`), the raw output is returned and the filter name gains a `:diagnostic-guard` suffix. That suffix is not applied on every path: `--raw-on-failure` on a non-zero exit skips the filter and records `raw_on_failure` (no suffix, no step, no message). When the generic pass would drop a line the filter had kept, the filtered body is kept — the filter's own reduction is kept — and the report records `diagnostic_gate:kept_filtered`. The printed view may still gain a `[tee:<id>]` line when the saving pays for it. `compress` reinjects omitted failure lines under a marker; so does `exec` on the default path, and only for a nested `lm-resizer`. A view that contains a diagnostic can therefore show little or no saving; read the saved original with `lm-resizer tee read <id>`.
 
 A sufficiently reduced view may display `[tee:<id>]`. Read it with `lm-resizer tee read <id>`; otherwise `tee list` and the JSON `tee_hint` field provide recovery without adding tokens to the view.
 
@@ -147,7 +149,7 @@ Windows (PowerShell):
 cargo uninstall --root "$installRoot" lm-resizer
 ~~~
 
-The CLI also offers `compress` for files or standard input, `tool-output` for already captured command output, and opt-in MCP, HTTP and agent hook integrations. `install --client all --scope project` also writes Codex user configuration and replaces an existing `mcp_servers.lm_resizer` table without backup; save it before installation. See [the agent integration guide](docs/CLAUDE_CODEX.md) and [the release guide](docs/RELEASE.md) for those workflows.
+The CLI also offers `compress` for files or standard input, `tool-output` for already captured command output, and opt-in MCP, HTTP and agent hook integrations. `install --client all --scope project` also writes Codex user configuration and replaces an existing `mcp_servers.lm_resizer` table without backup; save it before installation. See [the agent integration guide](docs/CLAUDE_CODEX.md) and [the release guide](docs/RELEASE.md) for those workflows. Every option, command and variable shown by `--help` is listed in [the CLI reference](docs/CLI-REFERENCE.md) (in French).
 
 Copyable examples from this checkout (Bash):
 

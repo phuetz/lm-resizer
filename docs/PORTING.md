@@ -3,8 +3,11 @@
 Goal: provide a Rust-native context compression stack with speed, predictable
 memory use, and parallel processing.
 
-Non-goal: shipping any Python runtime surface. The repository is Cargo-only:
-no `.py` files, no Python package manifests, and no Python helper scripts.
+Non-goal: shipping any Python runtime surface. The product is Cargo-only:
+no Python package manifest (`pyproject.toml`, `requirements.txt`, `setup.py`,
+`Pipfile`, `poetry.lock`) and no `.py` file outside `bench/real/`. That
+directory holds benchmark and contract scripts; they are not part of the
+runtime.
 
 ## Ported Now
 
@@ -24,8 +27,9 @@ no `.py` files, no Python package manifests, and no Python helper scripts.
   - `exec` with Native command output filtering before compression
   - `wrap`
   - `serve`
-- Minimal MCP tools:
+- Minimal MCP tools (four, as listed by `tools/list`):
   - `lm_resizer_compress`
+  - `lm_resizer_tool_output`
   - `lm_resizer_retrieve`
   - `lm_resizer_stats`
 - MCP config installer for Claude Code, Codex, Cursor, and VS Code.
@@ -53,8 +57,15 @@ no `.py` files, no Python package manifests, and no Python helper scripts.
 - `sanitize-provider-fixture` converts real provider JSON into shareable
   fixtures by redacting secret-like keys and replacing long strings with
   placeholders.
-- Raw-output tee recovery for large or failed `exec` commands, emitting a
-  `[full output: ...]` hint so compressed output remains recoverable.
+- Raw-output recovery for `exec`. On the default capture path the raw bytes
+  are archived and the JSON field `tee_hint` is `[raw: <id>]` even when the
+  printed text is not reduced: `echo hello` exiting 4 prints `hello` with no
+  `[tee:<id>]` line and still sets `tee_hint`. The visible `[tee:<id>]` line is
+  added only when the reduction still saves at least a quarter of the tokens
+  once the trailer is included. `--raw-on-failure` on a non-zero exit returns
+  the raw text and archives nothing (`tee_hint` null). `LM_RESIZER_TEE=0`
+  disables the archive. The `[full output: <<ccr:...>>]` hint belongs to
+  `mcp-proxy`.
 - Lightweight `exec` savings history in JSONL, summarized by `lm-resizer stats`.
 - Lightweight CCR retrieval feedback in JSONL, also summarized by
   `lm-resizer stats`.
@@ -68,8 +79,10 @@ no `.py` files, no Python package manifests, and no Python helper scripts.
   integration: helpers can ask how argv or full shell lines should be rewritten
   without executing them or modifying agent configuration.
 - `init-native-hooks` writes project-local Codex `.codex/hooks.json` and Claude
-  `.claude/settings.json` PostToolUse hooks that call the Rust `lm-resizer hook`
-  handler.
+  `.claude/settings.json` with both a `PreToolUse` and a `PostToolUse` hook
+  (matcher `Bash`, plus `exec_command` for Codex) that call the Rust
+  `lm-resizer hook` handler. `--client` also accepts `gemini`, `copilot` and
+  `cursor`.
 - `hook` reads native hook JSON from stdin, records savings when it recognizes
   a Bash command/output pair, and exits successfully for unknown event shapes.
 - `init-shims` writes opt-in PATH command wrappers that automatically route
@@ -184,8 +197,8 @@ no `.py` files, no Python package manifests, and no Python helper scripts.
 ### Agent Launchers
 
 - Deeper agent-native hook integrations beyond the current wrapper env mapping,
-  helper scripts, reversible instruction blocks, PATH shims, and PostToolUse
-  savings hooks.
+  helper scripts, reversible instruction blocks, PATH shims, and the
+  PreToolUse / PostToolUse hooks.
 - More agent-specific session providers beyond the current Claude/Codex local
   store discovery as new clients expose stable session locations.
 

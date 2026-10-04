@@ -221,12 +221,12 @@ Horloge cumulée en tête de plan. Total visé **~11:10**.
 - **Écran :** sandbox hôte → pipe → lm-resizer.
 
 #### Plan 35 · 3:56–4:04 · 8 s
-- **Dit :** `--command` sert seulement à choisir le même filtre sémantique que `exec` [README.md]. Budget de jetons optionnel, conscient de la question [README.md].
-- **Écran :** `--command "cargo test" --token-budget 2000` [README.md].
+- **Dit :** `--command` sert seulement à choisir le même filtre sémantique que `exec` [README.md]. Le code de sortie d'origine se passe avec `--exit-code`.
+- **Écran :** `--command "cargo test" --exit-code 1`. Rectifié le 04/10 (0.2.4) : `tool-output --token-budget` n'existe pas ; le budget de jetons n'existe que sur `compress` et ne s'applique qu'aux données structurées (tableau JSON), pas au texte libre.
 
 #### Plan 36 · 4:04–4:12 · 8 s
-- **Dit :** L'original complet est rangé sous un hash de récupération CCR [README.md]. Si le candidat ne tient pas les seuils d'économie, on rend l'original exact [README.md].
-- **Écran :** `--min-savings-bytes` · `--min-savings-ratio`.
+- **Dit :** L'original complet est rangé sous un hash de récupération CCR [README.md]. Si le candidat ne gagne pas assez, on rend l'original exact [README.md].
+- **Écran :** tampon `no-growth`. Rectifié le 04/10 (0.2.4) : les options `--min-savings-bytes` et `--min-savings-ratio` n'existent pas dans le binaire (`--help` de `tool-output` et de `compress`) ; aucun réglage de seuil d'économie par option n'est offert.
 
 #### Plan 37 · 4:12–4:20 · 8 s
 - **Dit :** L'écriture de récupération est vérifiée avant d'annoncer le hash. Si le backend CCR ne peut pas relire l'original, lm-resizer rend le brut exact [README.md].
@@ -241,7 +241,7 @@ Horloge cumulée en tête de plan. Total visé **~11:10**.
 - **Écran :** `lm-resizer retrieve <hash>` · `stats` · `doctor --json`.
 
 #### Plan 40 · 4:36–4:44 · 8 s
-- **Dit :** Quand la sortie est grosse, ou que l'enfant échoue, `exec` range le brut et ajoute un indice `[full output: …]` [README.md]. `LM_RESIZER_TEE=0` éteint cette récupération [README.md].
+- **Dit :** Quand la sortie est grosse, ou que l'enfant échoue, `exec` range le brut et ajoute un indice de récupération (`[tee:<id>]` ou `[raw: <id>]` constatés en 0.2.4 ; le `[full output: …]` d'origine est l'étiquette du proxy MCP) [README.md]. `LM_RESIZER_TEE=0` éteint l'archive du brut. Rectifié le 04/10 (0.2.4) : avec `LM_RESIZER_TEE=0`, plus de fichier tee, plus de `[raw: …]` ni de `tee_hint` ; mais le hash CCR (`Retrieve more: hash=…`, `lm-resizer retrieve <hash>`) reste émis et récupérable (constaté avec `LM_RESIZER_TEE=0 lm-resizer compress`), car le CCR est un autre mécanisme.
 - **Écran :** tee hint à l'écran.
 
 #### Plan 41 · 4:44–4:50 · 6 s
