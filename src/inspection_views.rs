@@ -1,7 +1,8 @@
 //! Explicit inspection commands for arbitrary producers and local manifests.
 use anyhow::{Context, Result};
+use regex::Regex;
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, path::Path, sync::LazyLock};
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum Mode {
@@ -22,9 +23,15 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             .starts_with("Traceback (most recent call last):")
     });
     if let Some(start) = traceback_start {
-        // A traceback is a single diagnostic: the intermediate frames and
-        // source lines explain the final exception even without keywords.
-        keep[start..].fill(true);
+        // Keep every frame through the terminal exception (including chained
+        // tracebacks), without treating unrelated progress after it as a frame.
+        let end = lines
+            .iter()
+            .enumerate()
+            .skip(start)
+            .rev()
+            .find_map(|(i, line)| python_exception_line(line).then_some(i));
+        keep[start..=end.unwrap_or(lines.len() - 1)].fill(true);
     }
     for (i, line) in lines.iter().enumerate() {
         let lower = line.to_ascii_lowercase();
@@ -47,6 +54,7 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
         ]
         .iter()
         .any(|word| lower.contains(word))
+            || diagnostic_marker(line)
             || file_location(line)
             || line.trim_start().starts_with('^');
         let test_signal = diagnostic
@@ -89,9 +97,9 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             }
         }
     }
-    // Preserve final numeric totals even if the producer uses unfamiliar wording.
+    // Preserve final numeric totals, not numbered progress rows.
     for i in (0..lines.len()).rev().take(10) {
-        if lines[i].chars().any(|c| c.is_ascii_digit()) {
+        if numeric_summary(lines[i]) {
             keep[i] = true;
         }
     }
@@ -113,6 +121,40 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
     } else {
         body
     }
+}
+
+fn diagnostic_marker(line: &str) -> bool {
+    // Tool prefixes, diagnostic annotations and process signals are common
+    // across ecosystems. Keep these lines even when their wording has no
+    // English "error" or "fail" substring.
+    static MARKER: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?ix)
+            ^\s*(?:
+                (?:[\w.-]+\s+)?(?:err!|warn!|error:|warning:|fatal:|panic:|note:|hint:|help:|caused\s+by:|reason:)
+                |(?:segmentation\s+fault|bus\s+error|illegal\s+instruction|floating\s+point\s+exception|aborted|core\s+dumped|killed)(?:\s|\(|$)
+                |(?:signal\s+\d+|signal\s+[a-z][\w-]*)(?:\s|$)
+                |goroutine\s+\d+\s+\[[^]]+\]:
+            )
+        ").unwrap()
+    });
+    MARKER.is_match(line)
+}
+
+fn numeric_summary(line: &str) -> bool {
+    static TOTAL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?ix)
+            \b(?:\d+\s+(?:tests?|files?|packages?|records?|jobs?|suites?|passed|failed|errors?|warnings?|skipped|ignored|compiled|processed|added)|
+                 (?:total|found|finished|results?|summary|tests?\s+run)\s*[:=]?\s*\d+)\b
+        ").unwrap()
+    });
+    TOTAL.is_match(line)
+}
+
+fn python_exception_line(line: &str) -> bool {
+    static EXCEPTION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^[A-Za-z_][\w.]*(?:Error|Exception|Warning|Interrupt|Exit):(?:\s|$)").unwrap()
+    });
+    EXCEPTION.is_match(line)
 }
 
 fn file_location(line: &str) -> bool {
@@ -344,6 +386,56 @@ mod tests {
         ] {
             assert!(view.contains(line), "missing compiler detail: {line}");
         }
+    }
+    #[test]
+    fn generic_views_keep_prefixed_diagnostics_signals_and_distant_advice() {
+        let noise = "progress step\n".repeat(30);
+        for (line, exit) in [
+            ("npm ERR! code ELIFECYCLE", 1),
+            ("yarn WARN! deprecated package", 0),
+            ("Segmentation fault (core dumped)", 139),
+            ("Bus error (core dumped)", 135),
+            ("Illegal instruction (core dumped)", 132),
+            ("note: this binding is intentionally distant", 0),
+            ("hint: inspect the dependency graph", 1),
+            ("help: consider changing this to a borrow", 1),
+            ("Caused by: inaccessible registry", 1),
+            ("goroutine 1 [running]:", 2),
+        ] {
+            let raw = format!("{noise}{line}\n{noise}done\n");
+            for mode in [Mode::Errors, Mode::Tests, Mode::Summary] {
+                let out = summarize(mode, &raw, exit);
+                assert!(out.contains(line), "lost {line}");
+                if exit != 0 {
+                    assert!(out.starts_with(&format!("[FAIL] Command failed (exit code: {exit})")));
+                }
+            }
+        }
+    }
+    #[test]
+    fn final_totals_do_not_pull_in_numbered_progress() {
+        let raw = format!(
+            "warning: check configuration\n{}12 files checked\n",
+            (1..=30)
+                .map(|n| format!("progress phase {n}: preparing files\n"))
+                .collect::<String>()
+        );
+        let out = summarize(Mode::Summary, &raw, 0);
+        assert!(out.contains("warning: check configuration"));
+        assert!(out.contains("12 files checked"));
+        assert!(!out.contains("progress phase 30:"));
+    }
+    #[test]
+    fn traceback_stops_at_last_exception_and_keeps_chained_frames() {
+        let raw = format!(
+            "Traceback (most recent call last):\n  File \"a.py\", line 1, in a\n    b()\nValueError: root\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"a.py\", line 5, in b\n    raise RuntimeError('wrap')\nRuntimeError: wrap\n{}",
+            "progress after crash\n".repeat(30)
+        );
+        let out = summarize(Mode::Errors, &raw, 1);
+        assert!(out.contains("ValueError: root"));
+        assert!(out.contains("RuntimeError: wrap"));
+        assert!(out.contains("    b()"));
+        assert_eq!(out.matches("progress after crash").count(), 1);
     }
     #[test]
     fn schema_has_every_heterogeneous_variant() {
