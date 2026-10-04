@@ -273,6 +273,15 @@ pub fn run_mcp_proxy(command: Vec<String>, store_path: Option<PathBuf>) -> Resul
     if command.is_empty() {
         anyhow::bail!("missing command for mcp-proxy");
     }
+
+    if command[0].starts_with('-') && command[0] != "--" {
+        eprintln!(
+            "unknown option '{}' for mcp-proxy; options go before `--`, the upstream command goes after it (try --help)",
+            command[0]
+        );
+        std::process::exit(2);
+    }
+
     let (program, args) = command
         .split_first()
         .context("missing command for mcp-proxy")?;
