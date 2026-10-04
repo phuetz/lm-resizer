@@ -112,6 +112,12 @@ fn generic_tool_output_and_gain_record_a_failed_command() {
     let gain: Value = serde_json::from_slice(&gain.stdout).unwrap();
     assert_eq!(gain["exec_history"]["commands"], 1);
     assert_eq!(gain["exec_history"]["measured_commands"], 1);
+    let scoped = cli(state.path(), &["gain", "--history", "--project"]);
+    let scoped = String::from_utf8(scoped.stdout).unwrap();
+    assert!(scoped.contains("Project: "));
+    assert!(scoped.contains("Total commands: 1"));
+    assert!(scoped.contains("Recent executions:"));
+    assert!(scoped.contains("unknown-tool"));
 }
 
 #[test]

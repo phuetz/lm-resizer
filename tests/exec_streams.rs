@@ -58,7 +58,10 @@ fn raw_failure_keeps_whitespace_and_stderr_only_is_labeled() {
             .unwrap();
         let report: Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(out.status.code(), Some(8));
-        assert_eq!(report["output"], expected);
+        assert_eq!(
+            report["output"],
+            format!("[FAIL] Command failed (exit code: 8)\n{expected}")
+        );
     }
 }
 

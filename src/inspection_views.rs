@@ -17,6 +17,15 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
     }
     let lines: Vec<&str> = raw.lines().collect();
     let mut keep = vec![false; lines.len()];
+    let traceback_start = lines.iter().position(|line| {
+        line.trim_start()
+            .starts_with("Traceback (most recent call last):")
+    });
+    if let Some(start) = traceback_start {
+        // A traceback is a single diagnostic: the intermediate frames and
+        // source lines explain the final exception even without keywords.
+        keep[start..].fill(true);
+    }
     for (i, line) in lines.iter().enumerate() {
         let lower = line.to_ascii_lowercase();
         let diagnostic = [
@@ -30,10 +39,16 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             "expected",
             "received",
             "assert",
+            "not found",
+            "missing",
+            "warning",
+            "symbol:",
+            "location:",
         ]
         .iter()
         .any(|word| lower.contains(word))
-            || file_location(line);
+            || file_location(line)
+            || line.trim_start().starts_with('^');
         let test_signal = diagnostic
             || [
                 "assert",
@@ -62,10 +77,20 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             if i + 1 < lines.len() {
                 keep[i + 1] = true;
             }
+            // Compilers place source and caret lines after the location.
+            if (file_location(line) || lower.starts_with("file ")) && i + 2 < lines.len() {
+                keep[i + 2] = true;
+            }
+            // Git's fatal diagnostics can carry a short usage example.
+            if lower.contains("fatal") {
+                for slot in keep.iter_mut().take((i + 5).min(lines.len())).skip(i) {
+                    *slot = true;
+                }
+            }
         }
     }
     // Preserve final numeric totals even if the producer uses unfamiliar wording.
-    for i in (0..lines.len()).rev().take(8) {
+    for i in (0..lines.len()).rev().take(10) {
         if lines[i].chars().any(|c| c.is_ascii_digit()) {
             keep[i] = true;
         }
@@ -288,6 +313,37 @@ mod tests {
             summarize(Mode::Errors, "unusual diagnostic", 7),
             "[FAIL] Command failed (exit code: 7)\nunusual diagnostic"
         );
+    }
+    #[test]
+    fn generic_errors_keep_source_carets_and_full_traceback() {
+        let traceback = "noise\nTraceback (most recent call last):\n  File \"app.py\", line 8, in a\n    a()\n  File \"app.py\", line 5, in b\n    return c()\n  File \"app.py\", line 2, in c\n    raise ValueError('deep boom')\nValueError: deep boom\n";
+        let view = summarize(Mode::Errors, traceback, 1);
+        for line in [
+            "    a()",
+            "    return c()",
+            "    raise ValueError('deep boom')",
+            "ValueError: deep boom",
+        ] {
+            assert!(view.contains(line), "missing traceback line: {line}");
+        }
+        let syntax = "noise\n  File \"bad.py\", line 1\n    def broken(:\n               ^\nSyntaxError: invalid syntax\n";
+        let view = summarize(Mode::Errors, syntax, 1);
+        assert!(view.contains("    def broken(:"));
+        assert!(view.contains("               ^"));
+    }
+    #[test]
+    fn generic_errors_keep_missing_header_and_compiler_details() {
+        let raw = "progress\nerror: first problem\nat step compile\nmissing header stdio.h\n12 files checked\n";
+        assert!(summarize(Mode::Errors, raw, 1).contains("missing header stdio.h"));
+        let java = "Bad.java:1: error: cannot find symbol\n  int x = missing;\n          ^\n  symbol:   variable missing\n  location: class Bad\n1 error\n";
+        let view = summarize(Mode::Errors, java, 1);
+        for line in [
+            "          ^",
+            "symbol:   variable missing",
+            "location: class Bad",
+        ] {
+            assert!(view.contains(line), "missing compiler detail: {line}");
+        }
     }
     #[test]
     fn schema_has_every_heterogeneous_variant() {

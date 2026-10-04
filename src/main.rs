@@ -2690,6 +2690,9 @@ fn run_inspected_command(
             }
         }
     }
+    if !matches!(mode, Some(inspection_views::Mode::Raw)) {
+        prepend_failure_status(&mut output, captured.code);
+    }
     let tee_hint = archive_raw_bytes(&captured.raw)?;
     if let Some(hint) = &tee_hint {
         append_recovery_instruction(&mut output, hint, &raw);
@@ -2831,6 +2834,7 @@ fn run_exec_command(
     if let Some(hint) = &tee_hint {
         append_recovery_instruction(&mut final_output, hint, &raw);
     }
+    prepend_failure_status(&mut final_output, exit_code);
 
     perf_stage("tee", phase.elapsed());
     let phase = Instant::now();
@@ -2922,6 +2926,7 @@ fn process_captured_output(
         }
         keys = vec![key];
     }
+    prepend_failure_status(&mut output, exit_code);
     Ok(ExecReport {
         streams: None,
         tokens: TokenCounts::measure(raw, &output),
@@ -2937,6 +2942,15 @@ fn process_captured_output(
         tee_hint: None,
         output,
     })
+}
+
+fn prepend_failure_status(output: &mut String, exit_code: i32) {
+    if exit_code != 0 && !output.starts_with("[FAIL] Command failed (exit code: ") {
+        output.insert_str(
+            0,
+            &format!("[FAIL] Command failed (exit code: {exit_code})\n"),
+        );
+    }
 }
 
 fn run_command_streaming(
@@ -5587,7 +5601,25 @@ fn format_gain(report: &Value) -> String {
     } else {
         saved as f64 * 100.0 / original as f64
     };
-    format!("LM Resizer gain\nTotal commands: {commands}\nOriginal tokens: {original}\nOutput tokens: {compressed}\nTokens saved: {saved} ({pct:.1}%)\nTokenizer: {TOKENIZER}\n")
+    let mut output = "LM Resizer gain\n".to_string();
+    if let Some(project) = history["project"].as_str() {
+        output.push_str(&format!("Project: {project}\n"));
+    }
+    output.push_str(&format!("Total commands: {commands}\nOriginal tokens: {original}\nOutput tokens: {compressed}\nTokens saved: {saved} ({pct:.1}%)\nTokenizer: {TOKENIZER}\n"));
+    if let Some(rows) = report["history"].as_array() {
+        output.push_str("Recent executions:\n");
+        for row in rows {
+            let command = row["command"]
+                .as_str()
+                .unwrap_or("")
+                .replace(['\n', '\r'], " ");
+            output.push_str(&format!(
+                "  exit {} | {} tokens saved | {}\n",
+                row["exit_code"], row["tokens_saved"], command
+            ));
+        }
+    }
+    output
 }
 
 fn inspect_image(path: &Path) -> Result<ImageReport> {
@@ -7910,7 +7942,7 @@ fn mcp_tools() -> Value {
                     "content": { "type": "string" },
                     "command": { "type": "string" },
                     "exit_code": { "type": "integer", "default": 0 },
-                    "raw_on_failure": { "type": "boolean", "default": true },
+                    "raw_on_failure": { "type": "boolean", "default": false },
                     "query": { "type": "string" }
                 },
                 "required": ["content", "command"]
@@ -7966,7 +7998,7 @@ fn handle_mcp_tool_call(id: Value, params: Value, store_path: &Path) -> Value {
             let raw_on_failure = args
                 .get("raw_on_failure")
                 .and_then(Value::as_bool)
-                .unwrap_or(true);
+                .unwrap_or(false);
             let query = args.get("query").and_then(Value::as_str).unwrap_or("");
             let store = open_store(Some(store_path.to_path_buf()))?;
             let mut report = process_captured_output(
@@ -8009,6 +8041,8 @@ fn handle_mcp_tool_call(id: Value, params: Value, store_path: &Path) -> Value {
             "jsonrpc": "2.0",
             "id": id,
             "result": {
+                "isError": name == "lm_resizer_tool_output"
+                    && payload["exit_code"].as_i64().is_some_and(|code| code != 0),
                 "content": [{
                     "type": "text",
                     "text": serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
@@ -10368,7 +10402,10 @@ command = "node"
         }
         let failure = process_captured_output(&command, raw, 1, true, "", &store).unwrap();
         assert_eq!(failure.filter, "raw_on_failure");
-        assert_eq!(failure.output, raw);
+        assert_eq!(
+            failure.output,
+            format!("[FAIL] Command failed (exit code: 1)\n{raw}")
+        );
     }
 
     #[test]
@@ -10406,7 +10443,28 @@ command = "node"
         );
         let failure: Value =
             serde_json::from_str(failed["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-        assert_eq!(failure["output"], "error: compilation failed\n");
+        assert!(failure["output"]
+            .as_str()
+            .unwrap()
+            .starts_with("[FAIL] Command failed (exit code: 1)\nerror: compilation failed\n"));
+
+        let misleading = handle_mcp_tool_call(
+            json!(3),
+            json!({"name":"lm_resizer_tool_output","arguments":{
+                "command":"unknown-tool","content":"progress\nall tests passed\nOK\n","exit_code":7
+            }}),
+            &temp.path().join("ccr.sqlite"),
+        );
+        let payload: Value =
+            serde_json::from_str(misleading["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(misleading["result"]["isError"], true);
+        assert_eq!(payload["exit_code"], 7);
+        assert_eq!(payload["filter"], "generic:summary");
+        assert!(payload["output"]
+            .as_str()
+            .unwrap()
+            .starts_with("[FAIL] Command failed (exit code: 7)\n"));
     }
 
     #[test]
