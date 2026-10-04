@@ -359,7 +359,10 @@ fn direct_mixed_view_and_tee_retains_producer_order() {
     let (report, raw, code) = run_capture_shim(script, &["pytest"], &["pytest"]);
     let expected_raw: String = (0..8).map(|i| format!("OUT{i:04}\nERR{i:04}\n")).collect();
     assert_eq!(raw, expected_raw.as_bytes());
-    assert_eq!(report["output"], expected_raw);
+    assert_eq!(
+        report["output"],
+        format!("[FAIL] Command failed (exit code: 3)\n{expected_raw}")
+    );
     assert_eq!(code, 3);
 }
 

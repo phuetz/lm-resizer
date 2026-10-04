@@ -249,7 +249,9 @@ fn inspection_schema_environment_and_formatter_have_recoverable_contracts() {
         .unwrap();
     assert_eq!(out.status.code(), Some(7));
     let raw = b"format\n--check\na b.py\nERROR invalid syntax\n";
-    assert_eq!(out.stdout, raw);
+    let mut expected = b"[FAIL] Command failed (exit code: 7)\n".to_vec();
+    expected.extend_from_slice(raw);
+    assert_eq!(out.stdout, expected);
     let key = format!("{:x}", Sha256::digest(raw));
     assert_eq!(
         cli(dir.path())

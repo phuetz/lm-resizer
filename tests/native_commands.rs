@@ -101,7 +101,11 @@ fn pipe_filters_without_executing_and_preserves_errors_and_exit_status() {
     let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(2));
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["output"].as_str().unwrap(), raw);
+    assert!(value["output"]
+        .as_str()
+        .unwrap()
+        .starts_with("[FAIL] Command failed (exit code: 2)\n"));
+    assert!(value["output"].as_str().unwrap().contains(raw));
     assert_eq!(value["exit_code"], 2);
 }
 
