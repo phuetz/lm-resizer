@@ -100,6 +100,14 @@ The installer edits only the marked lm-resizer block. The helpers use
 `rewrite` and `rewrite-shell` to recommend an `lm-resizer exec -- ...` command;
 they do not execute target commands.
 
+`rewrite-shell` may rewrite independent segments joined by `&&`, `||`, or `;`.
+It shares the PreToolUse refusal: a command whose stdout or stderr is redirected
+(`>`, `>>`, `2>`, `&>`, `>&`), consumed by a pipe (including `| tee` and `|&`),
+fed by a here-document, captured by `$(...)` or backticks, or interactive is
+returned unchanged. Wrapping those forms used to glue the redirect onto
+`lm-resizer exec`, so the file or the next program received the reduced view.
+The hook is stricter: any shell operator, including `&&`, leaves the whole line raw.
+
 ## Add Native Hook Config
 
 Generate experimental project-local hook config:

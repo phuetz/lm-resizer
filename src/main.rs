@@ -3061,26 +3061,32 @@ fn rewrite_shell_report(command: &str) -> RewriteShellReport {
     let mut rewrites = Vec::new();
     let mut after_pipe = false;
 
-    for token in tokens {
+    for (index, token) in tokens.iter().enumerate() {
         match token {
             ShellToken::Operator(op) => {
                 if !output.is_empty() && !output.ends_with(' ') {
                     output.push(' ');
                 }
-                output.push_str(&op);
+                output.push_str(op);
                 output.push(' ');
-                after_pipe = op == "|";
+                after_pipe = operator_consumes_output(op);
             }
             ShellToken::Segment(segment) => {
                 let trimmed = segment.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
-                let rewritten = if after_pipe {
-                    None
-                } else {
-                    rewrite_shell_segment(trimmed)
-                };
+                // Le producteur d'un tube (`|`, `|&`, donc aussi `| tee`) ne doit
+                // pas être enveloppé : le consommateur lirait la vue réduite.
+                let feeds_pipe = tokens.get(index + 1).is_some_and(
+                    |next| matches!(next, ShellToken::Operator(op) if operator_consumes_output(op)),
+                );
+                let rewritten =
+                    if after_pipe || feeds_pipe || segment_must_not_be_rewritten(trimmed) {
+                        None
+                    } else {
+                        rewrite_shell_segment(trimmed)
+                    };
                 if let Some((rewritten_segment, filter)) = rewritten {
                     output.push_str(&rewritten_segment);
                     rewrites.push(RewriteShellSegment {
@@ -3097,7 +3103,12 @@ fn rewrite_shell_report(command: &str) -> RewriteShellReport {
         }
     }
 
-    let rewritten = output.trim().to_string();
+    // Aucun segment réécrit : rendre la ligne d'origine, sans normaliser les espaces.
+    let rewritten = if rewrites.is_empty() {
+        command.trim().to_string()
+    } else {
+        output.trim().to_string()
+    };
     RewriteShellReport {
         command: command.to_string(),
         changed: rewritten != command.trim(),
@@ -3106,20 +3117,28 @@ fn rewrite_shell_report(command: &str) -> RewriteShellReport {
     }
 }
 
+fn operator_consumes_output(op: &str) -> bool {
+    matches!(op, "|" | "|&")
+}
+
 fn rewrite_shell_segment(segment: &str) -> Option<(String, String)> {
-    let (body, suffix) = split_trailing_redirects(segment);
-    if body.trim().is_empty() {
+    // Même refus que le hook : ne jamais recoller un suffixe de redirection sur
+    // `lm-resizer exec`, sinon `>` capture la vue réduite au lieu des octets d'origine.
+    if segment_must_not_be_rewritten(segment) {
         return None;
     }
-    let args = split_shell_words(body.trim())?;
+    let args = split_shell_words(segment.trim())?;
+    // `shell_join` ne sait pas rendre des apostrophes. Un mot `$(...)` ou `` `...` ``
+    // qui était littéral le redeviendrait une substitution entre guillemets doubles.
+    if args
+        .iter()
+        .any(|word| word.contains("$(") || word.contains('`'))
+    {
+        return None;
+    }
     let report = rewrite_command_report(&args);
     let rewritten = report.rewritten?;
-    let suffix = suffix.trim();
-    if suffix.is_empty() {
-        Some((rewritten, report.filter))
-    } else {
-        Some((format!("{rewritten} {suffix}"), report.filter))
-    }
+    Some((rewritten, report.filter))
 }
 
 fn split_trailing_redirects(segment: &str) -> (&str, &str) {
@@ -3220,6 +3239,12 @@ fn split_shell_operators(command: &str) -> Vec<ShellToken> {
 
                 if is_redirect {
                     // Part of a redirection (e.g. 2>&1, >&2, &> /dev/null), not a command separator.
+                } else if ch == '|' && i + 1 < chars.len() && chars[i + 1].1 == '&' {
+                    // `|&` pipes both stdout and stderr (bash). The producer must stay raw.
+                    push_shell_segment(&mut tokens, &command[start..idx]);
+                    tokens.push(ShellToken::Operator("|&".to_string()));
+                    start = chars[i + 1].0 + chars[i + 1].1.len_utf8();
+                    i += 1;
                 } else if i + 1 < chars.len() && chars[i + 1].1 == ch {
                     push_shell_segment(&mut tokens, &command[start..idx]);
                     tokens.push(ShellToken::Operator(format!("{ch}{ch}")));
@@ -5082,18 +5107,245 @@ fn segment_has_redirect(seg: &str) -> bool {
     !suffix.trim().is_empty()
 }
 
+/// Partagé par `rewrite-shell` et le hook PreToolUse. Vrai quand envelopper le segment dans
+/// `lm-resizer exec` remplacerait les octets qu'un fichier, un tube, une substitution, un
+/// here-doc ou un terminal attendent. Le hook refuse en plus tout opérateur (`&&`, `;`, `&`).
+fn segment_must_not_be_rewritten(segment: &str) -> bool {
+    segment_has_redirect(segment)
+        || segment_has_command_substitution(segment)
+        || segment_has_heredoc(segment)
+        || segment_is_interactive(segment)
+}
+
+/// `$(...)` et les backticks, y compris entre guillemets doubles. Pas `${var}` ni `'$(littéral)'`.
+fn segment_has_command_substitution(segment: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let chars: Vec<char> = segment.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        if escaped {
+            escaped = false;
+            index += 1;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '`' if !in_single => return true,
+            '$' if !in_single && index + 1 < chars.len() && chars[index + 1] == '(' => {
+                return true;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    false
+}
+
+/// Here-document (`<<` / `<<-`), y compris `<<'EOF'`. Le corps est des octets littéraux
+/// destinés à l'écrivain ou à l'interpréteur ; l'envelopper les ferait filtrer ou détacher.
+fn segment_has_heredoc(segment: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let chars: Vec<char> = segment.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        if escaped {
+            escaped = false;
+            index += 1;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '<' if !in_single
+                && !in_double
+                && index + 1 < chars.len()
+                && chars[index + 1] == '<' =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    false
+}
+
+fn segment_is_interactive(segment: &str) -> bool {
+    let Some(words) = split_shell_words(segment) else {
+        return false;
+    };
+    command_is_interactive(&words)
+}
+
+fn command_is_interactive(words: &[String]) -> bool {
+    let Some(program) = words.first() else {
+        return false;
+    };
+    let base = command_basename(program);
+    const ALWAYS: &[&str] = &[
+        "vim",
+        "nvim",
+        "vi",
+        "nano",
+        "emacs",
+        "less",
+        "more",
+        "most",
+        "top",
+        "htop",
+        "btop",
+        "watch",
+        "man",
+        "ssh",
+        "sftp",
+        "ftp",
+        "telnet",
+        "tmux",
+        "screen",
+        "fzf",
+        "mysql",
+        "mongo",
+        "mongosh",
+        "redis-cli",
+        "irb",
+        "ipython",
+        "pgcli",
+        "lazygit",
+        "tig",
+    ];
+    if ALWAYS.contains(&base.as_str()) {
+        return true;
+    }
+    if matches!(base.as_str(), "python" | "python3" | "node" | "nodejs") {
+        return repl_without_script(words);
+    }
+    if base == "psql" {
+        return !psql_is_scripted(words);
+    }
+    if matches!(base.as_str(), "docker" | "podman" | "kubectl")
+        && container_exec_is_interactive(words)
+    {
+        return true;
+    }
+    if base == "git" {
+        return git_command_is_interactive(words);
+    }
+    false
+}
+
+fn repl_without_script(words: &[String]) -> bool {
+    if words
+        .iter()
+        .any(|word| word == "-i" || word == "--interactive")
+    {
+        return true;
+    }
+    let scripted = words.iter().skip(1).any(|word| {
+        matches!(
+            word.as_str(),
+            "-c" | "-m" | "-e" | "--eval" | "--version" | "-V" | "--help" | "-h"
+        ) || !word.starts_with('-')
+    });
+    !scripted
+}
+
+fn psql_is_scripted(words: &[String]) -> bool {
+    words.iter().any(|word| {
+        matches!(
+            word.as_str(),
+            "-c" | "--command"
+                | "-f"
+                | "--file"
+                | "-l"
+                | "--list"
+                | "--version"
+                | "-V"
+                | "--help"
+                | "-?"
+        ) || word.starts_with("--command=")
+            || word.starts_with("--file=")
+    })
+}
+
+fn container_exec_is_interactive(words: &[String]) -> bool {
+    let Some(pos) = words.iter().position(|word| word == "exec") else {
+        return false;
+    };
+    words[pos + 1..].iter().any(|word| {
+        matches!(
+            word.as_str(),
+            "-i" | "-t" | "-it" | "-ti" | "--interactive" | "--tty"
+        ) || word.starts_with("--interactive=")
+            || word.starts_with("--tty=")
+    })
+}
+
+fn git_command_is_interactive(words: &[String]) -> bool {
+    let Some(sub_index) = git_subcommand_index(words) else {
+        return false;
+    };
+    let sub = words[sub_index].as_str();
+    // Uniquement les arguments de la sous-commande : `git -C dir` n'est pas un `-C <commit>`.
+    let flags = &words[sub_index + 1..];
+    match sub {
+        "difftool" | "mergetool" => true,
+        "rebase" => flags
+            .iter()
+            .any(|word| word == "-i" || word == "--interactive"),
+        "add" | "checkout" | "restore" => flags
+            .iter()
+            .any(|word| matches!(word.as_str(), "-i" | "--interactive" | "-p" | "--patch")),
+        "commit" | "merge" | "cherry-pick" => !git_supplies_message(flags),
+        _ => false,
+    }
+}
+
+/// Index de la sous-commande git après les options globales (`-C`, `-c`, `--git-dir`, …).
+fn git_subcommand_index(words: &[String]) -> Option<usize> {
+    let mut index = 1;
+    while index < words.len() {
+        match words[index].as_str() {
+            "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" => index += 2,
+            flag if flag.starts_with('-') => index += 1,
+            _ => return Some(index),
+        }
+    }
+    None
+}
+
+fn git_supplies_message(flags: &[String]) -> bool {
+    flags.iter().any(|word| {
+        matches!(
+            word.as_str(),
+            "-m" | "--message" | "-F" | "--file" | "-C" | "--no-edit"
+        ) || word.starts_with("--message=")
+            || word.starts_with("--file=")
+            || (word.starts_with("-m") && word.len() > 2 && !word.starts_with("--"))
+    })
+}
+
 /// Rewrite a Bash command to run through `"{exe}" exec -- <cmd>` for the hook, ONLY when it is a
-/// single simple command (no `&&`/`||`/`;`/`|`, no redirect) whose program has a real filter.
-/// Crucially the wrap is VERBATIM — the original segment bytes are reused untouched, never
-/// re-tokenized — so quoting/backslash-escaping (e.g. a grep BRE `"\|"`) can't be corrupted the way
-/// a split-and-rejoin would. Compound/piped/redirected commands run raw (safety over coverage).
+/// single simple command (no `&&`/`||`/`;`/`|`/`&`, and [`segment_must_not_be_rewritten`] is
+/// false) whose program has a real filter. Crucially the wrap is VERBATIM — the original segment
+/// bytes are reused untouched, never re-tokenized — so quoting/backslash-escaping (e.g. a grep BRE
+/// `"\|"`) can't be corrupted the way a split-and-rejoin would. Compound, piped, redirected,
+/// substituted, here-document and interactive commands run raw (safety over coverage).
 fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
     let tokens = split_shell_operators(command.trim());
     let [ShellToken::Segment(seg)] = tokens.as_slice() else {
         return None; // operators present → don't touch (avoid pipe/&& semantics + re-quoting)
     };
     let seg = seg.trim();
-    if segment_has_redirect(seg) {
+    if segment_must_not_be_rewritten(seg) {
         return None;
     }
     let words = split_shell_words(seg)?;
@@ -6564,8 +6816,9 @@ run the original command.
 Useful target command families include `git`, `cargo`, `rg`/`grep`, listings,
 Terraform/OpenTofu, Docker/Podman, `tsc`, and `pytest`.
 
-Do not use lm-resizer for commands whose raw output is intentionally consumed by
-another program unless `rewrite-shell` left that pipe consumer unchanged.
+Do not use lm-resizer when stdout or stderr is redirected, piped (including `| tee`),
+captured by `$(...)` or backticks, fed by a here-document, or when the command is
+interactive. `rewrite-shell` leaves those lines unchanged.
 "#
     .to_string()
 }
@@ -10233,57 +10486,131 @@ command = "node"
 
     #[test]
     fn rewrite_shell_preserves_redirect_suffix() {
+        // Renversé le 2026-10-04. Ce test figeait le défaut : il exigeait
+        // `lm-resizer exec -- git status > status.txt`. Le shell redirigeait alors
+        // la vue réduite dans le fichier (67 octets au lieu du diff, `git apply` cassé).
         let report = rewrite_shell_report("git status > status.txt");
-        assert_eq!(
-            report.rewritten,
-            "lm-resizer exec -- git status > status.txt"
-        );
+        assert!(!report.changed, "{}", report.rewritten);
+        assert!(report.rewrites.is_empty());
+        assert_eq!(report.rewritten, "git status > status.txt");
     }
 
     #[test]
     fn rewrite_shell_handles_redirect_with_descriptor() {
-        let report = rewrite_shell_report("cargo test 2>&1 | tail -5");
-        assert_eq!(
-            report.rewritten,
-            "lm-resizer exec -- cargo test 2>&1 | tail -5"
-        );
+        // Renversé le 2026-10-04. L'ancien test recollait `2>`, `&>`, `>&` et le tube
+        // sur `lm-resizer exec`. Ces formes restent la commande d'origine.
+        // `git log &` n'est pas une redirection : la sortie va encore au terminal, il reste réécrit.
+        for command in [
+            "cargo test 2>&1 | tail -5",
+            "git status 2>/dev/null",
+            "git status 2>&1",
+            "git diff >out.txt 2>&1",
+            "git status &> /dev/null",
+            "git status >&2",
+        ] {
+            let report = rewrite_shell_report(command);
+            assert_eq!(report.rewritten, command, "ne doit pas réécrire {command}");
+            assert!(!report.changed);
+        }
 
-        let report2 = rewrite_shell_report("git status 2>/dev/null");
-        assert_eq!(
-            report2.rewritten,
-            "lm-resizer exec -- git status 2>/dev/null"
-        );
-
-        let report3 = rewrite_shell_report("git status 2>&1");
-        assert_eq!(report3.rewritten, "lm-resizer exec -- git status 2>&1");
-
-        let report4 = rewrite_shell_report("git diff >out.txt 2>&1");
-        assert_eq!(
-            report4.rewritten,
-            "lm-resizer exec -- git diff >out.txt 2>&1"
-        );
-
-        let report5 = rewrite_shell_report("git status &> /dev/null");
-        assert_eq!(
-            report5.rewritten,
-            "lm-resizer exec -- git status &> /dev/null"
-        );
-
-        let report6 = rewrite_shell_report("git log &");
-        assert_eq!(report6.rewritten, "lm-resizer exec -- git log &");
-
-        let report7 = rewrite_shell_report("git status >&2");
-        assert_eq!(report7.rewritten, "lm-resizer exec -- git status >&2");
+        let background = rewrite_shell_report("git log &");
+        assert_eq!(background.rewritten, "lm-resizer exec -- git log &");
     }
 
     #[test]
     fn rewrite_shell_does_not_rewrite_pipe_consumer() {
+        // Le producteur non plus : `grep` recevrait la vue réduite. Ancien gel :
+        // `lm-resizer exec -- git status | grep modified` (un seul segment réécrit).
         let report = rewrite_shell_report("git status | grep modified");
+        assert_eq!(report.rewritten, "git status | grep modified");
+        assert!(report.rewrites.is_empty());
+        assert!(!report.changed);
+    }
+
+    #[test]
+    fn rewrite_shell_leaves_captured_or_interactive_output_unchanged() {
+        // Doit échouer sur l'ancienne logique (suffixe recollé, producteur de tube réécrit).
+        for command in [
+            "git diff > p.diff",
+            "git diff >> p.diff",
+            "git status 2> err.txt",
+            "git status 2>> err.txt",
+            "git diff &> both.txt",
+            "git diff >out.txt 2>&1",
+            "git diff | tee p.diff",
+            "git diff | tee -a p.diff",
+            "git status | head -n 5",
+            "git diff |& tee p.diff",
+            "cat <<'EOF'",
+            "tee note.txt <<'EOF'",
+            "git apply <<'PATCH'",
+            "git status $(echo --short)",
+            "git log -1 --oneline `git rev-parse --short HEAD`",
+            "git diff --stat $(echo --numstat)",
+            "x=$(git status --short)",
+            "psql",
+            "psql -h localhost",
+            "git rebase -i HEAD",
+            "git -C /tmp rebase -i HEAD",
+            "git add -p",
+            "git add --patch",
+            "git commit",
+            "git mergetool",
+            "vim README",
+            "less README",
+            "docker exec -it box sh",
+            "ssh host",
+            "python",
+            "node",
+            "watch git status",
+        ] {
+            let report = rewrite_shell_report(command);
+            assert_eq!(
+                report.rewritten, command,
+                "sortie captée ou interactive réécrite: {command} -> {}",
+                report.rewritten
+            );
+            assert!(!report.changed);
+            assert!(
+                rewrite_command_for_hook(command, "/opt/lm").is_none(),
+                "le hook ne partage pas le refus: {command}"
+            );
+        }
+
+        // Apostrophes : `$(...)` est littéral, mais `shell_join` le remettrait entre
+        // guillemets doubles et en ferait une vraie substitution. On ne réécrit pas.
+        // Le hook, lui, recolle les octets d'origine : il peut envelopper.
+        let literal = rewrite_shell_report("git status '$(echo --short)'");
+        assert_eq!(literal.rewritten, "git status '$(echo --short)'");
         assert_eq!(
-            report.rewritten,
-            "lm-resizer exec -- git status | grep modified"
+            rewrite_command_for_hook("git status '$(echo --short)'", "/opt/lm").as_deref(),
+            Some("\"/opt/lm\" exec -- git status '$(echo --short)'")
         );
-        assert_eq!(report.rewrites.len(), 1);
+
+        // Segments sûrs d'une ligne mixte : seule la partie dont la sortie va au modèle.
+        let mixed = rewrite_shell_report("git status && git diff > p.diff");
+        assert_eq!(
+            mixed.rewritten,
+            "lm-resizer exec -- git status && git diff > p.diff"
+        );
+        let mixed_first = rewrite_shell_report("git diff > p.diff && git status");
+        assert_eq!(
+            mixed_first.rewritten,
+            "git diff > p.diff && lm-resizer exec -- git status"
+        );
+
+        // psql scripté et commande simple : toujours réécrits. Le hook enveloppe tel quel.
+        let scripted = rewrite_shell_report("psql -c 'select 1'");
+        assert_eq!(
+            scripted.rewritten,
+            "lm-resizer exec -- psql -c \"select 1\""
+        );
+        assert_eq!(
+            rewrite_command_for_hook("psql -c 'select 1'", "/opt/lm").as_deref(),
+            Some("\"/opt/lm\" exec -- psql -c 'select 1'")
+        );
+        let plain = rewrite_shell_report("git status");
+        assert_eq!(plain.rewritten, "lm-resizer exec -- git status");
     }
 
     #[test]
@@ -11865,6 +12192,11 @@ Successfully tagged localhost/app:latest\n";
         assert!(rewrite_command_for_hook("git log | head", "/opt/lm").is_none());
         // redirect → output goes to a file, not the model → don't wrap
         assert!(rewrite_command_for_hook("grep x foo > out.txt", "/opt/lm").is_none());
+        // même refus que rewrite-shell : substitution, here-doc, interactif
+        assert!(rewrite_command_for_hook("git status $(echo --short)", "/opt/lm").is_none());
+        assert!(rewrite_command_for_hook("cat <<'EOF'", "/opt/lm").is_none());
+        assert!(rewrite_command_for_hook("psql", "/opt/lm").is_none());
+        assert!(rewrite_command_for_hook("git diff | tee p.diff", "/opt/lm").is_none());
         // unsupported program → run raw
         assert!(rewrite_command_for_hook("echo hello", "/opt/lm").is_none());
         // supported single command → wrapped
