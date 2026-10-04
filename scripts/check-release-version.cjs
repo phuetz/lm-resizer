@@ -24,6 +24,19 @@ const versions = {
 for (const [name, actual] of Object.entries(versions)) {
   if (actual !== version) throw new Error(`${name} version ${actual} differs from ${version}`);
 }
+const installerDefaults = {
+  posix: read('install.sh').match(/LM_RESIZER_VERSION:-([^}]+)}/)?.[1],
+  powershell: read('install.ps1').match(/else \{ "([^"]+)" \}/)?.[1],
+};
+for (const [name, actual] of Object.entries(installerDefaults)) {
+  if (actual !== version) throw new Error(`${name} installer default ${actual} differs from ${version}`);
+}
+for (const file of ['README.md', 'README.fr.md']) {
+  for (const installer of ['install.sh', 'install.ps1']) {
+    const pinnedUrl = `https://raw.githubusercontent.com/phuetz/lm-resizer/v${version}/${installer}`;
+    if (!read(file).includes(pinnedUrl)) throw new Error(`${file} does not pin ${installer} to v${version}`);
+  }
+}
 if (process.env.RELEASE_TAG && process.env.RELEASE_TAG !== `v${version}`) {
   throw new Error(`Tag ${process.env.RELEASE_TAG} differs from v${version}`);
 }

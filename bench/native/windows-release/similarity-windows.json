@@ -1,0 +1,792 @@
+{
+  "policy_violations": [],
+  "source_sha256": "de415245d0eac1a6ac50a62e70047ec7025dbf75d41d1377e04e2d1c3f711965",
+  "local_sha256": {
+    "advice_cli.rs": "301f6930c74d70dba7db0f8f6d4f7a0e9133774fc5ba5ad11ee3347c8e5f6843",
+    "agent_hooks.rs": "7e6239156ff0b697b715c0783716c5f455940e783c9c3114eb2655a48b855952",
+    "command_capture.rs": "844bd8d8ad8d8ef6808718ef19dca26d9f669e9bab27f9bc2eb930094605e67c",
+    "command_filters.rs": "905d0a090204bef0a74c08afbe4d03b97b02abf86c18257130b1eace6e0c5605",
+    "command_views.rs": "2d1d0b16801f3889b80454d5eb24e0dfe5b6759cc4ae2e2fa719545bd842dc80",
+    "container_views.rs": "234218bd9595214711e374a9669bc64e289d1c66b5ac67045dc0d74bddb0afd7",
+    "conversation_views.rs": "c281352e67aa144b10b132ee182819d0f0a8e08494388d89c0bcb3c32a0bb3f7",
+    "diagnostic_views.rs": "c0814037c618db59e8f2c25214a65bbf8f64ada5a33272e658184cb3de163753",
+    "file_views.rs": "a3930cf6877ff8a8bbb70f05fc01ef2f5b3874dcd7b7a7c374907b9f8777aea0",
+    "inspection_views.rs": "2864d6f0c9a330f8d36fa1a88451aae6c67447395d1213b6e9c933969736942c",
+    "lossless_filters.rs": "bc6d105e38ec2891d3bacecb3bbb738e6c8023a4bae1dac6c159f67ab5e8009b",
+    "main.rs": "32c9958ba39f252b819cd1bce1c04dca74863b54e5ce97bb7a4a1fd4819da79b",
+    "mcp_proxy.rs": "70815c2f32f7062e80e283faf5e51c66f492e5fbb873058df7d906aa649ef977",
+    "outline_view.rs": "d785a6c02f861d775dd4d8bb1786f4dde9bcc6f943e4d188208fe64170c2b5fa",
+    "package_views.rs": "0b74540d08ffd6a9aadfedad0c75e2d7c80a6e1aa4c138cbd689aa946f92429c",
+    "parity_filters.rs": "88175c2506687c36dd0611b3a69d01ff63fc7ff3f8eb6237807ba30108c6f158",
+    "patch_view.rs": "8973620ebdb7f963dadb4fe14f59d9a414c43eb23ff34a28666f48bb0c9db11d",
+    "provider_usage.rs": "68e89682928f0bfba4585dbca61cf1884483ce41967ca08dcc345dc8a7d49448",
+    "reversible_views.rs": "c79de4137612670a6d2209e41b1b14de9d673b7e311ffb27c9cd4665912634f6",
+    "shared_context.rs": "e4683fb77b53a48a2f67a21e33307d169c5a8af3b06c7fb61716fb226a6682c3",
+    "structured_views.rs": "29a393afe33c4c9c04bab8ab52328ab9170cb7984f9dd8d1dc9291c745f42370",
+    "test_views.rs": "8a82cb26d05d6459077642920d4f8cfa883859a686eaaa47d9ddac605c19ddc8",
+    "token_metrics.rs": "19d0319bb3c2bec22de5528083f8fb33b5cb07950e4fb0810ac74ac1993158f9"
+  },
+  "local_files": 23,
+  "oracle_files": 131,
+  "window": 32,
+  "rejection_threshold": 72,
+  "matches": [
+    {
+      "file": "main.rs",
+      "function": "filter_docker_build",
+      "line": 4723,
+      "tokens": 52,
+      "oracle_file": "src/cmds/system/log_cmd.rs",
+      "oracle_function": "analyze_logs",
+      "oracle_line": 86
+    },
+    {
+      "file": "main.rs",
+      "function": "parse_ini_sections",
+      "line": 9180,
+      "tokens": 50,
+      "oracle_file": "src/cmds/system/deps.rs",
+      "oracle_function": "summarize_requirements_str",
+      "oracle_line": 185
+    },
+    {
+      "file": "main.rs",
+      "function": "docker_build_line_is_identity",
+      "line": 4640,
+      "tokens": 49,
+      "oracle_file": "src/cmds/system/log_cmd.rs",
+      "oracle_function": "analyze_logs",
+      "oracle_line": 86
+    },
+    {
+      "file": "main.rs",
+      "function": "filter_vitest",
+      "line": 4797,
+      "tokens": 49,
+      "oracle_file": "src/cmds/go/go_cmd.rs",
+      "oracle_function": "is_go_test_failure_line",
+      "oracle_line": 553
+    },
+    {
+      "file": "main.rs",
+      "function": "split_shell_words",
+      "line": 3256,
+      "tokens": 46,
+      "oracle_file": "src/core/runner.rs",
+      "oracle_function": "extract_test_summary",
+      "oracle_line": 805
+    },
+    {
+      "file": "main.rs",
+      "function": "init_command_shims",
+      "line": 6380,
+      "tokens": 46,
+      "oracle_file": "src/cmds/system/env_cmd.rs",
+      "oracle_function": "is_lang_var",
+      "oracle_line": 133
+    },
+    {
+      "file": "main.rs",
+      "function": "sanitize_provider_fixture",
+      "line": 4104,
+      "tokens": 44,
+      "oracle_file": "src/hooks/trust.rs",
+      "oracle_function": "write_store",
+      "oracle_line": 66
+    },
+    {
+      "file": "main.rs",
+      "function": "docker_build_line_is_failure",
+      "line": 4608,
+      "tokens": 44,
+      "oracle_file": "src/cmds/go/go_cmd.rs",
+      "oracle_function": "is_go_test_failure_line",
+      "oracle_line": 550
+    },
+    {
+      "file": "parity_filters.rs",
+      "function": "parse_trx",
+      "line": 617,
+      "tokens": 44,
+      "oracle_file": "src/cmds/system/log_cmd.rs",
+      "oracle_function": "analyze_logs",
+      "oracle_line": 74
+    },
+    {
+      "file": "main.rs",
+      "function": "init_filter_file",
+      "line": 3937,
+      "tokens": 43,
+      "oracle_file": "src/hooks/trust.rs",
+      "oracle_function": "write_store",
+      "oracle_line": 67
+    },
+    {
+      "file": "main.rs",
+      "function": "filter_listing",
+      "line": 4845,
+      "tokens": 42,
+      "oracle_file": "src/cmds/jvm/gradlew_cmd.rs",
+      "oracle_function": "filter_dependencies",
+      "oracle_line": 453
+    },
+    {
+      "file": "main.rs",
+      "function": "install_codex",
+      "line": 8102,
+      "tokens": 42,
+      "oracle_file": "src/core/config.rs",
+      "oracle_function": "set_recall_mode",
+      "oracle_line": 461
+    },
+    {
+      "file": "command_views.rs",
+      "function": "direct_args",
+      "line": 8,
+      "tokens": 41,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "shared_long_takes_value",
+      "oracle_line": 1886
+    },
+    {
+      "file": "file_views.rs",
+      "function": "listing",
+      "line": 123,
+      "tokens": 41,
+      "oracle_file": "src/cmds/rust/cargo_cmd.rs",
+      "oracle_function": "parse_line",
+      "oracle_line": 1059
+    },
+    {
+      "file": "main.rs",
+      "function": "filter_diagnostics",
+      "line": 4486,
+      "tokens": 41,
+      "oracle_file": "src/discover/registry.rs",
+      "oracle_function": "rewrite_single",
+      "oracle_line": 747
+    },
+    {
+      "file": "mcp_proxy.rs",
+      "function": "run_mock_mcp_server",
+      "line": 453,
+      "tokens": 41,
+      "oracle_file": "src/discover/provider.rs",
+      "oracle_function": "extract_commands",
+      "oracle_line": 196
+    },
+    {
+      "file": "parity_filters.rs",
+      "function": "unescape",
+      "line": 963,
+      "tokens": 41,
+      "oracle_file": "src/cmds/system/json_cmd.rs",
+      "oracle_function": "validate_json_extension",
+      "oracle_line": 19
+    },
+    {
+      "file": "parity_filters.rs",
+      "function": "push_playwright_error",
+      "line": 1335,
+      "tokens": 41,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "filter_status_with_args",
+      "oracle_line": 2343
+    },
+    {
+      "file": "container_views.rs",
+      "function": "logs",
+      "line": 43,
+      "tokens": 40,
+      "oracle_file": "src/hooks/init.rs",
+      "oracle_function": "clean_double_blanks",
+      "oracle_line": 1603
+    },
+    {
+      "file": "main.rs",
+      "function": "filter_vitest",
+      "line": 4794,
+      "tokens": 40,
+      "oracle_file": "src/cmds/js/bun_cmd.rs",
+      "oracle_function": "filter_bun_pm_ls_tree",
+      "oracle_line": 100
+    },
+    {
+      "file": "lossless_filters.rs",
+      "function": "test_view",
+      "line": 115,
+      "tokens": 39,
+      "oracle_file": "src/cmds/js/pnpm_cmd.rs",
+      "oracle_function": "extract_outdated_text",
+      "oracle_line": 247
+    },
+    {
+      "file": "main.rs",
+      "function": "load_trusted_filter_records",
+      "line": 3793,
+      "tokens": 39,
+      "oracle_file": "src/hooks/trust.rs",
+      "oracle_function": "read_store",
+      "oracle_line": 55
+    },
+    {
+      "file": "main.rs",
+      "function": "remove_toml_table",
+      "line": 8146,
+      "tokens": 39,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_release_view",
+      "oracle_line": 943
+    },
+    {
+      "file": "parity_filters.rs",
+      "function": "trx_paths",
+      "line": 451,
+      "tokens": 39,
+      "oracle_file": "src/cmds/js/tsc_cmd.rs",
+      "oracle_function": "filter_tsc_output",
+      "oracle_line": 255
+    },
+    {
+      "file": "test_views.rs",
+      "function": "cargo",
+      "line": 32,
+      "tokens": 39,
+      "oracle_file": "src/cmds/js/prisma_cmd.rs",
+      "oracle_function": "filter_migrate_dev",
+      "oracle_line": 243
+    },
+    {
+      "file": "main.rs",
+      "function": "filter_docker_build",
+      "line": 4710,
+      "tokens": 38,
+      "oracle_file": "src/cmds/git/gt_cmd.rs",
+      "oracle_function": "filter_gt_log_entries",
+      "oracle_line": 193
+    },
+    {
+      "file": "main.rs",
+      "function": "format_stats_markdown",
+      "line": 5521,
+      "tokens": 38,
+      "oracle_file": "src/cmds/scala/sbt_cmd.rs",
+      "oracle_function": "filter_sbt_test",
+      "oracle_line": 324
+    },
+    {
+      "file": "parity_filters.rs",
+      "function": "format_report_paths",
+      "line": 580,
+      "tokens": 38,
+      "oracle_file": "src/cmds/dotnet/binlog.rs",
+      "oracle_function": "parse_test_from_text",
+      "oracle_line": 921
+    },
+    {
+      "file": "parity_filters.rs",
+      "function": "parse_trx",
+      "line": 607,
+      "tokens": 38,
+      "oracle_file": "src/cmds/git/diff_cmd.rs",
+      "oracle_function": "condense_unified_diff_strict",
+      "oracle_line": 2089
+    },
+    {
+      "file": "test_views.rs",
+      "function": "javascript",
+      "line": 274,
+      "tokens": 38,
+      "oracle_file": "src/cmds/cloud/aws_cmd.rs",
+      "oracle_function": "extract_assume_principals",
+      "oracle_line": 923
+    },
+    {
+      "file": "main.rs",
+      "function": "run_command_streaming",
+      "line": 2913,
+      "tokens": 37,
+      "oracle_file": "src/main.rs",
+      "oracle_function": "run_cli",
+      "oracle_line": 3110
+    },
+    {
+      "file": "main.rs",
+      "function": "filter_diagnostics",
+      "line": 4480,
+      "tokens": 37,
+      "oracle_file": "src/cmds/cloud/psql_cmd.rs",
+      "oracle_function": "filter_table",
+      "oracle_line": 80
+    },
+    {
+      "file": "main.rs",
+      "function": "list_tee_files",
+      "line": 4979,
+      "tokens": 37,
+      "oracle_file": "src/discover/provider.rs",
+      "oracle_function": "discover_sessions_in_projects_dir",
+      "oracle_line": 108
+    },
+    {
+      "file": "inspection_views.rs",
+      "function": "json_schema",
+      "line": 79,
+      "tokens": 36,
+      "oracle_file": "src/core/stream.rs",
+      "oracle_function": "run_streaming",
+      "oracle_line": 612
+    },
+    {
+      "file": "inspection_views.rs",
+      "function": "schema",
+      "line": 79,
+      "tokens": 36,
+      "oracle_file": "src/core/stream.rs",
+      "oracle_function": "run_streaming",
+      "oracle_line": 612
+    },
+    {
+      "file": "main.rs",
+      "function": "trust_filter_file",
+      "line": 3585,
+      "tokens": 36,
+      "oracle_file": "src/discover/provider.rs",
+      "oracle_function": "extract_commands",
+      "oracle_line": 168
+    },
+    {
+      "file": "main.rs",
+      "function": "mcp_args",
+      "line": 8115,
+      "tokens": 36,
+      "oracle_file": "src/cmds/dotnet/dotnet_cmd.rs",
+      "oracle_function": "build_effective_dotnet_args",
+      "oracle_line": 557
+    },
+    {
+      "file": "command_filters.rs",
+      "function": "apply",
+      "line": 112,
+      "tokens": 35,
+      "oracle_file": "src/cmds/python/ruff_cmd.rs",
+      "oracle_function": "filter_ruff_format",
+      "oracle_line": 264
+    },
+    {
+      "file": "file_views.rs",
+      "function": "listing",
+      "line": 135,
+      "tokens": 35,
+      "oracle_file": "src/cmds/system/deps.rs",
+      "oracle_function": "summarize_pyproject_str",
+      "oracle_line": 213
+    },
+    {
+      "file": "inspection_views.rs",
+      "function": "dependencies",
+      "line": 132,
+      "tokens": 35,
+      "oracle_file": "src/cmds/rust/cargo_cmd.rs",
+      "oracle_function": "compute_test_summary",
+      "oracle_line": 151
+    },
+    {
+      "file": "main.rs",
+      "function": "provider_label",
+      "line": 1349,
+      "tokens": 35,
+      "oracle_file": "src/cmds/system/local_llm.rs",
+      "oracle_function": "lang_display_name",
+      "oracle_line": 115
+    },
+    {
+      "file": "main.rs",
+      "function": "open_store",
+      "line": 2357,
+      "tokens": 35,
+      "oracle_file": "src/core/config.rs",
+      "oracle_function": "save",
+      "oracle_line": 373
+    },
+    {
+      "file": "main.rs",
+      "function": "first_lost_failure_line",
+      "line": 4276,
+      "tokens": 35,
+      "oracle_file": "src/cmds/php/phpstan_cmd.rs",
+      "oracle_function": "filter_phpstan_text",
+      "oracle_line": 215
+    },
+    {
+      "file": "main.rs",
+      "function": "docker_build_line_is_mechanical",
+      "line": 4679,
+      "tokens": 35,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 809
+    },
+    {
+      "file": "package_views.rs",
+      "function": "filter",
+      "line": 15,
+      "tokens": 35,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 808
+    },
+    {
+      "file": "test_views.rs",
+      "function": "javascript",
+      "line": 265,
+      "tokens": 35,
+      "oracle_file": "src/cmds/cloud/aws_cmd.rs",
+      "oracle_function": "format_sg_rule",
+      "oracle_line": 1203
+    },
+    {
+      "file": "test_views.rs",
+      "function": "go",
+      "line": 290,
+      "tokens": 35,
+      "oracle_file": "src/cmds/cloud/container.rs",
+      "oracle_function": "docker_ps_all",
+      "oracle_line": 150
+    },
+    {
+      "file": "test_views.rs",
+      "function": "go",
+      "line": 303,
+      "tokens": 35,
+      "oracle_file": "src/cmds/system/search.rs",
+      "oracle_function": "run",
+      "oracle_line": 751
+    },
+    {
+      "file": "diagnostic_views.rs",
+      "function": "typescript",
+      "line": 18,
+      "tokens": 34,
+      "oracle_file": "src/cmds/system/local_llm.rs",
+      "oracle_function": "extract_imports",
+      "oracle_line": 144
+    },
+    {
+      "file": "file_views.rs",
+      "function": "search",
+      "line": 50,
+      "tokens": 34,
+      "oracle_file": "src/cmds/ruby/rake_cmd.rs",
+      "oracle_function": "is_failure_header",
+      "oracle_line": 167
+    },
+    {
+      "file": "file_views.rs",
+      "function": "tree",
+      "line": 103,
+      "tokens": 34,
+      "oracle_file": "src/cmds/ruby/rake_cmd.rs",
+      "oracle_function": "is_failure_header",
+      "oracle_line": 167
+    },
+    {
+      "file": "main.rs",
+      "function": "audit_filter_file",
+      "line": 3627,
+      "tokens": 34,
+      "oracle_file": "src/discover/provider.rs",
+      "oracle_function": "extract_commands",
+      "oracle_line": 168
+    },
+    {
+      "file": "main.rs",
+      "function": "audit_filter_file",
+      "line": 3629,
+      "tokens": 34,
+      "oracle_file": "src/hooks/init.rs",
+      "oracle_function": "remove_hook_from_settings",
+      "oracle_line": 1031
+    },
+    {
+      "file": "main.rs",
+      "function": "save_trusted_filter_records",
+      "line": 3802,
+      "tokens": 34,
+      "oracle_file": "src/core/config.rs",
+      "oracle_function": "save",
+      "oracle_line": 373
+    },
+    {
+      "file": "main.rs",
+      "function": "verify_filter_file",
+      "line": 3862,
+      "tokens": 34,
+      "oracle_file": "src/discover/provider.rs",
+      "oracle_function": "extract_commands",
+      "oracle_line": 168
+    },
+    {
+      "file": "main.rs",
+      "function": "filter_diagnostics",
+      "line": 4493,
+      "tokens": 34,
+      "oracle_file": "src/cmds/python/pytest_cmd.rs",
+      "oracle_function": "build_pytest_summary",
+      "oracle_line": 274
+    },
+    {
+      "file": "main.rs",
+      "function": "docker_build_line_is_failure",
+      "line": 4604,
+      "tokens": 34,
+      "oracle_file": "src/cmds/js/pnpm_cmd.rs",
+      "oracle_function": "extract_outdated_text",
+      "oracle_line": 248
+    },
+    {
+      "file": "main.rs",
+      "function": "discover_exec_savings",
+      "line": 5798,
+      "tokens": 34,
+      "oracle_file": "src/cmds/dotnet/dotnet_trx.rs",
+      "oracle_function": "parse_trx_files_in_dir_since",
+      "oracle_line": 140
+    },
+    {
+      "file": "main.rs",
+      "function": "discover_agent_sessions",
+      "line": 5863,
+      "tokens": 34,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "parse_stash_stat",
+      "oracle_line": 3540
+    },
+    {
+      "file": "patch_view.rs",
+      "function": "expand",
+      "line": 91,
+      "tokens": 34,
+      "oracle_file": "src/core/stream.rs",
+      "oracle_function": "run_streaming",
+      "oracle_line": 501
+    },
+    {
+      "file": "shared_context.rs",
+      "function": "open",
+      "line": 17,
+      "tokens": 34,
+      "oracle_file": "src/core/config.rs",
+      "oracle_function": "save",
+      "oracle_line": 375
+    },
+    {
+      "file": "test_views.rs",
+      "function": "pytest",
+      "line": 149,
+      "tokens": 34,
+      "oracle_file": "src/cmds/rust/cargo_cmd.rs",
+      "oracle_function": "filter_cargo_install",
+      "oracle_line": 449
+    },
+    {
+      "file": "test_views.rs",
+      "function": "pytest",
+      "line": 215,
+      "tokens": 34,
+      "oracle_file": "src/cmds/rust/cargo_cmd.rs",
+      "oracle_function": "filter_cargo_clippy",
+      "oracle_line": 1426
+    },
+    {
+      "file": "file_views.rs",
+      "function": "grouped_page",
+      "line": 41,
+      "tokens": 33,
+      "oracle_file": "src/cmds/system/log_cmd.rs",
+      "oracle_function": "analyze_logs",
+      "oracle_line": 166
+    },
+    {
+      "file": "main.rs",
+      "function": "rewrite_shell_report",
+      "line": 3061,
+      "tokens": 33,
+      "oracle_file": "src/cmds/js/prisma_cmd.rs",
+      "oracle_function": "filter_migrate_dev",
+      "oracle_line": 242
+    },
+    {
+      "file": "main.rs",
+      "function": "verify_filter_file",
+      "line": 3864,
+      "tokens": 33,
+      "oracle_file": "src/hooks/init.rs",
+      "oracle_function": "uninstall_with_patch_mode",
+      "oracle_line": 1227
+    },
+    {
+      "file": "main.rs",
+      "function": "verify_filter_file",
+      "line": 3880,
+      "tokens": 33,
+      "oracle_file": "src/cmds/system/local_llm.rs",
+      "oracle_function": "extract_imports",
+      "oracle_line": 143
+    },
+    {
+      "file": "main.rs",
+      "function": "sanitize_provider_fixture",
+      "line": 4099,
+      "tokens": 33,
+      "oracle_file": "src/discover/provider.rs",
+      "oracle_function": "extract_commands",
+      "oracle_line": 168
+    },
+    {
+      "file": "main.rs",
+      "function": "sanitize_provider_fixture",
+      "line": 4101,
+      "tokens": 33,
+      "oracle_file": "src/hooks/init.rs",
+      "oracle_function": "uninstall_with_patch_mode",
+      "oracle_line": 1227
+    },
+    {
+      "file": "main.rs",
+      "function": "filter_diff_summary",
+      "line": 4428,
+      "tokens": 33,
+      "oracle_file": "src/cmds/scala/sbt_cmd.rs",
+      "oracle_function": "filter_sbt_test",
+      "oracle_line": 310
+    },
+    {
+      "file": "main.rs",
+      "function": "summarize_retrieval_feedback",
+      "line": 5426,
+      "tokens": 33,
+      "oracle_file": "src/cmds/cloud/container.rs",
+      "oracle_function": "docker_ps_all",
+      "oracle_line": 150
+    },
+    {
+      "file": "main.rs",
+      "function": "inspect_image",
+      "line": 5541,
+      "tokens": 33,
+      "oracle_file": "src/discover/provider.rs",
+      "oracle_function": "extract_commands",
+      "oracle_line": 168
+    },
+    {
+      "file": "main.rs",
+      "function": "learn_agent_block",
+      "line": 6688,
+      "tokens": 33,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 821
+    },
+    {
+      "file": "parity_filters.rs",
+      "function": "read_trx_report",
+      "line": 373,
+      "tokens": 33,
+      "oracle_file": "src/cmds/dotnet/dotnet_cmd.rs",
+      "oracle_function": "scan_mtp_kind_in_file",
+      "oracle_line": 623
+    },
+    {
+      "file": "parity_filters.rs",
+      "function": "push_playwright_error",
+      "line": 1354,
+      "tokens": 33,
+      "oracle_file": "src/cmds/ruby/rubocop_cmd.rs",
+      "oracle_function": "filter_rubocop_text",
+      "oracle_line": 224
+    },
+    {
+      "file": "token_metrics.rs",
+      "function": "summarize_history",
+      "line": 180,
+      "tokens": 33,
+      "oracle_file": "src/cmds/cloud/container.rs",
+      "oracle_function": "docker_ps_all",
+      "oracle_line": 150
+    },
+    {
+      "file": "command_filters.rs",
+      "function": "apply",
+      "line": 161,
+      "tokens": 32,
+      "oracle_file": "src/core/tee_file.rs",
+      "oracle_function": "needs_shell_quoting",
+      "oracle_line": 185
+    },
+    {
+      "file": "diagnostic_views.rs",
+      "function": "python_lint",
+      "line": 127,
+      "tokens": 32,
+      "oracle_file": "src/cmds/js/playwright_cmd.rs",
+      "oracle_function": "extract_failures_regex",
+      "oracle_line": 219
+    },
+    {
+      "file": "main.rs",
+      "function": "run",
+      "line": 1497,
+      "tokens": 32,
+      "oracle_file": "src/cmds/system/read.rs",
+      "oracle_function": "read_head_lines",
+      "oracle_line": 254
+    },
+    {
+      "file": "main.rs",
+      "function": "is_sensitive_key",
+      "line": 4162,
+      "tokens": 32,
+      "oracle_file": "src/cmds/system/ctest_cmd.rs",
+      "oracle_function": "should_passthrough",
+      "oracle_line": 98
+    },
+    {
+      "file": "main.rs",
+      "function": "install_json_mcp",
+      "line": 8064,
+      "tokens": 32,
+      "oracle_file": "src/core/config.rs",
+      "oracle_function": "set_recall_mode",
+      "oracle_line": 466
+    },
+    {
+      "file": "parity_filters.rs",
+      "function": "summarize_binlog",
+      "line": 1001,
+      "tokens": 32,
+      "oracle_file": "src/cmds/cloud/container.rs",
+      "oracle_function": "docker_ps_all",
+      "oracle_line": 149
+    },
+    {
+      "file": "test_views.rs",
+      "function": "pytest",
+      "line": 177,
+      "tokens": 32,
+      "oracle_file": "src/cmds/go/golangci_cmd.rs",
+      "oracle_function": "filter_golangci_json",
+      "oracle_line": 395
+    },
+    {
+      "file": "test_views.rs",
+      "function": "pytest",
+      "line": 209,
+      "tokens": 32,
+      "oracle_file": "src/cmds/go/go_cmd.rs",
+      "oracle_function": "filter_go_test_json",
+      "oracle_line": 437
+    }
+  ],
+  "violations": []
+}

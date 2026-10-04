@@ -1,7 +1,7 @@
 & {
 $ErrorActionPreference = "Stop"
 
-$version = if ($env:LM_RESIZER_VERSION) { $env:LM_RESIZER_VERSION } else { "0.2.3" }
+$version = if ($env:LM_RESIZER_VERSION) { $env:LM_RESIZER_VERSION } else { "0.2.4" }
 if ($version -notmatch '^[0-9A-Za-z.+-]+$') { throw "Invalid version: $version" }
 if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.InteropServices.Architecture]::X64) {
   throw "Only Windows x86_64 is supported"
@@ -24,7 +24,36 @@ try {
     if (Test-Path -LiteralPath $base -PathType Container) {
       Copy-Item -LiteralPath (Join-Path $base $Name) -Destination $Destination
     } else {
-      Invoke-WebRequest -Uri "$base/$Name" -OutFile $Destination
+      try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -UseBasicParsing -Uri "$base/$Name" -OutFile $Destination
+      } catch {
+        $node = Get-Command node -ErrorAction SilentlyContinue
+        if (-not $node) { throw "HTTPS download failed. Use Node.js or download the archive and .sha256 on another machine, then set LM_RESIZER_RELEASE_BASE_URL to their local folder. $($_.Exception.Message)" }
+        Write-Warning "PowerShell HTTPS failed; retrying with Node.js certificate validation enabled."
+        $download = @'
+const https = require('https'), fs = require('fs');
+const [url, dest] = process.argv.slice(1);
+function get(url, remaining) {
+  if (!url.startsWith('https://')) throw new Error('Only HTTPS downloads are accepted');
+  https.get(url, {rejectUnauthorized: true}, res => {
+    if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+      res.resume();
+      if (!remaining) throw new Error('Too many redirects');
+      return get(new URL(res.headers.location, url).href, remaining - 1);
+    }
+    if (res.statusCode !== 200) throw new Error('HTTP ' + res.statusCode);
+    const file = fs.createWriteStream(dest);
+    res.on('error', err => { throw err; });
+    file.on('error', err => { throw err; });
+    res.pipe(file);
+  }).on('error', err => { throw err; });
+}
+get(url, 5);
+'@
+        & $node.Source -e $download "$base/$Name" $Destination
+        if ($LASTEXITCODE -ne 0) { throw "Node.js HTTPS download failed ($LASTEXITCODE)" }
+      }
     }
   }
   Get-ReleaseAsset $archive $zip
@@ -34,11 +63,22 @@ try {
     throw "Invalid checksum file for $archive"
   }
   $expected = $Matches[1]
-  $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash
+  # Pure .NET: independent of a PSModulePath inherited from PowerShell 7.
+  $sha = [Security.Cryptography.SHA256]::Create()
+  $inputFile = [IO.File]::OpenRead($zip)
+  try {
+    $actual = [BitConverter]::ToString($sha.ComputeHash($inputFile)).Replace('-', '')
+  } finally {
+    $inputFile.Dispose()
+    $sha.Dispose()
+  }
   if ($actual -ne $expected) { throw "SHA-256 mismatch for $archive" }
 
   $unpack = Join-Path $tmp "unpacked"
-  Expand-Archive -LiteralPath $zip -DestinationPath $unpack
+  # Windows PowerShell 5.1: Assembly.Load with a partial name cannot resolve
+  # this assembly; Add-Type -AssemblyName goes through the GAC and works.
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  [IO.Compression.ZipFile]::ExtractToDirectory($zip, $unpack)
   $source = Join-Path $unpack "lm-resizer.exe"
   if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Archive is missing lm-resizer.exe" }
   $reported = & $source --version

@@ -1,0 +1,155 @@
+{
+  "binary_sha256": "ad5972b05a1f8af621f7b39ced956ddcb96f99ef66d31d8f9413b22f7330ac38",
+  "headroom_version": "0.39.1",
+  "tokenizer": "o200k_base",
+  "source": "unchanged real captures, replayed by unregistered Python producer",
+  "cases": [
+    {
+      "id": "ripgrep-diff",
+      "mode": "diff",
+      "raw_tokens": 227,
+      "rtk_tokens": 227,
+      "lm_view_tokens": 206,
+      "lm_total_tokens": 206,
+      "headroom_specialized_tokens": 199,
+      "exact_inverse": false,
+      "tee_exact": true,
+      "filter": "native:summary:diff-metadata"
+    },
+    {
+      "id": "ripgrep-find",
+      "mode": "paths",
+      "raw_tokens": 3695,
+      "rtk_tokens": 3695,
+      "lm_view_tokens": 2486,
+      "lm_total_tokens": 2497,
+      "headroom_specialized_tokens": 2367,
+      "exact_inverse": true,
+      "tee_exact": true,
+      "filter": "lossless:path-fold"
+    },
+    {
+      "id": "fastapi-diff",
+      "mode": "diff",
+      "raw_tokens": 279,
+      "rtk_tokens": 279,
+      "lm_view_tokens": 273,
+      "lm_total_tokens": 273,
+      "headroom_specialized_tokens": 266,
+      "exact_inverse": false,
+      "tee_exact": true,
+      "filter": "native:summary:diff-metadata"
+    },
+    {
+      "id": "fastapi-find",
+      "mode": "paths",
+      "raw_tokens": 61723,
+      "rtk_tokens": 61723,
+      "lm_view_tokens": 40123,
+      "lm_total_tokens": 40132,
+      "headroom_specialized_tokens": 39208,
+      "exact_inverse": true,
+      "tee_exact": true,
+      "filter": "lossless:path-fold"
+    },
+    {
+      "id": "TypeScript-diff",
+      "mode": "diff",
+      "raw_tokens": 2144,
+      "rtk_tokens": 2144,
+      "lm_view_tokens": 2083,
+      "lm_total_tokens": 2083,
+      "headroom_specialized_tokens": 2076,
+      "exact_inverse": false,
+      "tee_exact": true,
+      "filter": "native:summary:diff-metadata"
+    },
+    {
+      "id": "TypeScript-find",
+      "mode": "paths",
+      "raw_tokens": 1361049,
+      "rtk_tokens": 1361049,
+      "lm_view_tokens": 618177,
+      "lm_total_tokens": 618190,
+      "headroom_specialized_tokens": 631002,
+      "exact_inverse": true,
+      "tee_exact": true,
+      "filter": "lossless:path-fold"
+    },
+    {
+      "id": "TypeScript-grep",
+      "mode": "search",
+      "raw_tokens": 25859,
+      "rtk_tokens": 25859,
+      "lm_view_tokens": 21017,
+      "lm_total_tokens": 21017,
+      "headroom_specialized_tokens": 20243,
+      "exact_inverse": true,
+      "tee_exact": true,
+      "filter": "lossless:match-fold"
+    },
+    {
+      "id": "compare-diff",
+      "mode": "diff",
+      "raw_tokens": 43402,
+      "rtk_tokens": 43402,
+      "lm_view_tokens": 42750,
+      "lm_total_tokens": 42750,
+      "headroom_specialized_tokens": 42743,
+      "exact_inverse": false,
+      "tee_exact": true,
+      "filter": "native:summary:diff-metadata"
+    },
+    {
+      "id": "compare-grep",
+      "mode": "search",
+      "raw_tokens": 2818,
+      "rtk_tokens": 2818,
+      "lm_view_tokens": 2119,
+      "lm_total_tokens": 2119,
+      "headroom_specialized_tokens": 1971,
+      "exact_inverse": true,
+      "tee_exact": true,
+      "filter": "lossless:match-fold"
+    },
+    {
+      "id": "compare-find",
+      "mode": "paths",
+      "raw_tokens": 14203,
+      "rtk_tokens": 14203,
+      "lm_view_tokens": 9019,
+      "lm_total_tokens": 9031,
+      "headroom_specialized_tokens": 8794,
+      "exact_inverse": true,
+      "tee_exact": true,
+      "filter": "lossless:path-fold"
+    },
+    {
+      "id": "fresh-git-diff",
+      "mode": "diff",
+      "raw_tokens": 98,
+      "rtk_tokens": 98,
+      "lm_view_tokens": 90,
+      "lm_total_tokens": 90,
+      "headroom_specialized_tokens": 83,
+      "exact_inverse": false,
+      "tee_exact": true,
+      "filter": "native:summary:diff-metadata"
+    }
+  ],
+  "conversation": {
+    "source": "controlled repeat of ripgrep-log, two tool messages",
+    "raw_tokens": 6207,
+    "rtk_tokens": 6207,
+    "lm_tokens": 3126,
+    "headroom_specialized_tokens": 3135,
+    "exact_message_inverse": true,
+    "tee_exact": true,
+    "headroom_stats": {
+      "spans_folded": 1,
+      "lines_removed": 254,
+      "chars_removed": 9522,
+      "blocks": 2
+    }
+  }
+}

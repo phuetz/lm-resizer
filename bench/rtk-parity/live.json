@@ -1,0 +1,166 @@
+[
+  {
+    "command": [
+      "git",
+      "log",
+      "-1"
+    ],
+    "parity": true,
+    "strict_byte_parity": true,
+    "recall_adapted": false,
+    "view_token_delta": 0,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "e45bf81 Initial fixture (6 hours ago) <Contributor>\n",
+    "view": "e45bf81 Initial fixture (6 hours ago) <Contributor>\n"
+  },
+  {
+    "command": [
+      "git",
+      "diff"
+    ],
+    "parity": true,
+    "strict_byte_parity": true,
+    "recall_adapted": false,
+    "view_token_delta": 0,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "src/lib.rs | 1 +\n 1 file changed, 1 insertion(+)\n\nChanges:\n\nsrc/lib.rs\n@@ -1,3 +1,4 @@\n pub fn total() -> i32 { 42 }\n #[test] fn succeeds() { assert_eq!(total(), 42); }\n #[test] fn invoice_total() { assert_eq!(total(), 43); }\n+// changed\n  +1 -0\n",
+    "view": "src/lib.rs | 1 +\n 1 file changed, 1 insertion(+)\n\nChanges:\n\nsrc/lib.rs\n@@ -1,3 +1,4 @@\n pub fn total() -> i32 { 42 }\n #[test] fn succeeds() { assert_eq!(total(), 42); }\n #[test] fn invoice_total() { assert_eq!(total(), 43); }\n+// changed\n  +1 -0\n"
+  },
+  {
+    "command": [
+      "git",
+      "status"
+    ],
+    "parity": true,
+    "strict_byte_parity": true,
+    "recall_adapted": false,
+    "view_token_delta": 0,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "* master\n M src/lib.rs\n?? .eslintrc.json\n?? Cargo.lock\n?? __pycache__/\n?? invoice.jest.test.js\n?? invoice.vitest.test.js\n?? lint.js\n?? node_modules\n?? numbers.ts\n?? package.json\n",
+    "view": "* master\n M src/lib.rs\n?? .eslintrc.json\n?? Cargo.lock\n?? __pycache__/\n?? invoice.jest.test.js\n?? invoice.vitest.test.js\n?? lint.js\n?? node_modules\n?? numbers.ts\n?? package.json\n"
+  },
+  {
+    "command": [
+      "git",
+      "show",
+      "--stat"
+    ],
+    "parity": true,
+    "strict_byte_parity": true,
+    "recall_adapted": false,
+    "view_token_delta": 0,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "commit e45bf81c6da1fc39ef4da1a3be47c26aa34abf6a\nAuthor: Contributor <contributor@example.test>\nDate:   Sat Oct 3 01:59:36 2026 +0200\n\n    Initial fixture\n\n Cargo.toml      | 5 +++++\n src/lib.rs      | 3 +++\n test_invoice.py | 4 ++++\n 3 files changed, 12 insertions(+)\n",
+    "view": "commit e45bf81c6da1fc39ef4da1a3be47c26aa34abf6a\nAuthor: Contributor <contributor@example.test>\nDate:   Sat Oct 3 01:59:36 2026 +0200\n\n    Initial fixture\n\n Cargo.toml      | 5 +++++\n src/lib.rs      | 3 +++\n test_invoice.py | 4 ++++\n 3 files changed, 12 insertions(+)\n"
+  },
+  {
+    "command": [
+      "rg",
+      "-n",
+      "assert",
+      "src"
+    ],
+    "parity": true,
+    "strict_byte_parity": true,
+    "recall_adapted": false,
+    "view_token_delta": 0,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "src/lib.rs:2:#[test] fn succeeds() { assert_eq!(total(), 42); }\nsrc/lib.rs:3:#[test] fn invoice_total() { assert_eq!(total(), 43); }\n",
+    "view": "src/lib.rs:2:#[test] fn succeeds() { assert_eq!(total(), 42); }\nsrc/lib.rs:3:#[test] fn invoice_total() { assert_eq!(total(), 43); }\n"
+  },
+  {
+    "command": [
+      "grep",
+      "-rn",
+      "assert",
+      "src"
+    ],
+    "parity": true,
+    "strict_byte_parity": true,
+    "recall_adapted": false,
+    "view_token_delta": 0,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "src/lib.rs:2:#[test] fn succeeds() { assert_eq!(total(), 42); }\nsrc/lib.rs:3:#[test] fn invoice_total() { assert_eq!(total(), 43); }\n",
+    "view": "src/lib.rs:2:#[test] fn succeeds() { assert_eq!(total(), 42); }\nsrc/lib.rs:3:#[test] fn invoice_total() { assert_eq!(total(), 43); }\n"
+  },
+  {
+    "command": [
+      "find",
+      "src",
+      "-type",
+      "f"
+    ],
+    "parity": true,
+    "strict_byte_parity": true,
+    "recall_adapted": false,
+    "view_token_delta": 0,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "lib.rs\n",
+    "view": "lib.rs\n"
+  },
+  {
+    "command": [
+      "ls",
+      "-la",
+      "src"
+    ],
+    "parity": true,
+    "strict_byte_parity": true,
+    "recall_adapted": false,
+    "view_token_delta": 0,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "664  lib.rs  147B\n",
+    "view": "664  lib.rs  147B\n"
+  },
+  {
+    "command": [
+      "ls",
+      "-R",
+      "src"
+    ],
+    "parity": true,
+    "strict_byte_parity": false,
+    "recall_adapted": true,
+    "view_token_delta": 3,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "lib.rs  147B\n... (1 filtered)\n[+1 hidden: rtk recall 80b58e081f60]\n",
+    "view": "lib.rs  147B\n... (1 filtered)\n[+1 hidden: lm-resizer tee read d7795b2a8a58]\n"
+  },
+  {
+    "command": [
+      "tree",
+      "src"
+    ],
+    "parity": true,
+    "strict_byte_parity": true,
+    "recall_adapted": false,
+    "view_token_delta": 0,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "src\n└── lib.rs\n",
+    "view": "src\n└── lib.rs\n"
+  },
+  {
+    "command": [
+      "cat",
+      "src/lib.rs"
+    ],
+    "parity": true,
+    "strict_byte_parity": true,
+    "recall_adapted": false,
+    "view_token_delta": 0,
+    "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+    "rtk_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+    "reference": "pub fn total() -> i32 { 42 }\n#[test] fn succeeds() { assert_eq!(total(), 42); }\n#[test] fn invoice_total() { assert_eq!(total(), 43); }\n// changed\n",
+    "view": "pub fn total() -> i32 { 42 }\n#[test] fn succeeds() { assert_eq!(total(), 42); }\n#[test] fn invoice_total() { assert_eq!(total(), 43); }\n// changed\n"
+  }
+]

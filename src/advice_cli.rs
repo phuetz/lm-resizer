@@ -56,13 +56,18 @@ impl AdviceReport {
 #[allow(clippy::result_large_err)] // Reports are returned rarely and serialized by callers.
 pub fn load_advice_file(path: &Path) -> Result<RetentionAdvice, AdviceReport> {
     let source = format!("file:{}", path.display());
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| AdviceReport::failure("advice-unreadable", &source, e.to_string()))?;
+    let raw = std::fs::read_to_string(path).map_err(|e| {
+        AdviceReport::failure(
+            "advice-unreadable",
+            &source,
+            format!("cannot read {}: {}", path.display(), e),
+        )
+    })?;
     RetentionAdvice::from_json(&raw).ok_or_else(|| {
         AdviceReport::failure(
             "advice-invalid",
             &source,
-            "not a RetentionAdvice JSON document",
+            format!("{}: not a RetentionAdvice JSON document", path.display()),
         )
     })
 }
@@ -212,8 +217,13 @@ pub fn advice_from_code_explorer(input: &Path) -> Result<(RetentionAdvice, u128)
     let symbols = lm_resizer_core::transforms::source_compressor::parse_cypher_symbols(&text);
     match symbols {
         Some(mut symbols) => {
-            let current = std::fs::read(&canonical)
-                .map_err(|e| AdviceReport::failure("advice-unreadable", &source, e.to_string()))?;
+            let current = std::fs::read(&canonical).map_err(|e| {
+                AdviceReport::failure(
+                    "advice-unreadable",
+                    &source,
+                    format!("cannot read {}: {}", canonical.display(), e),
+                )
+            })?;
             let current = String::from_utf8(current)
                 .map_err(|e| AdviceReport::failure("advice-invalid", &source, e.to_string()))?;
             if matches!(language_from_path(&relative), Some("c" | "cpp")) {
@@ -265,4 +275,37 @@ fn language_from_path(path: &str) -> Option<&'static str> {
 
 pub fn supports_structural_path(path: &Path) -> bool {
     language_from_path(&path.to_string_lossy()).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn unreadable_advice_detail_names_the_file() {
+        let p = Path::new("definitely/missing-advice.json");
+        let err = load_advice_file(p).unwrap_err();
+        assert_eq!(err.status, "advice-unreadable");
+        let detail = err.detail.expect("should have detail");
+        assert!(
+            detail.contains("missing-advice.json"),
+            "detail should contain filename: {}",
+            detail
+        );
+    }
+
+    #[test]
+    fn invalid_advice_detail_names_the_file() {
+        let mut temp = tempfile::NamedTempFile::new().unwrap();
+        write!(temp, "{{bad").unwrap();
+        let err = load_advice_file(temp.path()).unwrap_err();
+        assert_eq!(err.status, "advice-invalid");
+        let detail = err.detail.expect("should have detail");
+        assert!(
+            detail.contains(&temp.path().display().to_string()),
+            "detail should contain filename: {}",
+            detail
+        );
+    }
 }

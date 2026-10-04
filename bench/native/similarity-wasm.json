@@ -1,0 +1,9 @@
+{
+  "source_sha256": "de415245d0eac1a6ac50a62e70047ec7025dbf75d41d1377e04e2d1c3f711965",
+  "local_files": 1,
+  "oracle_files": 131,
+  "window": 32,
+  "rejection_threshold": 72,
+  "matches": [],
+  "violations": []
+}

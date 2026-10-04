@@ -1,0 +1,134 @@
+{
+  "cases": [
+    {
+      "case": "cargo_ok",
+      "raw_tokens": 837,
+      "tools": {
+        "before": {
+          "tokens": 28,
+          "missing": [
+            "0 failed"
+          ],
+          "exit": 0,
+          "tee_exact": true
+        },
+        "lm": {
+          "tokens": 24,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": true
+        },
+        "rtk": {
+          "tokens": 24,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": null
+        },
+        "headroom": {
+          "tokens": 837,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": null
+        }
+      }
+    },
+    {
+      "case": "dotnet_ok",
+      "raw_tokens": 111,
+      "tools": {
+        "before": {
+          "tokens": 54,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": true
+        },
+        "lm": {
+          "tokens": 17,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": true
+        },
+        "rtk": {
+          "tokens": 21,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": null
+        },
+        "headroom": {
+          "tokens": 111,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": null
+        }
+      }
+    },
+    {
+      "case": "git_diff",
+      "raw_tokens": 195,
+      "tools": {
+        "before": {
+          "tokens": 156,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": true
+        },
+        "lm": {
+          "tokens": 156,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": true
+        },
+        "rtk": {
+          "tokens": 125,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": null
+        },
+        "headroom": {
+          "tokens": 195,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": null
+        }
+      }
+    },
+    {
+      "case": "compile_error",
+      "raw_tokens": 106,
+      "tools": {
+        "before": {
+          "tokens": 106,
+          "missing": [],
+          "exit": 101,
+          "tee_exact": true
+        },
+        "lm": {
+          "tokens": 106,
+          "missing": [],
+          "exit": 101,
+          "tee_exact": true
+        },
+        "rtk": {
+          "tokens": 78,
+          "missing": [],
+          "exit": 101,
+          "tee_exact": null
+        },
+        "headroom": {
+          "tokens": 106,
+          "missing": [],
+          "exit": 0,
+          "tee_exact": null
+        }
+      }
+    }
+  ],
+  "oracle": {
+    "version": "rtk 0.50.0",
+    "binary_sha256": "ee22ea6f7dc70cc32e97027e63a00c06133b1eb173c38282563dfc4bbfcafad8",
+    "source_archive_sha256": "de415245d0eac1a6ac50a62e70047ec7025dbf75d41d1377e04e2d1c3f711965"
+  },
+  "binary_sha256": "a744938b38f7b451d1dbd2e8c8457003ff7920030c30314da8e857ff0fc1056e",
+  "before_sha256": "cc3b84d873f18bc57979385dc8c4cca754b8f4fc7b056e0a8259f112c4b38d63",
+  "tokenizer": "o200k_base"
+}

@@ -1,0 +1,677 @@
+{
+  "source_sha256": "de415245d0eac1a6ac50a62e70047ec7025dbf75d41d1377e04e2d1c3f711965",
+  "local_files": 85,
+  "oracle_files": 131,
+  "window": 32,
+  "rejection_threshold": 72,
+  "matches": [
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "detect_language",
+      "line": 1164,
+      "tokens": 92,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 810
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "is_full_line_comment",
+      "line": 1065,
+      "tokens": 78,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 810
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "is_ts_specific_line",
+      "line": 1253,
+      "tokens": 65,
+      "oracle_file": "src/cmds/go/go_cmd.rs",
+      "oracle_function": "is_go_test_failure_line",
+      "oracle_line": 548
+    },
+    {
+      "file": "transforms/smart_crusher/crushers.rs",
+      "function": "crush_number_array",
+      "line": 357,
+      "tokens": 61,
+      "oracle_file": "src/cmds/js/prisma_cmd.rs",
+      "oracle_function": "filter_migrate_dev",
+      "oracle_line": 295
+    },
+    {
+      "file": "transforms/magika_detector.rs",
+      "function": "map_magika_label",
+      "line": 117,
+      "tokens": 60,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "shared_long_takes_value",
+      "oracle_line": 1887
+    },
+    {
+      "file": "transforms/magika_detector.rs",
+      "function": "looks_like_source_code",
+      "line": 73,
+      "tokens": 56,
+      "oracle_file": "src/cmds/go/go_cmd.rs",
+      "oracle_function": "is_go_test_failure_line",
+      "oracle_line": 549
+    },
+    {
+      "file": "transforms/content_detector.rs",
+      "function": "as_str",
+      "line": 46,
+      "tokens": 55,
+      "oracle_file": "src/learn/detector.rs",
+      "oracle_function": "as_str",
+      "oracle_line": 20
+    },
+    {
+      "file": "transforms/log_compressor.rs",
+      "function": "as_str",
+      "line": 98,
+      "tokens": 55,
+      "oracle_file": "src/learn/detector.rs",
+      "oracle_function": "as_str",
+      "oracle_line": 20
+    },
+    {
+      "file": "transforms/smart_crusher/classifier.rs",
+      "function": "as_str",
+      "line": 50,
+      "tokens": 55,
+      "oracle_file": "src/learn/detector.rs",
+      "oracle_function": "as_str",
+      "oracle_line": 20
+    },
+    {
+      "file": "transforms/log_compressor.rs",
+      "function": "select_lines",
+      "line": 751,
+      "tokens": 53,
+      "oracle_file": "src/cmds/python/pytest_cmd.rs",
+      "oracle_function": "filter_pytest_output",
+      "oracle_line": 79
+    },
+    {
+      "file": "transforms/advice_structural.rs",
+      "function": "as_str",
+      "line": 60,
+      "tokens": 51,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "summary",
+      "oracle_line": 2255
+    },
+    {
+      "file": "transforms/log_compressor.rs",
+      "function": "as_str",
+      "line": 72,
+      "tokens": 51,
+      "oracle_file": "src/learn/detector.rs",
+      "oracle_function": "as_str",
+      "oracle_line": 20
+    },
+    {
+      "file": "tokenizer/registry.rs",
+      "function": "detect_backend",
+      "line": 41,
+      "tokens": 50,
+      "oracle_file": "src/cmds/rust/cargo_cmd.rs",
+      "oracle_function": "filter_cargo_nextest",
+      "oracle_line": 651
+    },
+    {
+      "file": "tokenizer/registry.rs",
+      "function": "detect_backend",
+      "line": 50,
+      "tokens": 49,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 816
+    },
+    {
+      "file": "transforms/adaptive_sizer.rs",
+      "function": "simhash",
+      "line": 212,
+      "tokens": 48,
+      "oracle_file": "src/cmds/dotnet/binlog.rs",
+      "oracle_function": "read_i64_le",
+      "oracle_line": 606
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_python",
+      "line": 1744,
+      "tokens": 48,
+      "oracle_file": "src/cmds/python/uv_cmd.rs",
+      "oracle_function": "extract_diagnostics",
+      "oracle_line": 121
+    },
+    {
+      "file": "transforms/diff_compressor.rs",
+      "function": "parse_diff",
+      "line": 681,
+      "tokens": 47,
+      "oracle_file": "src/cmds/git/diff_cmd.rs",
+      "oracle_function": "condense_unified_diff_strict",
+      "oracle_line": 2089
+    },
+    {
+      "file": "transforms/search_compressor.rs",
+      "function": "hash_u64",
+      "line": 674,
+      "tokens": 47,
+      "oracle_file": "src/core/tracking.rs",
+      "oracle_function": "should_sample_cleanup",
+      "oracle_line": 451
+    },
+    {
+      "file": "transforms/smart_crusher/crushers.rs",
+      "function": "crush_string_array",
+      "line": 204,
+      "tokens": 47,
+      "oracle_file": "src/cmds/js/prisma_cmd.rs",
+      "oracle_function": "filter_migrate_dev",
+      "oracle_line": 292
+    },
+    {
+      "file": "transforms/prose_compressor.rs",
+      "function": "apply",
+      "line": 45,
+      "tokens": 45,
+      "oracle_file": "src/cmds/system/ctest_cmd.rs",
+      "oracle_function": "build_logical_lines",
+      "oracle_line": 246
+    },
+    {
+      "file": "transforms/smart_crusher/types.rs",
+      "function": "as_str",
+      "line": 38,
+      "tokens": 45,
+      "oracle_file": "src/cmds/system/local_llm.rs",
+      "oracle_function": "lang_display_name",
+      "oracle_line": 122
+    },
+    {
+      "file": "transforms/tag_protector.rs",
+      "function": "identify_spans",
+      "line": 493,
+      "tokens": 45,
+      "oracle_file": "src/cmds/python/mypy_cmd.rs",
+      "oracle_function": "filter_mypy_output",
+      "oracle_line": 61
+    },
+    {
+      "file": "transforms/anchor_selector.rs",
+      "function": "default",
+      "line": 77,
+      "tokens": 44,
+      "oracle_file": "src/analytics/cc_economics.rs",
+      "oracle_function": "compute_totals",
+      "oracle_line": 313
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "detect_language",
+      "line": 1191,
+      "tokens": 44,
+      "oracle_file": "src/cmds/jvm/mvn_cmd.rs",
+      "oracle_function": "keep_outside_block",
+      "oracle_line": 505
+    },
+    {
+      "file": "output.rs",
+      "function": "is_routine_command_output",
+      "line": 192,
+      "tokens": 42,
+      "oracle_file": "src/cmds/rust/cargo_cmd.rs",
+      "oracle_function": "filter_cargo_nextest",
+      "oracle_line": 651
+    },
+    {
+      "file": "tokenizer/tiktoken_impl.rs",
+      "function": "encoding_for",
+      "line": 177,
+      "tokens": 42,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 823
+    },
+    {
+      "file": "transforms/smart_crusher/classifier.rs",
+      "function": "classify_array",
+      "line": 71,
+      "tokens": 42,
+      "oracle_file": "src/cmds/system/wc_cmd.rs",
+      "oracle_function": "detect_mode",
+      "oracle_line": 65
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_python",
+      "line": 1705,
+      "tokens": 42,
+      "oracle_file": "src/cmds/python/uv_cmd.rs",
+      "oracle_function": "extract_diagnostics",
+      "oracle_line": 122
+    },
+    {
+      "file": "transforms/pipeline/offloads/diff_noise.rs",
+      "function": "body_is_whitespace_only",
+      "line": 229,
+      "tokens": 41,
+      "oracle_file": "src/cmds/scala/sbt_cmd.rs",
+      "oracle_function": "filter_sbt_test",
+      "oracle_line": 200
+    },
+    {
+      "file": "transforms/smart_crusher/analyzer.rs",
+      "function": "analyze_field",
+      "line": 266,
+      "tokens": 40,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "format_mr_view",
+      "oracle_line": 381
+    },
+    {
+      "file": "transforms/smart_crusher/planning.rs",
+      "function": "plan_top_n",
+      "line": 282,
+      "tokens": 40,
+      "oracle_file": "src/core/tracking.rs",
+      "oracle_function": "ecosystem_mix",
+      "oracle_line": 1549
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "detect_language",
+      "line": 1156,
+      "tokens": 40,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "filter_status_with_args",
+      "oracle_line": 2345
+    },
+    {
+      "file": "transforms/log_compressor.rs",
+      "function": "select_lines",
+      "line": 757,
+      "tokens": 38,
+      "oracle_file": "src/cmds/php/phpunit_cmd.rs",
+      "oracle_function": "filter_phpunit_output",
+      "oracle_line": 46
+    },
+    {
+      "file": "relevance/bm25.rs",
+      "function": "score",
+      "line": 172,
+      "tokens": 37,
+      "oracle_file": "src/cmds/system/local_llm.rs",
+      "oracle_function": "analyze_code",
+      "oracle_line": 87
+    },
+    {
+      "file": "transforms/magika_detector.rs",
+      "function": "map_magika_label",
+      "line": 114,
+      "tokens": 37,
+      "oracle_file": "src/core/filter.rs",
+      "oracle_function": "from_extension",
+      "oracle_line": 64
+    },
+    {
+      "file": "transforms/anchor_selector.rs",
+      "function": "write_python_json_inner",
+      "line": 454,
+      "tokens": 36,
+      "oracle_file": "src/cmds/system/json_cmd.rs",
+      "oracle_function": "compact_json",
+      "oracle_line": 174
+    },
+    {
+      "file": "transforms/diff_compressor.rs",
+      "function": "compress_with_store",
+      "line": 391,
+      "tokens": 36,
+      "oracle_file": "src/core/tracking.rs",
+      "oracle_function": "get_summary_filtered",
+      "oracle_line": 920
+    },
+    {
+      "file": "transforms/live_zone.rs",
+      "function": "as_str",
+      "line": 220,
+      "tokens": 36,
+      "oracle_file": "src/core/tracking.rs",
+      "oracle_function": "as_str",
+      "oracle_line": 141
+    },
+    {
+      "file": "transforms/live_zone.rs",
+      "function": "summarize_openai_responses_no_change_reason",
+      "line": 441,
+      "tokens": 36,
+      "oracle_file": "src/cmds/git/diff_cmd.rs",
+      "oracle_function": "condense_unified_diff_strict",
+      "oracle_line": 2097
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_conservative",
+      "line": 414,
+      "tokens": 36,
+      "oracle_file": "src/cmds/system/summary.rs",
+      "oracle_function": "summarize_logs_quick",
+      "oracle_line": 211
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_python",
+      "line": 1596,
+      "tokens": 36,
+      "oracle_file": "src/cmds/python/uv_cmd.rs",
+      "oracle_function": "extract_diagnostics",
+      "oracle_line": 121
+    },
+    {
+      "file": "transforms/anchor_selector.rs",
+      "function": "calculate_information_score",
+      "line": 195,
+      "tokens": 35,
+      "oracle_file": "src/cmds/system/local_llm.rs",
+      "oracle_function": "analyze_code",
+      "oracle_line": 40
+    },
+    {
+      "file": "transforms/live_zone.rs",
+      "function": "plan_openai_user_message",
+      "line": 2197,
+      "tokens": 35,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "args_without_patch_shape",
+      "oracle_line": 231
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "as_str",
+      "line": 33,
+      "tokens": 35,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "summary",
+      "oracle_line": 2255
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "detect_language",
+      "line": 1176,
+      "tokens": 35,
+      "oracle_file": "src/cmds/ruby/rake_cmd.rs",
+      "oracle_function": "looks_like_test_path",
+      "oracle_line": 46
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_ts_js",
+      "line": 1973,
+      "tokens": 35,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 808
+    },
+    {
+      "file": "transforms/anchor_selector.rs",
+      "function": "select_by_density",
+      "line": 806,
+      "tokens": 34,
+      "oracle_file": "src/cmds/js/next_cmd.rs",
+      "oracle_function": "filter_next_build",
+      "oracle_line": 127
+    },
+    {
+      "file": "transforms/diagnostic_gate.rs",
+      "function": "lost_failure_lines",
+      "line": 61,
+      "tokens": 34,
+      "oracle_file": "src/cmds/git/gt_cmd.rs",
+      "oracle_function": "filter_gt_log_entries",
+      "oracle_line": 189
+    },
+    {
+      "file": "transforms/smart_crusher/analyzer.rs",
+      "function": "analyze_crushability",
+      "line": 426,
+      "tokens": 34,
+      "oracle_file": "src/cmds/cloud/container.rs",
+      "oracle_function": "docker_ps_all",
+      "oracle_line": 147
+    },
+    {
+      "file": "transforms/smart_crusher/compaction/formatter.rs",
+      "function": "format_ccr_marker",
+      "line": 312,
+      "tokens": 34,
+      "oracle_file": "src/cmds/system/local_llm.rs",
+      "oracle_function": "extract_structs",
+      "oracle_line": 201
+    },
+    {
+      "file": "transforms/smart_crusher/crusher.rs",
+      "function": "hash_canonical",
+      "line": 1040,
+      "tokens": 34,
+      "oracle_file": "src/core/retriever.rs",
+      "oracle_function": "content_hash",
+      "oracle_line": 86
+    },
+    {
+      "file": "transforms/smart_crusher/crusher.rs",
+      "function": "opaque_kind_label",
+      "line": 1070,
+      "tokens": 34,
+      "oracle_file": "src/learn/detector.rs",
+      "oracle_function": "as_str",
+      "oracle_line": 24
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_path_with_store",
+      "line": 215,
+      "tokens": 34,
+      "oracle_file": "src/cmds/cloud/container.rs",
+      "oracle_function": "run",
+      "oracle_line": 26
+    },
+    {
+      "file": "relevance/bm25.rs",
+      "function": "score",
+      "line": 158,
+      "tokens": 33,
+      "oracle_file": "src/cmds/go/golangci_cmd.rs",
+      "oracle_function": "filter_golangci_json",
+      "oracle_line": 367
+    },
+    {
+      "file": "transforms/adaptive_sizer.rs",
+      "function": "simhash",
+      "line": 193,
+      "tokens": 33,
+      "oracle_file": "src/cmds/system/search.rs",
+      "oracle_function": "clean_line",
+      "oracle_line": 1027
+    },
+    {
+      "file": "transforms/anchor_selector.rs",
+      "function": "from_string",
+      "line": 121,
+      "tokens": 33,
+      "oracle_file": "src/cmds/php/phpt_cmd.rs",
+      "oracle_function": "parse",
+      "oracle_line": 232
+    },
+    {
+      "file": "transforms/anchor_selector.rs",
+      "function": "select_anchors",
+      "line": 674,
+      "tokens": 33,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "filter_branch_output",
+      "oracle_line": 3187
+    },
+    {
+      "file": "transforms/diff_compressor.rs",
+      "function": "parse_diff",
+      "line": 739,
+      "tokens": 33,
+      "oracle_file": "src/cmds/dotnet/binlog.rs",
+      "oracle_function": "parse_test_from_text",
+      "oracle_line": 939
+    },
+    {
+      "file": "transforms/smart_crusher/compaction/walker.rs",
+      "function": "emit_opaque_ccr_marker",
+      "line": 185,
+      "tokens": 33,
+      "oracle_file": "src/core/config.rs",
+      "oracle_function": "apply_recall_mode",
+      "oracle_line": 402
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_with_ast_symbols",
+      "line": 710,
+      "tokens": 33,
+      "oracle_file": "src/cmds/python/mypy_cmd.rs",
+      "oracle_function": "filter_mypy_output",
+      "oracle_line": 61
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "detect_language",
+      "line": 1208,
+      "tokens": 33,
+      "oracle_file": "src/cmds/jvm/mvn_cmd.rs",
+      "oracle_function": "keep_outside_block",
+      "oracle_line": 503
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_rust",
+      "line": 1403,
+      "tokens": 33,
+      "oracle_file": "src/cmds/python/mypy_cmd.rs",
+      "oracle_function": "filter_mypy_output",
+      "oracle_line": 61
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_python",
+      "line": 1592,
+      "tokens": 33,
+      "oracle_file": "src/cmds/python/mypy_cmd.rs",
+      "oracle_function": "filter_mypy_output",
+      "oracle_line": 61
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_ts_js",
+      "line": 1893,
+      "tokens": 33,
+      "oracle_file": "src/cmds/python/mypy_cmd.rs",
+      "oracle_function": "filter_mypy_output",
+      "oracle_line": 61
+    },
+    {
+      "file": "relevance/bm25.rs",
+      "function": "score_batch",
+      "line": 198,
+      "tokens": 32,
+      "oracle_file": "src/cmds/js/tsc_cmd.rs",
+      "oracle_function": "filter_tsc_output",
+      "oracle_line": 305
+    },
+    {
+      "file": "transforms/adaptive_sizer.rs",
+      "function": "compute_unique_bigram_curve",
+      "line": 162,
+      "tokens": 32,
+      "oracle_file": "src/cmds/system/format_cmd.rs",
+      "oracle_function": "filter_black_output",
+      "oracle_line": 164
+    },
+    {
+      "file": "transforms/live_zone.rs",
+      "function": "plan_block_replacements",
+      "line": 1145,
+      "tokens": 32,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "args_without_patch_shape",
+      "oracle_line": 231
+    },
+    {
+      "file": "transforms/live_zone.rs",
+      "function": "inspect_latest_user_blocks_value",
+      "line": 1523,
+      "tokens": 32,
+      "oracle_file": "src/cmds/git/git_cmd.rs",
+      "oracle_function": "args_without_patch_shape",
+      "oracle_line": 231
+    },
+    {
+      "file": "transforms/smart_crusher/crusher.rs",
+      "function": "process_value",
+      "line": 487,
+      "tokens": 32,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "format_mr_view",
+      "oracle_line": 381
+    },
+    {
+      "file": "transforms/smart_crusher/crusher.rs",
+      "function": "crush_mixed_array",
+      "line": 850,
+      "tokens": 32,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "format_mr_view",
+      "oracle_line": 381
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "detect_language",
+      "line": 1188,
+      "tokens": 32,
+      "oracle_file": "src/cmds/cloud/curl_cmd.rs",
+      "oracle_function": "filter_curl_output",
+      "oracle_line": 115
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "compress_rust",
+      "line": 1456,
+      "tokens": 32,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 824
+    }
+  ],
+  "violations": [
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "detect_language",
+      "line": 1164,
+      "tokens": 92,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 810
+    },
+    {
+      "file": "transforms/source_compressor.rs",
+      "function": "is_full_line_comment",
+      "line": 1065,
+      "tokens": 78,
+      "oracle_file": "src/cmds/git/glab_cmd.rs",
+      "oracle_function": "filter_ci_trace",
+      "oracle_line": 810
+    }
+  ]
+}

@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use crate::{
     build_pipeline, compress_text_with_pipeline, open_store, record_exec_history,
-    resolve_command_path, ExecReport,
+    resolve_command_path, ExecReport, TokenCounts,
 };
 
 /// Tracks pending JSON-RPC requests issued by the client/agent.
@@ -224,10 +224,13 @@ pub fn compress_tool_call_result(
             let compressed_bytes = candidate.len();
             let bytes_saved = original_bytes.saturating_sub(compressed_bytes);
 
+            let tokens = TokenCounts::measure(text, &candidate);
             *text_val = Value::String(candidate);
             modified = true;
 
             let exec_report = ExecReport {
+                streams: None,
+                tokens,
                 command: format!("mcp:{tool_name}"),
                 exit_code: 0,
                 filter: "mcp_proxy".to_string(),

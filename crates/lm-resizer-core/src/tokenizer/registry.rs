@@ -190,7 +190,7 @@ mod tests {
     struct RegistryGuard<'a> {
         _g: std::sync::MutexGuard<'a, ()>,
     }
-    impl<'a> RegistryGuard<'a> {
+    impl RegistryGuard<'_> {
         fn acquire() -> Self {
             // Recover from a poisoned lock — a panic in one test should not
             // break every subsequent test in the file.
@@ -199,7 +199,7 @@ mod tests {
             Self { _g: g }
         }
     }
-    impl<'a> Drop for RegistryGuard<'a> {
+    impl Drop for RegistryGuard<'_> {
         fn drop(&mut self) {
             clear_hf_registrations();
         }

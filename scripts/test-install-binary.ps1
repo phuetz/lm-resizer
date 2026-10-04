@@ -40,6 +40,19 @@ try {
   if ($output -notmatch [regex]::Escape("lm-resizer $version")) { throw "Wrong installed version: $output" }
   $before = (Get-FileHash -Algorithm SHA256 -LiteralPath $binary).Hash
 
+  # Reproduce a PowerShell 5.1 child inheriting an unusable module search path.
+  & {
+    function Get-FileHash { throw "Get-FileHash must not be required by the installer" }
+    $savedModules = $env:PSModulePath
+    try {
+      $env:PSModulePath = Join-Path $tmp "no modules"
+      Get-Content -LiteralPath (Join-Path $root "install.ps1") -Raw | Invoke-Expression
+    } finally {
+      $env:PSModulePath = $savedModules
+    }
+  }
+
+
   # Exercise the normal one-command PATH update, then restore it in finally.
   $env:LM_RESIZER_SKIP_PATH_UPDATE = "0"
   Get-Content -LiteralPath (Join-Path $root "install.ps1") -Raw | Invoke-Expression
@@ -50,6 +63,9 @@ try {
 
   $repacked = Join-Path $tmp "repacked"
   Expand-Archive -LiteralPath (Join-Path $bad $archive) -DestinationPath $repacked
+  if (-not (Test-Path -LiteralPath (Join-Path $repacked "docs\TOKEN-STATISTICS.md"))) {
+    throw "release archive missing docs/TOKEN-STATISTICS.md"
+  }
   Set-Content -LiteralPath (Join-Path $repacked "TAMPERED") -Value "tampered"
   Remove-Item -LiteralPath (Join-Path $bad $archive) -Force
   Compress-Archive -Path (Join-Path $repacked "*") -DestinationPath (Join-Path $bad $archive)

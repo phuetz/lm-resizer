@@ -52,7 +52,7 @@ $evidence = [ordered]@{
   )
   release_checks = @(
     "cargo fmt --check",
-    "cargo test --release",
+    "cargo test --workspace --release",
     "cargo check --release",
     "cargo check --release --examples",
     "cargo build --release",

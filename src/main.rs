@@ -39,13 +39,104 @@ use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use walkdir::WalkDir;
 
 mod advice_cli;
+mod agent_hooks;
+mod command_capture;
+mod command_filters;
+mod command_views;
+mod container_views;
+mod conversation_views;
+mod diagnostic_views;
+mod file_views;
+mod inspection_views;
+mod lossless_filters;
 mod mcp_proxy;
+mod outline_view;
+mod package_views;
 mod parity_filters;
+mod patch_view;
 mod provider_usage;
-mod rtk_filters;
+mod reversible_views;
 mod shared_context;
+mod structured_views;
+mod test_views;
+mod token_metrics;
+
+use token_metrics::{TokenCounts, TOKENIZER};
 
 use lm_resizer_core::transforms::diagnostic_gate::FAILURE_SIGNAL;
+
+// Native flags remain owned by the native program, not reinterpreted by clap.
+const NATIVE_TOOLS: &[&str] = &[
+    "git",
+    "gh",
+    "glab",
+    "gt",
+    "grep",
+    "rg",
+    "ast-grep",
+    "sg",
+    "find",
+    "fd",
+    "ls",
+    "tree",
+    "cat",
+    "head",
+    "tail",
+    "nl",
+    "diff",
+    "wc",
+    "cargo",
+    "pytest",
+    "ruff",
+    "mypy",
+    "pip",
+    "uv",
+    "sqlfluff",
+    "npm",
+    "npx",
+    "pnpm",
+    "yarn",
+    "bun",
+    "bunx",
+    "deno",
+    "jest",
+    "vitest",
+    "tsc",
+    "eslint",
+    "prettier",
+    "playwright",
+    "next",
+    "prisma",
+    "black",
+    "go",
+    "golangci-lint",
+    "dotnet",
+    "mvn",
+    "gradle",
+    "gradlew",
+    "sbt",
+    "ctest",
+    "make",
+    "php",
+    "phpunit",
+    "phpstan",
+    "pest",
+    "paratest",
+    "ecs",
+    "pint",
+    "phpt",
+    "rake",
+    "rspec",
+    "rubocop",
+    "docker",
+    "podman",
+    "kubectl",
+    "oc",
+    "aws",
+    "psql",
+    "curl",
+    "wget",
+];
 
 #[derive(Parser)]
 #[command(name = "lm-resizer")]
@@ -58,6 +149,80 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Summarize an arbitrary command; the complete output stays recoverable.
+    Observe {
+        /// Output policy: errors, tests, or summary.
+        #[arg(long, value_enum, default_value = "summary")]
+        mode: inspection_views::Mode,
+        #[arg(long)]
+        json: bool,
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// Keep diagnostic paragraphs from any failed command.
+    Err(InspectionArgs),
+    /// Summarize test output from any command.
+    Test(InspectionArgs),
+    /// Summarize any command while retaining unknown diagnostics.
+    Summary(InspectionArgs),
+    /// Execute literally while retaining raw recovery and measured history.
+    Proxy(InspectionArgs),
+    /// Execute a literal shell command with recovery and measured history.
+    Run {
+        #[arg(short = 'c', long)]
+        command: String,
+    },
+    /// Show a compact JSON schema (all input bytes remain recoverable).
+    Json { input: Option<PathBuf> },
+    /// Show callable signatures using a fresh local syntax index; bodies stay in tee.
+    Outline { input: PathBuf },
+    /// Read a file literally, optionally showing only its first lines.
+    Read {
+        input: PathBuf,
+        #[arg(long)]
+        head_lines: Option<usize>,
+    },
+    /// List direct dependencies from local manifests.
+    Deps {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
+    /// Show sorted environment variables with secrets redacted.
+    Env { filter: Option<String> },
+    /// Run a formatter through the native capture and view engine.
+    Format {
+        #[arg(value_parser=["prettier", "ruff", "black", "biome"])]
+        tool: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Fold exact repeated tool blocks inside a supplied JSON message window.
+    Dedup { input: Option<PathBuf> },
+    /// Count locally recorded hook rewrites by client.
+    HookAudit {},
+    /// Show effective local storage and capture configuration.
+    Config {},
+    /// Filter stdin without executing any command; accepts native pipe filter names.
+    Pipe {
+        #[arg(short, long)]
+        filter: String,
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value_t = 0)]
+        exit_code: i32,
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
+    /// Expand a reversible view from stdin or a file, without accessing tee.
+    Expand {
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+    },
+    /// Execute a supported native tool directly, preserving every argument.
+    #[command(external_subcommand)]
+    Native(Vec<String>),
     /// Compress stdin or a file and persist originals for CCR retrieval.
     Compress {
         /// Input file. Reads stdin when omitted.
@@ -124,7 +289,7 @@ enum Commands {
         #[arg(long)]
         store: Option<PathBuf>,
     },
-    /// Execute a command, apply RTK-style output filtering, then run the compression pipeline.
+    /// Execute a command with the native command view and recoverable raw output.
     Exec {
         /// User query used by relevance-aware compressors.
         #[arg(short, long, default_value = "")]
@@ -187,8 +352,13 @@ enum Commands {
         command: String,
     },
     /// Retrieve an original payload by CCR hash.
+    #[command(visible_alias = "recall")]
     Retrieve {
-        hash: String,
+        #[arg(required_unless_present = "list")]
+        hash: Option<String>,
+        /// List recoverable command outputs.
+        #[arg(long, conflicts_with = "hash")]
+        list: bool,
         /// CCR SQLite database path.
         #[arg(long)]
         store: Option<PathBuf>,
@@ -219,7 +389,17 @@ enum Commands {
         store: Option<PathBuf>,
     },
     /// Show CCR store statistics.
+    #[command(visible_alias = "gain")]
     Stats {
+        /// Include recent executions with exact counts, duration and exit status.
+        #[arg(short = 'H', long)]
+        history: bool,
+        /// Restrict execution statistics to the current working directory.
+        #[arg(short, long)]
+        project: bool,
+        /// Number of recent executions shown by --history.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
         /// CCR SQLite database path.
         #[arg(long)]
         store: Option<PathBuf>,
@@ -231,7 +411,7 @@ enum Commands {
     Image {
         /// Image file to inspect.
         input: PathBuf,
-        /// Write a smaller PNG or JPEG if encoding saves bytes. Never overwrites.
+        /// Write a smaller image in the input format (PNG or JPEG). Never overwrites.
         #[arg(long)]
         output: Option<PathBuf>,
         /// Optional maximum width or height for explicit downscaling.
@@ -429,9 +609,10 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Install native Codex/Claude hook config that calls `lm-resizer hook`.
+    /// Install native agent hooks that call `lm-resizer hook`.
+    #[command(visible_alias = "init")]
     InitNativeHooks {
-        /// Agent to configure: codex, claude, or all.
+        /// Agent: codex, claude, gemini, copilot, cursor, or all (codex + claude).
         #[arg(long, default_value = "all")]
         client: String,
         /// Project directory where native hook config will be written.
@@ -470,7 +651,7 @@ enum Commands {
     },
     /// Install reversible project agent instructions for hook helpers.
     InstallHooks {
-        /// Agent to configure: codex, claude, or all.
+        /// Agent: codex, claude, gemini, copilot, cursor, or all (codex + claude).
         #[arg(long, default_value = "codex")]
         client: String,
         /// Project directory containing AGENTS.md / CLAUDE.md.
@@ -589,6 +770,14 @@ enum Commands {
     },
 }
 
+#[derive(clap::Args)]
+struct InspectionArgs {
+    #[arg(long)]
+    json: bool,
+    #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+    command: Vec<String>,
+}
+
 #[derive(Subcommand)]
 enum TeeCommand {
     /// List raw output recovery files.
@@ -644,6 +833,8 @@ enum FilterProfile {
 
 #[derive(Debug, Serialize)]
 struct CompressReport {
+    #[serde(flatten)]
+    tokens: TokenCounts,
     content_type: String,
     original_bytes: usize,
     compressed_bytes: usize,
@@ -679,7 +870,29 @@ struct BatchItemReport {
 }
 
 #[derive(Debug, Serialize)]
+struct CapturedStreams {
+    stdout_bytes: usize,
+    stderr_bytes: usize,
+    /// Streams are captured independently; cross-stream chronology is unknown.
+    layout: &'static str,
+}
+
+impl CapturedStreams {
+    fn new(stdout: &[u8], stderr: &[u8]) -> Self {
+        Self {
+            stdout_bytes: stdout.len(),
+            stderr_bytes: stderr.len(),
+            layout: "stdout_then_stderr; [stderr] boundary; no cross-stream chronology",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 struct ExecReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    streams: Option<CapturedStreams>,
+    #[serde(flatten)]
+    tokens: TokenCounts,
     command: String,
     exit_code: i32,
     filter: String,
@@ -719,6 +932,9 @@ struct RewriteShellSegment {
 
 #[derive(Debug, Serialize)]
 struct ExecHistoryRecord {
+    cwd: String,
+    #[serde(flatten)]
+    tokens: TokenCounts,
     timestamp_unix: u64,
     command: String,
     exit_code: i32,
@@ -822,18 +1038,23 @@ struct FilterTestOutcome {
 
 #[derive(Debug, Serialize, Default)]
 struct DiscoverReport {
+    #[serde(flatten)]
+    tokens: TokenCounts,
     files_scanned: usize,
     command_outputs: usize,
     rewritable_commands: usize,
     original_bytes: usize,
     filtered_bytes: usize,
     estimated_bytes_saved: usize,
-    estimated_tokens_saved: usize,
+    /// Legacy JSON alias for the exact prospective `tokens.tokens_saved`.
+    estimated_tokens_saved: i64,
     candidates: Vec<DiscoverCandidate>,
 }
 
 #[derive(Debug, Serialize)]
 struct DiscoverCandidate {
+    #[serde(flatten)]
+    tokens: TokenCounts,
     command: String,
     filter: String,
     original_bytes: usize,
@@ -884,11 +1105,14 @@ struct MlStatusReport {
 
 #[derive(Debug, Serialize)]
 struct EvalReport {
+    #[serde(flatten)]
+    tokens: TokenCounts,
     files_scanned: usize,
     command_outputs: usize,
     candidates: usize,
     estimated_bytes_saved: usize,
-    estimated_tokens_saved: usize,
+    /// Legacy JSON alias for the exact prospective `tokens.tokens_saved`.
+    estimated_tokens_saved: i64,
     pass: bool,
     notes: Vec<String>,
 }
@@ -1130,10 +1354,188 @@ fn provider_label(provider: ProviderKind) -> &'static str {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let cli = Cli::parse();
-    match cli.command {
+fn main() {
+    if let Err(error) = run_on_cli_thread() {
+        // Keep contextual errors readable even when RUST_BACKTRACE is enabled.
+        eprintln!("Error: {error:#}");
+        std::process::exit(1);
+    }
+}
+
+fn run_on_cli_thread() -> Result<()> {
+    // Clap's generated command builder has a large debug stack frame. Windows
+    // gives the main thread only 1 MiB, so dispatch on a thread with an explicit
+    // stack rather than depending on a platform-specific linker flag.
+    std::thread::Builder::new()
+        .name("lm-resizer-cli".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            let cli = Cli::parse();
+            // Short command adapters do synchronous capture/filtering. Creating
+            // a worker per CPU here costs more than the work itself. Services
+            // retain their multithread runtime and scheduling behaviour.
+            let mut runtime = if matches!(
+                &cli.command,
+                Commands::Exec { .. }
+                    | Commands::Pipe { .. }
+                    | Commands::Native(_)
+                    | Commands::Observe { .. }
+                    | Commands::Err(_)
+                    | Commands::Test(_)
+                    | Commands::Summary(_)
+                    | Commands::Format { .. }
+            ) {
+                tokio::runtime::Builder::new_current_thread()
+            } else {
+                tokio::runtime::Builder::new_multi_thread()
+            };
+            runtime.enable_all().build()?.block_on(run(cli))
+        })?
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+async fn run(cli: Cli) -> Result<()> {
+    let command = match cli.command {
+        Commands::Proxy(a) => Commands::Observe {
+            mode: inspection_views::Mode::Raw,
+            json: a.json,
+            command: a.command,
+        },
+        Commands::Run { command } => Commands::Observe {
+            mode: inspection_views::Mode::Raw,
+            json: false,
+            command: vec![
+                if cfg!(windows) { "cmd" } else { "sh" }.into(),
+                if cfg!(windows) { "/C" } else { "-c" }.into(),
+                command,
+            ],
+        },
+        Commands::Err(a) => Commands::Observe {
+            mode: inspection_views::Mode::Errors,
+            json: a.json,
+            command: a.command,
+        },
+        Commands::Test(a) => Commands::Observe {
+            mode: inspection_views::Mode::Tests,
+            json: a.json,
+            command: a.command,
+        },
+        Commands::Summary(a) => Commands::Observe {
+            mode: inspection_views::Mode::Summary,
+            json: a.json,
+            command: a.command,
+        },
+        other => other,
+    };
+    match command {
+        Commands::Err(_)
+        | Commands::Test(_)
+        | Commands::Summary(_)
+        | Commands::Proxy(_)
+        | Commands::Run { .. } => unreachable!(),
+        Commands::Observe {
+            mode,
+            json,
+            command,
+        } => {
+            let report = run_inspected_command(&command, Some(mode), None, "")?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.output);
+            }
+            if report.exit_code != 0 {
+                std::process::exit(report.exit_code);
+            }
+        }
+        Commands::Json { input } => {
+            let raw = read_input(input.as_deref()).await?;
+            let view = inspection_views::json_schema(&raw)?;
+            let hint = archive_raw_bytes(raw.as_bytes())?;
+            let mut view = view;
+            if let Some(hint) = hint {
+                append_recovery_instruction(&mut view, &hint, &raw);
+            }
+            print!("{view}");
+        }
+        Commands::Outline { input } => {
+            let raw = std::fs::read_to_string(&input)?;
+            let store = open_store(None)?;
+            let mut view = outline_view::outline(&input, &raw, store.as_ref());
+            if let Some(hint) = archive_raw_bytes(raw.as_bytes())? {
+                append_recovery_instruction(&mut view, &hint, &raw);
+            }
+            print!("{view}");
+        }
+        Commands::Read { input, head_lines } => {
+            let raw = std::fs::read(&input)?;
+            let text = display_captured_bytes(&raw);
+            let mut view = if let Some(n) = head_lines {
+                text.split_inclusive('\n').take(n).collect::<String>()
+            } else {
+                text.clone()
+            };
+            if let Some(hint) = archive_raw_bytes(&raw)? {
+                append_recovery_instruction(&mut view, &hint, &text);
+            }
+            print!("{view}");
+        }
+        Commands::Deps { path } => print!("{}", inspection_views::dependencies(&path)?),
+        Commands::Env { filter } => print!(
+            "{}",
+            inspection_views::environment(std::env::vars(), filter.as_deref())
+        ),
+        Commands::Dedup { input } => {
+            let raw = read_input(input.as_deref()).await?;
+            let output = conversation_views::fold(&raw)?;
+            archive_raw_bytes(raw.as_bytes())?;
+            println!("{output}");
+        }
+        Commands::HookAudit {} => {
+            let path = default_state_dir()?.join("hook-audit.jsonl");
+            let raw = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+                Err(e) => return Err(e.into()),
+            };
+            let mut clients = std::collections::BTreeMap::<String, usize>::new();
+            for line in raw.lines() {
+                if let Ok(value) = serde_json::from_str::<Value>(line) {
+                    if let Some(client) = value["client"].as_str() {
+                        *clients.entry(client.into()).or_default() += 1;
+                    }
+                }
+            }
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &json!({"rewrites":clients.values().sum::<usize>(),"clients":clients})
+                )?
+            );
+        }
+        Commands::Config {} => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "state_directory": default_state_dir()?, "tee": std::env::var("LM_RESIZER_TEE").unwrap_or_else(|_|"1".into()),
+                    "capture": "native ordered; separate for stream and raw-on-failure", "tokenizer": "o200k_base"
+                }))?
+            );
+        }
+        Commands::Format { tool, args } => {
+            let mut command = vec![tool.clone()];
+            if tool == "ruff" || tool == "biome" {
+                command.push("format".into());
+            }
+            command.extend(args);
+            let report = run_native_command(&command)?;
+            print!("{}", report.output);
+            if report.exit_code != 0 {
+                std::process::exit(report.exit_code);
+            }
+        }
+
         Commands::Compress {
             input,
             query,
@@ -1249,6 +1651,48 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        Commands::Pipe {
+            filter,
+            input,
+            json,
+            exit_code,
+            store,
+        } => {
+            let command = pipe_filter_command(&filter)
+                .context("unknown pipe filter; use a supported native pipe filter name")?;
+            let raw = read_input(input.as_deref()).await?;
+            let store = open_store(store)?;
+            let started = Instant::now();
+            let mut report =
+                process_captured_output(&command, &raw, exit_code, false, "", store.as_ref())?;
+            attach_report_recovery(&raw, &mut report)?;
+            report.command = format!("pipe --filter {filter}");
+            record_exec_history(&report, started.elapsed())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.output);
+            }
+            if exit_code != 0 {
+                std::process::exit(exit_code);
+            }
+        }
+        Commands::Expand { input } => {
+            let view = read_input(input.as_deref()).await?;
+            print!("{}", lossless_filters::expand(&view)?);
+        }
+        Commands::Native(command) => {
+            let program = command.first().context("missing native command")?;
+            if !NATIVE_TOOLS.contains(&program.as_str()) {
+                anyhow::bail!("unknown command '{program}'; use --help or exec -- <program>");
+            }
+            let store = open_store(None)?;
+            let report = run_exec_command(&command, "", false, false, store.as_ref())?;
+            print!("{}", report.output);
+            if report.exit_code != 0 {
+                std::process::exit(report.exit_code);
+            }
+        }
         Commands::Exec {
             query,
             json,
@@ -1284,7 +1728,7 @@ async fn main() -> Result<()> {
             let raw = read_input(input.as_deref()).await?;
             let parts = split_shell_words(&command).context("invalid --command quoting")?;
             let store = open_store(store)?;
-            let report = process_captured_output(
+            let mut report = process_captured_output(
                 &parts,
                 &raw,
                 exit_code,
@@ -1292,6 +1736,7 @@ async fn main() -> Result<()> {
                 &query,
                 store.as_ref(),
             )?;
+            attach_report_recovery(&raw, &mut report)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -1316,7 +1761,12 @@ async fn main() -> Result<()> {
                 println!("{}", report.rewritten);
             }
         }
-        Commands::Retrieve { hash, store } => {
+        Commands::Retrieve { hash, store, list } => {
+            if list {
+                run_tee_command(TeeCommand::List { json: false })?;
+                return Ok(());
+            }
+            let hash = hash.context("missing recall key")?;
             let store = open_store(store)?;
             let payload = store
                 .get(&hash)
@@ -1361,20 +1811,61 @@ async fn main() -> Result<()> {
                 println!("{key}");
             }
         }
-        Commands::Stats { store, markdown } => {
+        Commands::Stats {
+            store,
+            markdown,
+            history,
+            project,
+            limit,
+        } => {
             let store = open_store(store)?;
-            let exec_history = summarize_exec_history().unwrap_or_default();
+            let mut exec_history = summarize_exec_history().unwrap_or_default();
+            let mut recent = None;
+            if history || project {
+                let path = default_state_dir()?.join("exec-history.jsonl");
+                let content = if path.exists() {
+                    std::fs::read_to_string(path)?
+                } else {
+                    String::new()
+                };
+                let cwd = std::env::current_dir()?.to_string_lossy().into_owned();
+                let (summary, rows, unscoped) =
+                    token_metrics::select_history(&content, project.then_some(cwd.as_str()), limit);
+                exec_history = summary;
+                exec_history["unscoped_records"] = json!(unscoped);
+                if project {
+                    exec_history["project"] = json!(cwd);
+                }
+                if history {
+                    recent = Some(rows);
+                }
+            }
             let retrieval_feedback = summarize_retrieval_feedback().unwrap_or_default();
             let proxy_history = summarize_proxy_history().unwrap_or_default();
-            let report = json!({
+            let mut report = json!({
                 "entries": store.len(),
                 "empty": store.is_empty(),
                 "exec_history": exec_history,
                 "retrieval_feedback": retrieval_feedback,
                 "proxy_history": proxy_history,
             });
+            if let Some(rows) = recent {
+                report["history"] = json!(rows);
+            }
             if markdown {
                 print!("{}", format_stats_markdown(&report));
+                if let Some(rows) = report["history"].as_array() {
+                    println!("\n## Recent executions\n\n| Command | Exit | Tokens saved | Duration ms |\n|---|---:|---:|---:|");
+                    for row in rows {
+                        println!(
+                            "| {} | {} | {} | {} |",
+                            markdown_escape(row["command"].as_str().unwrap_or("")),
+                            row["exit_code"],
+                            row["tokens_saved"],
+                            row["duration_ms"]
+                        );
+                    }
+                }
             } else {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
@@ -1581,7 +2072,7 @@ async fn main() -> Result<()> {
                 print!("{}", format_discover_markdown(&report));
             } else {
                 println!(
-                    "Scanned {} files, found {} command outputs, estimated {} bytes / {} tokens saved",
+                    "Scanned {} files, found {} command outputs, prospective {} bytes / {} tokens saved (tiktoken-rs/o200k_base; exact text count)",
                     report.files_scanned,
                     report.command_outputs,
                     report.estimated_bytes_saved,
@@ -1619,7 +2110,7 @@ async fn main() -> Result<()> {
                     println!("Missing known paths: {}", report.missing.len());
                 }
                 println!(
-                    "Found {} command outputs, estimated {} bytes / {} tokens saved",
+                    "Found {} command outputs, prospective {} bytes / {} tokens saved (tiktoken-rs/o200k_base; exact text count)",
                     report.discover.command_outputs,
                     report.discover.estimated_bytes_saved,
                     report.discover.estimated_tokens_saved
@@ -1639,7 +2130,7 @@ async fn main() -> Result<()> {
                 print!("{}", format_eval_markdown(&report));
             } else {
                 println!(
-                    "Eval {}: {} files, {} command outputs, {} candidates, {} est. tokens saved",
+                    "Eval {}: {} files, {} command outputs, {} candidates, {} prospective tokens saved (tiktoken-rs/o200k_base; exact text count)",
                     if report.pass { "pass" } else { "warn" },
                     report.files_scanned,
                     report.command_outputs,
@@ -1720,9 +2211,9 @@ async fn main() -> Result<()> {
             json,
         } => {
             // PreToolUse: rewrite a supported Bash command to run through `lm-resizer exec --`
-            // (in-place output substitution, the rtk role). PostToolUse: measure-only telemetry.
-            if event.eq_ignore_ascii_case("PreToolUse") {
-                emit_pretooluse_rewrite(&event);
+            // (in-place output substitution, the native role). PostToolUse: measure-only telemetry.
+            if event.eq_ignore_ascii_case("PreToolUse") || event == "BeforeTool" {
+                emit_pretooluse_rewrite(&event, &client);
             } else {
                 let report = run_native_hook(&client, &event);
                 if json {
@@ -1904,10 +2395,39 @@ fn compress_text_with_pipeline_gate(
     token_budget: Option<usize>,
     reinject: bool,
 ) -> Result<CompressReport> {
+    compress_text_with_metrics(
+        content,
+        query,
+        store,
+        pipeline,
+        token_budget,
+        reinject,
+        true,
+    )
+}
+
+// `exec` only needs the final raw/output count; intermediate counts are unused.
+fn compress_text_with_metrics(
+    content: &str,
+    query: &str,
+    store: &dyn CcrStore,
+    pipeline: &CompressionPipeline,
+    token_budget: Option<usize>,
+    reinject: bool,
+    measure_tokens: bool,
+) -> Result<CompressReport> {
+    let tokens = |output: &str| {
+        if measure_tokens {
+            TokenCounts::measure(content, output)
+        } else {
+            TokenCounts::default()
+        }
+    };
     if let Some(output) = compact_json_rows(content) {
         let key = lm_resizer_core::ccr::compute_key(content.as_bytes());
         store.put(&key, content);
         return Ok(CompressReport {
+            tokens: tokens(&output),
             content_type: "json".to_string(),
             original_bytes: content.len(),
             compressed_bytes: output.len(),
@@ -1931,7 +2451,7 @@ fn compress_text_with_pipeline_gate(
     // d'échec omises sont réinjectées, courtes et dans l'ordre, sous un
     // marqueur ; l'original reste dans le CCR.
     let mut steps_applied = result.steps_applied;
-    let (output, reinjected) = if reinject {
+    let (mut output, reinjected) = if reinject {
         lm_resizer_core::transforms::diagnostic_gate::reinject_lost_failure_lines(
             content,
             &result.output,
@@ -1943,6 +2463,7 @@ fn compress_text_with_pipeline_gate(
         steps_applied.push(format!("diagnostic_reinjection:{reinjected}"));
         if output.len() >= content.len() {
             return Ok(CompressReport {
+                tokens: tokens(content),
                 content_type: detection.content_type.as_str().to_string(),
                 original_bytes: content.len(),
                 compressed_bytes: content.len(),
@@ -1959,13 +2480,26 @@ fn compress_text_with_pipeline_gate(
     } else {
         result.bytes_saved
     };
+    // Les clés des offloads désignent parfois une étape déjà minifiée.
+    // La première clé du CLI doit toujours retrouver l'entrée exacte, même
+    // quand seul un reformat (notamment source_compressor) a été appliqué.
+    let mut cache_keys = result.cache_keys;
+    if output != content {
+        let original_key = lm_resizer_core::ccr::compute_key(content.as_bytes());
+        store.put(&original_key, content);
+        for key in &cache_keys {
+            output = output.replace(&format!("hash={key}]"), &format!("hash={original_key}]"));
+        }
+        cache_keys = vec![original_key];
+    }
     Ok(CompressReport {
+        tokens: tokens(&output),
         content_type: detection.content_type.as_str().to_string(),
         original_bytes: content.len(),
         compressed_bytes: output.len(),
         bytes_saved,
         steps_applied,
-        cache_keys: result.cache_keys,
+        cache_keys,
         output,
     })
 }
@@ -2064,6 +2598,7 @@ fn compress_with_optional_advice(
         return pipeline_report(Some(advice_report));
     }
     let report = CompressReport {
+        tokens: TokenCounts::measure(input_text, &elision.output),
         content_type: "source_code".to_string(),
         original_bytes: input_text.len(),
         compressed_bytes: elision.output.len(),
@@ -2075,6 +2610,81 @@ fn compress_with_optional_advice(
     Ok((report, Some(advice_report)))
 }
 
+fn perf_stage(stage: &str, elapsed: std::time::Duration) {
+    if std::env::var_os("LM_RESIZER_PROFILE").is_some() {
+        eprintln!("profile {stage}: {:.6}s", elapsed.as_secs_f64());
+    }
+}
+
+/// Native capture and native view selection share the existing tee and metrics.
+fn run_native_command(command: &[String]) -> Result<ExecReport> {
+    run_inspected_command(command, None, None, "")
+}
+fn run_inspected_command(
+    command: &[String],
+    mode: Option<inspection_views::Mode>,
+    store: Option<&dyn CcrStore>,
+    query: &str,
+) -> Result<ExecReport> {
+    let started = Instant::now();
+    let captured = command_capture::run(command)?;
+    let raw = display_captured_bytes(&captured.raw);
+    let (filter, mut output) = if let Some(error) = captured.launch_error {
+        ("native:launch-error".to_string(), error)
+    } else {
+        if let Some(mode) = mode {
+            (
+                "native:observe".into(),
+                inspection_views::summarize(mode, &raw, captured.code),
+            )
+        } else {
+            filter_command_output(command, &raw)
+        }
+    };
+    let filter = if filter.starts_with("native:")
+        || filter.starts_with("lossless:")
+        || filter.starts_with("code-outline:")
+    {
+        filter
+    } else {
+        format!("native:{filter}")
+    };
+    let filtered_bytes = output.len();
+    let mut compression_steps = Vec::new();
+    let mut cache_keys = Vec::new();
+    if mode.is_none() && filter == "native:native_owned" {
+        if let Some(store) = store {
+            let compressed = compress_text(&output, query, store)?;
+            if first_lost_failure_line(&output, &compressed.output).is_none() {
+                output = compressed.output;
+                compression_steps = compressed.steps_applied;
+                cache_keys = compressed.cache_keys;
+            }
+        }
+    }
+    let tee_hint = archive_raw_bytes(&captured.raw)?;
+    if let Some(hint) = &tee_hint {
+        append_recovery_instruction(&mut output, hint, &raw);
+    }
+    let report = ExecReport {
+        streams: None,
+        tokens: TokenCounts::measure(&raw, &output),
+        command: command.join(" "),
+        exit_code: captured.code,
+        filter,
+        original_bytes: captured.raw.len(),
+        filtered_bytes,
+        compressed_bytes: output.len(),
+        bytes_saved: captured.raw.len().saturating_sub(output.len()),
+        compression_steps,
+        cache_keys,
+        tee_hint,
+        output,
+    };
+    record_exec_history(&report, started.elapsed())?;
+    Ok(report)
+}
+
 fn run_exec_command(
     command: &[String],
     query: &str,
@@ -2082,33 +2692,47 @@ fn run_exec_command(
     stream: bool,
     store: &dyn CcrStore,
 ) -> Result<ExecReport> {
+    if !raw_on_failure && !stream {
+        return run_inspected_command(command, None, Some(store), query);
+    }
     let started = Instant::now();
     let (program, args) = command.split_first().context("missing command for exec")?;
     let resolved_program = resolve_command_path(program).unwrap_or_else(|| PathBuf::from(program));
-    let (exit_code, raw) = if stream {
+    let (exit_code, raw_bytes, streams) = if stream {
         run_command_streaming(&resolved_program, args, &command.join(" "))?
     } else {
-        let output = Command::new(&resolved_program)
-            .args(args)
+        let output = command_capture::build_command(&resolved_program, args)
+            .stdin(Stdio::inherit())
             .output()
             .with_context(|| format!("failed to execute '{}'", command.join(" ")))?;
         (
-            output.status.code().unwrap_or(1),
-            combine_command_output(&output.stdout, &output.stderr),
+            child_exit_code(output.status),
+            combine_command_bytes(&output.stdout, &output.stderr),
+            CapturedStreams::new(&output.stdout, &output.stderr),
         )
     };
 
+    let raw = display_captured_bytes(&raw_bytes);
+    perf_stage("capture", started.elapsed());
+    let phase = Instant::now();
     let (filter, filtered) = if raw_on_failure && exit_code != 0 {
         ("raw_on_failure".to_string(), raw.clone())
     } else {
         filter_command_output(command, &raw)
     };
 
-    let mut compressed = if matches!(
-        filter.as_str(),
-        "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
-    ) {
+    perf_stage("filter", phase.elapsed());
+    let phase = Instant::now();
+    let mut compressed = if filter == "raw_on_failure"
+        || filter.starts_with("native:")
+        || filter.starts_with("code-outline:")
+        || filter.starts_with("lossless:")
+        || matches!(
+            filter.as_str(),
+            "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
+        ) {
         CompressReport {
+            tokens: TokenCounts::default(),
             content_type: if matches!(filter.as_str(), "json-passthrough" | "aws-json") {
                 "json"
             } else {
@@ -2123,7 +2747,15 @@ fn run_exec_command(
             output: filtered.clone(),
         }
     } else {
-        compress_text_with_pipeline_gate(&filtered, query, store, &build_pipeline(), None, false)?
+        compress_text_with_metrics(
+            &filtered,
+            query,
+            store,
+            &build_pipeline(),
+            None,
+            false,
+            false,
+        )?
     };
     // Porte de conservation des diagnostics. Le filtre de commande a choisi
     // les lignes qui comptent ; l'étape générique qui suit ne connaît pas la
@@ -2133,6 +2765,8 @@ fn run_exec_command(
     // annoncée et récupérable, mais le diagnostic n'était plus sous les yeux.
     // Une ligne d'échec que le filtre gardait et que la compression perd :
     // on rend la sortie filtrée, qui est déjà réduite.
+    perf_stage("pipeline_and_intermediate_tokens", phase.elapsed());
+    let phase = Instant::now();
     if let Some(lost) = first_lost_indispensable_line(&filtered, &compressed.output, &filter) {
         eprintln!(
             "lm-resizer: compression générique annulée, elle omettait « {} »",
@@ -2144,29 +2778,50 @@ fn run_exec_command(
             .push("diagnostic_gate:kept_filtered".to_string());
         compressed.cache_keys.clear();
     }
-    let tee_hint = tee_raw_output_if_useful(&raw, &filtered)?;
+    perf_stage("diagnostic_gate", phase.elapsed());
+    let phase = Instant::now();
+    if !compressed.cache_keys.is_empty() {
+        let key = lm_resizer_core::ccr::compute_key(raw.as_bytes());
+        store.put(&key, &raw);
+        for intermediate in &compressed.cache_keys {
+            compressed.output = compressed
+                .output
+                .replace(&format!("hash={intermediate}]"), &format!("hash={key}]"));
+        }
+        compressed.cache_keys = vec![key];
+    }
+    // La pipeline peut réduire une sortie que le filtre n'a pas modifiée.
+    // Le tee doit couvrir les omissions de toutes les étapes d'exec.
+    let tee_hint = tee_raw_bytes_if_useful(&raw_bytes, &compressed.output)?;
     let mut final_output = compressed.output;
-    if let Some(hint) = &tee_hint {
-        if !final_output.ends_with('\n') && !final_output.is_empty() {
+    if streams.stdout_bytes > 0 && streams.stderr_bytes > 0 {
+        if !final_output.ends_with('\n') {
             final_output.push('\n');
         }
-        final_output.push_str(hint);
-        final_output.push('\n');
+        final_output.push_str("[capture: stdout and stderr captured separately; displayed order is not chronological]\n");
+    }
+    if let Some(hint) = &tee_hint {
+        append_recovery_instruction(&mut final_output, hint, &raw);
     }
 
+    perf_stage("tee", phase.elapsed());
+    let phase = Instant::now();
     let report = ExecReport {
+        streams: Some(streams),
+        tokens: TokenCounts::measure(&raw, &final_output),
         command: command.join(" "),
         exit_code,
         filter,
-        original_bytes: raw.len(),
+        original_bytes: raw_bytes.len(),
         filtered_bytes: filtered.len(),
         compressed_bytes: final_output.len(),
-        bytes_saved: raw.len().saturating_sub(final_output.len()),
+        bytes_saved: raw_bytes.len().saturating_sub(final_output.len()),
         compression_steps: compressed.steps_applied,
         cache_keys: compressed.cache_keys,
         tee_hint,
         output: final_output,
     };
+    perf_stage("final_tokens", phase.elapsed());
     record_exec_history(&report, started.elapsed())?;
     Ok(report)
 }
@@ -2187,18 +2842,23 @@ fn process_captured_output(
     };
     let (mut output, mut steps, mut keys) = if keep_raw {
         (raw.to_string(), Vec::new(), Vec::new())
-    } else if matches!(
-        filter.as_str(),
-        "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
-    ) {
+    } else if filter.starts_with("native:")
+        || filter.starts_with("code-outline:")
+        || filter.starts_with("lossless:")
+        || matches!(
+            filter.as_str(),
+            "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
+        )
+    {
         (filtered.clone(), Vec::new(), Vec::new())
     } else {
-        let result = compress_text_with_pipeline_gate(
+        let result = compress_text_with_metrics(
             &filtered,
             query,
             store,
             &build_pipeline(),
             None,
+            false,
             false,
         )?;
         (result.output, result.steps_applied, result.cache_keys)
@@ -2208,7 +2868,7 @@ fn process_captured_output(
         steps.push("diagnostic_gate:kept_filtered".to_string());
         keys.clear();
     }
-    if output.len() >= raw.len() && output != raw {
+    if !filter.starts_with("native:") && output.len() >= raw.len() && output != raw {
         output = raw.to_string();
         steps.clear();
         keys.clear();
@@ -2216,9 +2876,14 @@ fn process_captured_output(
     if output != raw {
         let key = lm_resizer_core::ccr::compute_key(raw.as_bytes());
         store.put(&key, raw);
-        keys.push(key);
+        for intermediate in &keys {
+            output = output.replace(&format!("hash={intermediate}]"), &format!("hash={key}]"));
+        }
+        keys = vec![key];
     }
     Ok(ExecReport {
+        streams: None,
+        tokens: TokenCounts::measure(raw, &output),
         command: command.join(" "),
         exit_code,
         filter,
@@ -2233,9 +2898,13 @@ fn process_captured_output(
     })
 }
 
-fn run_command_streaming(program: &Path, args: &[String], display: &str) -> Result<(i32, String)> {
-    let mut child = Command::new(program)
-        .args(args)
+fn run_command_streaming(
+    program: &Path,
+    args: &[String],
+    display: &str,
+) -> Result<(i32, Vec<u8>, CapturedStreams)> {
+    let mut child = command_capture::build_command(program, args)
+        .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -2243,18 +2912,25 @@ fn run_command_streaming(program: &Path, args: &[String], display: &str) -> Resu
 
     let stdout = child.stdout.take().context("failed to capture stdout")?;
     let stderr = child.stderr.take().context("failed to capture stderr")?;
-    let stdout_handle = std::thread::spawn(move || stream_reader(stdout, false));
-    let stderr_handle = std::thread::spawn(move || stream_reader(stderr, true));
+    let streams = std::thread::scope(|scope| {
+        let workers = [
+            scope.spawn(|| stream_reader(stdout, false)),
+            scope.spawn(|| stream_reader(stderr, true)),
+        ];
+        workers
+            .into_iter()
+            .map(|worker| {
+                worker
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("output capture worker panicked"))?
+            })
+            .collect::<Result<Vec<_>>>()
+    })?;
     let status = child.wait()?;
-    let stdout = stdout_handle
-        .join()
-        .map_err(|_| anyhow::anyhow!("stdout stream thread panicked"))??;
-    let stderr = stderr_handle
-        .join()
-        .map_err(|_| anyhow::anyhow!("stderr stream thread panicked"))??;
     Ok((
-        status.code().unwrap_or(1),
-        combine_command_output(&stdout, &stderr),
+        child_exit_code(status),
+        combine_command_bytes(&streams[0], &streams[1]),
+        CapturedStreams::new(&streams[0], &streams[1]),
     ))
 }
 
@@ -2279,18 +2955,76 @@ fn stream_reader<R: std::io::Read>(reader: R, stderr: bool) -> Result<Vec<u8>> {
     Ok(captured)
 }
 
-fn combine_command_output(stdout: &[u8], stderr: &[u8]) -> String {
-    let stdout = String::from_utf8_lossy(stdout);
-    let stderr = String::from_utf8_lossy(stderr);
-    match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
-        (false, false) => format!("{stdout}\n[stderr]\n{stderr}"),
-        (false, true) => stdout.into_owned(),
-        (true, false) => stderr.into_owned(),
-        (true, true) => String::new(),
+fn child_exit_code(status: std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    let interrupted = {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal().map(|number| 128 + number)
+    };
+    #[cfg(not(unix))]
+    let interrupted = None;
+    status.code().or(interrupted).unwrap_or(1)
+}
+
+fn combine_command_bytes(stdout: &[u8], stderr: &[u8]) -> Vec<u8> {
+    let mut bytes = stdout.to_vec();
+    if !stderr.is_empty() {
+        if !stdout.is_empty() {
+            bytes.push(b'\n');
+        }
+        bytes.extend_from_slice(b"[stderr]\n");
+        bytes.extend_from_slice(stderr);
     }
+    bytes
+}
+
+fn display_captured_bytes(bytes: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+    }
+    let mut text = String::from(
+        "[non-UTF-8 capture: invalid bytes shown as \\xNN, not literal text; exact bytes in tee]\n",
+    );
+    let mut remaining = bytes;
+    while !remaining.is_empty() {
+        match std::str::from_utf8(remaining) {
+            Ok(valid) => {
+                text.push_str(valid);
+                break;
+            }
+            Err(error) => {
+                let valid = error.valid_up_to();
+                text.push_str(std::str::from_utf8(&remaining[..valid]).expect("validated prefix"));
+                remaining = &remaining[valid..];
+                let invalid = error.error_len().unwrap_or(remaining.len());
+                for byte in &remaining[..invalid] {
+                    text.push_str(&format!("\\x{byte:02X}"));
+                }
+                remaining = &remaining[invalid..];
+            }
+        }
+    }
+    text
 }
 
 fn rewrite_command_report(command: &[String]) -> RewriteReport {
+    if let Some((file, count)) = inspection_views::head_read(command) {
+        let argv = vec![
+            "lm-resizer".into(),
+            "read".into(),
+            file,
+            "--head-lines".into(),
+            count.to_string(),
+        ];
+        return RewriteReport {
+            command: command.join(" "),
+            supported: true,
+            filter: "file-read".into(),
+            rewritten: Some(shell_join(&argv)),
+            argv,
+        };
+    }
+
     let command_text = command.join(" ");
     if command.is_empty() {
         return RewriteReport {
@@ -2303,7 +3037,7 @@ fn rewrite_command_report(command: &[String]) -> RewriteReport {
     }
 
     let (filter, _) = filter_command_output(command, "");
-    let supported = filter != "none" && filter != "generic";
+    let supported = !matches!(filter.as_str(), "none" | "generic" | "lossless:generic");
     let mut argv = vec![
         "lm-resizer".to_string(),
         "exec".to_string(),
@@ -2401,7 +3135,39 @@ fn split_trailing_redirects(segment: &str) -> (&str, &str) {
             '\\' if !in_single => escaped = true,
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
-            '>' | '<' if !in_single && !in_double => return segment.split_at(idx),
+            '>' | '<' if !in_single && !in_double => {
+                let mut start_idx = idx;
+                if idx > 0 {
+                    let before = &segment[..idx];
+                    let last_char = before.chars().last().unwrap();
+                    if last_char.is_ascii_digit() {
+                        let mut all_digits = true;
+                        let mut digits_start = idx - last_char.len_utf8();
+                        for (i, c) in before.char_indices().rev() {
+                            if c.is_whitespace() {
+                                digits_start = i + c.len_utf8();
+                                break;
+                            } else if !c.is_ascii_digit() {
+                                all_digits = false;
+                                break;
+                            }
+                            if i == 0 {
+                                digits_start = 0;
+                            }
+                        }
+                        if all_digits {
+                            start_idx = digits_start;
+                        }
+                    }
+                }
+                return segment.split_at(start_idx);
+            }
+            '&' if !in_single && !in_double => {
+                let after = &segment[idx + ch.len_utf8()..];
+                if after.starts_with('>') {
+                    return segment.split_at(idx);
+                }
+            }
             _ => {}
         }
     }
@@ -2435,14 +3201,33 @@ fn split_shell_operators(command: &str) -> Vec<ShellToken> {
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
             '&' | '|' if !in_single && !in_double => {
-                if i + 1 < chars.len() && chars[i + 1].1 == ch {
+                let is_redirect = if ch == '&' {
+                    let mut prev_char = None;
+                    if idx > 0 {
+                        let before = &command[..idx];
+                        prev_char = before.chars().last();
+                    }
+                    let next_char = if i + 1 < chars.len() {
+                        Some(chars[i + 1].1)
+                    } else {
+                        None
+                    };
+
+                    prev_char == Some('>') || prev_char == Some('<') || next_char == Some('>')
+                } else {
+                    false
+                };
+
+                if is_redirect {
+                    // Part of a redirection (e.g. 2>&1, >&2, &> /dev/null), not a command separator.
+                } else if i + 1 < chars.len() && chars[i + 1].1 == ch {
                     push_shell_segment(&mut tokens, &command[start..idx]);
                     tokens.push(ShellToken::Operator(format!("{ch}{ch}")));
                     start = chars[i + 1].0 + chars[i + 1].1.len_utf8();
                     i += 1;
-                } else if ch == '|' {
+                } else if ch == '|' || ch == '&' {
                     push_shell_segment(&mut tokens, &command[start..idx]);
-                    tokens.push(ShellToken::Operator("|".to_string()));
+                    tokens.push(ShellToken::Operator(ch.to_string()));
                     start = idx + ch.len_utf8();
                 }
             }
@@ -2471,30 +3256,42 @@ fn split_shell_words(segment: &str) -> Option<Vec<String>> {
     let mut in_single = false;
     let mut in_double = false;
     let mut escaped = false;
+    let mut has_word = false;
 
     for ch in segment.chars() {
         if escaped {
             current.push(ch);
+            has_word = true;
             escaped = false;
             continue;
         }
         match ch {
             '\\' if !in_single => escaped = true,
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => {
+                in_single = !in_single;
+                has_word = true;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                has_word = true;
+            }
             ch if ch.is_whitespace() && !in_single && !in_double => {
-                if !current.is_empty() {
+                if has_word {
                     words.push(std::mem::take(&mut current));
+                    has_word = false;
                 }
             }
-            _ => current.push(ch),
+            _ => {
+                current.push(ch);
+                has_word = true;
+            }
         }
     }
 
     if escaped || in_single || in_double {
         return None;
     }
-    if !current.is_empty() {
+    if has_word {
         words.push(current);
     }
     Some(words)
@@ -2503,7 +3300,9 @@ fn split_shell_words(segment: &str) -> Option<Vec<String>> {
 fn shell_join(args: &[String]) -> String {
     args.iter()
         .map(|arg| {
-            if arg.chars().all(|c| {
+            if arg.is_empty() {
+                String::from("\"\"")
+            } else if arg.chars().all(|c| {
                 c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '\\' | ':')
             }) {
                 arg.clone()
@@ -2515,8 +3314,69 @@ fn shell_join(args: &[String]) -> String {
         .join(" ")
 }
 
+fn pipe_filter_command(name: &str) -> Option<Vec<String>> {
+    command_views::pipe_command(name)
+}
+
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
+    // Only unwrap a single simple shell command. Never execute/rewrite the
+    // shell expression, nor guess the producer of pipelines or compound lists.
+    if command.len() == 3
+        && matches!(
+            command_basename(&command[0]).as_str(),
+            "bash" | "sh" | "zsh"
+        )
+        && matches!(command[1].as_str(), "-c" | "-lc")
+    {
+        if let [ShellToken::Segment(segment)] = split_shell_operators(&command[2]).as_slice() {
+            if let Some(words) = split_shell_words(segment) {
+                if !words.is_empty() {
+                    return filter_command_output(&words, raw);
+                }
+            }
+        }
+    }
+    if let Some(result) = command_views::filter(command, raw) {
+        return result;
+    }
+    // An explicitly wrapped native producer is already filtered too. Retain its
+    // existing generic-pipeline contract, including pre-pipeline byte counts.
+    if command.first().is_some_and(|p| {
+        matches!(
+            command_basename(p).as_str(),
+            "lm-resizer" | "lm-resizer.exe"
+        )
+    }) {
+        return ("native_owned".to_string(), raw.to_owned());
+    }
+    // Never post-process a command covered by native: extra views apply only
+    // to other producers, after the exact pipe dispatch above.
+    if command_views::direct_args(command).is_none() {
+        if let Some((name, view)) = structured_views::compress(raw) {
+            let filter = if name == "diff-metadata" {
+                "summary:diff-metadata".to_string()
+            } else if name == "code-outline:rust" {
+                "code-outline:rust".to_string()
+            } else {
+                format!("lossless:{name}")
+            };
+            return (filter, view);
+        }
+    }
+    if command_requests_json(command) && serde_json::from_str::<Value>(raw).is_ok() {
+        return ("json-passthrough".to_string(), raw.to_string());
+    }
+    if let Some((name, output)) = lossless_filters::filter(command, raw) {
+        return (format!("lossless:{name}"), output);
+    }
     let (name, output) = route_command_filter(command, raw);
+    if name == "generic" {
+        return ("lossless:generic".to_string(), output);
+    }
+    if raw.lines().any(|line| line == "[stderr]") && !output.lines().any(|line| line == "[stderr]")
+    {
+        return (format!("{name}:stream-guard"), raw.to_string());
+    }
     // Filters are also a possible source of lost diagnostics. The later
     // pipeline gate only compares its input with its output, so it cannot
     // recover a failure that disappeared here.
@@ -2530,17 +3390,19 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
 }
 
 fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
-    // RTK a déjà filtré et reformaté cette sortie pour sa commande. La
+    // native a déjà filtré et reformaté cette sortie pour sa commande. La
     // refiltrer avec les règles de la commande d'origine lit un format qui
-    // n'est plus le sien : mesuré sur `rtk dotnet test --logger detailed`,
+    // n'est plus le sien : mesuré sur `native dotnet test --logger detailed`,
     // 11 des 15 faits (Expected/Actual, fichier:ligne) disparaissaient.
-    // RTK garde le filtrage ; lm-resizer n'ajoute que sa compression
+    // native garde le filtrage ; lm-resizer n'ajoute que sa compression
     // générique, sous la porte de conservation des diagnostics.
-    if command
-        .first()
-        .is_some_and(|p| matches!(command_basename(p).as_str(), "rtk" | "rtk.exe"))
-    {
-        return ("rtk_owned".to_string(), raw.to_string());
+    if command.first().is_some_and(|p| {
+        matches!(
+            command_basename(p).as_str(),
+            "lm-resizer" | "lm-resizer.exe"
+        )
+    }) {
+        return ("native_owned".to_string(), raw.to_string());
     }
     if command_requests_json(command) && serde_json::from_str::<Value>(raw).is_ok() {
         return ("json-passthrough".to_string(), raw.to_string());
@@ -2595,22 +3457,22 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     if let Some((name, summary)) = parity_filters::summarize_for_command(command, raw) {
         return (format!("structured:{name}"), summary);
     }
-    if rtk_filters::is_prisma_migrate(command) {
-        let (name, filtered) = rtk_filters::filter(command, raw).expect("prisma migrate route");
+    if command_filters::is_prisma_migrate(command) {
+        let (name, filtered) = command_filters::filter(command, raw).expect("prisma migrate route");
         return (name.to_string(), filtered);
     }
     if command
         .first()
         .is_some_and(|program| command_basename(program) == "aws")
     {
-        let (name, filtered) = rtk_filters::filter(command, raw).expect("aws route");
+        let (name, filtered) = command_filters::filter(command, raw).expect("aws route");
         return (name.to_string(), filtered);
     }
     let command_text = normalized_command_text(command);
     if let Some((filter, filtered)) = apply_toml_filters(&command_text, raw) {
         return (filter, filtered);
     }
-    if let Some((name, filtered)) = rtk_filters::filter(command, raw) {
+    if let Some((name, filtered)) = command_filters::filter(command, raw) {
         return (name.to_string(), filtered);
     }
 
@@ -2633,22 +3495,10 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     }
 
     match (program.as_str(), sub) {
-        ("git", "status") => ("git_status".to_string(), filter_git_status(raw)),
-        ("git", "diff") => ("diff_summary".to_string(), filter_diff_summary(raw)),
-        ("git", "log") => ("git_log".to_string(), filter_git_log(raw)),
-        ("git", "show") => ("git_show".to_string(), filter_git_show(raw)),
         ("diff", _) => ("diff_summary".to_string(), filter_diff_summary(raw)),
-        ("cargo", "test") => ("cargo_test".to_string(), filter_cargo_test(raw)),
-        ("cargo", "check" | "build" | "clippy") => {
-            ("cargo_diagnostics".to_string(), filter_diagnostics(raw))
-        }
-        ("tsc", _) => ("tsc".to_string(), filter_tsc(raw)),
-        ("pytest", _) => ("pytest".to_string(), filter_pytest(raw)),
-        ("npm" | "pnpm" | "yarn", "test" | "run") => {
-            ("js_test".to_string(), filter_diagnostics(raw))
-        }
-        ("rg" | "grep", _) => ("search_results".to_string(), filter_search_results(raw)),
-        ("find" | "fd" | "ls" | "dir" | "tree", _) => ("listing".to_string(), filter_listing(raw)),
+        ("cargo", "clippy") => ("cargo_diagnostics".to_string(), filter_diagnostics(raw)),
+        ("yarn", "test" | "run") => ("js_test".to_string(), filter_diagnostics(raw)),
+        ("fd" | "dir", _) => ("listing".to_string(), filter_listing(raw)),
         _ => ("generic".to_string(), filter_generic(raw)),
     }
 }
@@ -3416,31 +4266,22 @@ fn apply_toml_filter(filter: &CompiledTomlFilter, raw: &str) -> String {
 
 /// A failure line of `before` that `after` no longer shows, if any.
 fn first_lost_failure_line<'a>(before: &'a str, after: &str) -> Option<&'a str> {
-    before
-        .lines()
-        .filter(|l| {
-            let trimmed = l.trim();
-            if trimmed.is_empty() || !FAILURE_SIGNAL.is_match(l) {
-                return false;
-            }
-            // curl's transfer header contains "% Received"; it is not a
-            // diagnostic even though the generic regex sees Received.
-            if trimmed.starts_with("% Total    % Received") {
-                return false;
-            }
-            // Git's structural header contains "diff", which the generic
-            // failure regex also matches. It is not a diagnostic.
-            if trimmed.starts_with("diff --git ") {
-                return false;
-            }
-            if trimmed.starts_with("test result: ok.") {
-                return false;
-            }
-            // A highlighted source line is context for the real error
-            // directly above it; comments in that frame can say "error".
-            !(l.contains(" | ") && l.contains("//"))
-        })
-        .find(|l| !after.contains(l.trim()))
+    if before == after {
+        return None;
+    }
+    let lost = lm_resizer_core::transforms::diagnostic_gate::lost_failure_lines(before, after);
+    let lost: std::collections::HashSet<&str> = lost.iter().map(|line| line.trim()).collect();
+    before.lines().find(|line| {
+        let trimmed = line.trim();
+        if trimmed.starts_with("% Total    % Received")
+            || trimmed.starts_with("diff --git ")
+            || trimmed.starts_with("test result: ok.")
+            || (line.contains(" | ") && line.contains("//"))
+        {
+            return false;
+        }
+        lost.contains(trimmed)
+    })
 }
 
 fn first_lost_indispensable_line<'a>(
@@ -3448,24 +4289,30 @@ fn first_lost_indispensable_line<'a>(
     after: &str,
     filter: &str,
 ) -> Option<&'a str> {
+    if before == after {
+        return None;
+    }
+    if before.lines().any(|line| line == "[stderr]")
+        && !after.lines().any(|line| line == "[stderr]")
+    {
+        return Some("[stderr]");
+    }
     first_lost_failure_line(before, after).or_else(|| {
         if matches!(filter, "search_results" | "listing") {
+            let remaining: std::collections::HashSet<&str> = after.lines().map(str::trim).collect();
             return before
                 .lines()
                 .filter(|line| !line.trim().is_empty())
-                .find(|line| {
-                    !after
-                        .lines()
-                        .any(|remaining| remaining.trim() == line.trim())
-                });
+                .find(|line| !remaining.contains(line.trim()));
         }
         if filter != "diff_summary" && filter != "git_show" {
             return None;
         }
+        let remaining: std::collections::HashSet<&str> = after.lines().collect();
         before.lines().find(|line| {
             ((line.starts_with('+') && !line.starts_with("+++"))
                 || (line.starts_with('-') && !line.starts_with("---")))
-                && !after.lines().any(|remaining| remaining == *line)
+                && !remaining.contains(line)
         })
     })
 }
@@ -3548,29 +4395,6 @@ fn command_basename(command: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn filter_git_status(raw: &str) -> String {
-    let mut kept = Vec::new();
-    let mut skipped = 0usize;
-
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty()
-            || trimmed.starts_with("(use ")
-            || trimmed.starts_with("use ")
-            || trimmed.starts_with("no changes added")
-        {
-            skipped += 1;
-            continue;
-        }
-        kept.push(line.to_string());
-    }
-
-    if kept.is_empty() {
-        return raw.trim().to_string();
-    }
-    append_omitted(kept, skipped)
-}
-
 fn filter_diff_summary(raw: &str) -> String {
     let has_unified_headers = raw
         .lines()
@@ -3650,18 +4474,6 @@ fn filter_psql(raw: &str) -> String {
     append_omitted(kept, 0)
 }
 
-fn filter_git_show(raw: &str) -> String {
-    let Some(split) = raw.find("diff --git ") else {
-        return raw.to_string();
-    };
-    let prelude = &raw[..split];
-    let diff = &raw[split..];
-    let filtered = filter_diff_summary(diff);
-    let mut output = prelude.to_string();
-    output.push_str(&filtered);
-    output
-}
-
 fn filter_diagnostics(raw: &str) -> String {
     let mut kept = Vec::new();
     let mut keep_following = 0usize;
@@ -3694,62 +4506,6 @@ fn filter_diagnostics(raw: &str) -> String {
 
     if kept.is_empty() {
         filter_generic(raw)
-    } else {
-        append_omitted(kept, skipped)
-    }
-}
-
-fn filter_cargo_test(raw: &str) -> String {
-    let mut kept = Vec::new();
-    let mut in_failure = false;
-    let mut failure_lines = 0usize;
-    let mut skipped = 0usize;
-
-    for line in raw.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("Compiling")
-            || trimmed.starts_with("Checking")
-            || trimmed.starts_with("Finished")
-            || trimmed.starts_with("running ")
-            || (line.starts_with("test ") && line.ends_with("... ok"))
-        {
-            skipped += 1;
-            continue;
-        }
-        if line == "failures:" || line.starts_with("---- ") {
-            in_failure = true;
-            failure_lines = 0;
-            kept.push(line.to_string());
-            continue;
-        }
-        if line.starts_with("test result:") {
-            in_failure = false;
-            kept.push(line.to_string());
-            continue;
-        }
-        if in_failure {
-            if failure_lines < 20 {
-                kept.push(line.to_string());
-                failure_lines += 1;
-            } else {
-                skipped += 1;
-            }
-            continue;
-        }
-        let lower = line.to_ascii_lowercase();
-        if lower.contains("error")
-            || lower.contains("failed")
-            || lower.contains("panic")
-            || lower.contains("could not compile")
-        {
-            kept.push(line.to_string());
-        } else {
-            skipped += 1;
-        }
-    }
-
-    if kept.is_empty() {
-        "cargo test: passed\n".to_string()
     } else {
         append_omitted(kept, skipped)
     }
@@ -3990,94 +4746,6 @@ fn filter_docker_build(raw: &str) -> String {
     }
 }
 
-fn filter_git_log(raw: &str) -> String {
-    let mut out = Vec::new();
-    let mut skipped = 0usize;
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("Date:") {
-            skipped += 1;
-        } else if !trimmed.is_empty() {
-            out.push(trimmed.to_string());
-        }
-    }
-    append_omitted(out, skipped)
-}
-
-fn filter_tsc(raw: &str) -> String {
-    let mut by_file = std::collections::BTreeMap::<String, Vec<String>>::new();
-    let mut skipped = 0usize;
-
-    for line in raw.lines() {
-        if let Some((file, rest)) = line.split_once('(') {
-            if rest.contains("): error TS") || rest.contains("): warning TS") {
-                by_file
-                    .entry(file.to_string())
-                    .or_default()
-                    .push(truncate_chars(line, 180));
-                continue;
-            }
-        }
-        if line.contains("Found 0 errors") {
-            return "TypeScript: no errors\n".to_string();
-        }
-        skipped += 1;
-    }
-
-    if by_file.is_empty() {
-        return filter_diagnostics(raw);
-    }
-
-    let error_count = by_file.values().map(Vec::len).sum::<usize>();
-    let mut out = vec![format!(
-        "TypeScript: {error_count} diagnostics in {} files",
-        by_file.len()
-    )];
-    for (file, lines) in by_file {
-        out.push(format!("{file}: {} diagnostics", lines.len()));
-        for line in lines.into_iter().take(5) {
-            out.push(format!("  {line}"));
-        }
-    }
-    append_omitted(out, skipped)
-}
-
-fn filter_pytest(raw: &str) -> String {
-    let mut kept = Vec::new();
-    let mut keep_following = 0usize;
-    let mut skipped = 0usize;
-
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        let important = trimmed.starts_with("FAILED ")
-            || trimmed.ends_with(" FAILED")
-            || trimmed.starts_with("ERROR ")
-            || trimmed.starts_with("====")
-            || trimmed.contains(" failed")
-            || trimmed.contains(" passed")
-            || trimmed.contains(" error")
-            || trimmed.contains(" warnings")
-            || line.starts_with("E   ")
-            || line.starts_with("File ");
-
-        if important {
-            kept.push(line.to_string());
-            keep_following = 2;
-        } else if keep_following > 0 {
-            kept.push(line.to_string());
-            keep_following -= 1;
-        } else {
-            skipped += 1;
-        }
-    }
-
-    if kept.is_empty() {
-        "pytest: passed\n".to_string()
-    } else {
-        append_omitted(kept, skipped)
-    }
-}
-
 /// True when the command invokes the vitest/jest JS test runners — directly (`vitest run`,
 /// `jest`) or via a JS launcher (`npx vitest`, `bunx jest`, `pnpm exec vitest`, `yarn jest`).
 /// Deliberately does NOT match `grep vitest` / `cat jest.config.js`: the runner must be the
@@ -4103,7 +4771,7 @@ fn command_runs_js_test(command: &[String]) -> bool {
 /// Filter vitest/jest output down to the real signal: failing files/tests, assertion diffs,
 /// stack frames, and the final `Test Files` / `Tests` summary. Passing-noise, the RUN banner,
 /// deprecation notices and timing footers are dropped. When everything passed, collapse hard to
-/// just the summary line(s) — matching rtk's `vitest run` semantic collapse.
+/// just the summary line(s) — matching native's `vitest run` semantic collapse.
 fn filter_vitest(raw: &str) -> String {
     let mut kept = Vec::new();
     let mut keep_following = 0usize;
@@ -4171,41 +4839,6 @@ fn filter_vitest(raw: &str) -> String {
     append_omitted(kept, skipped)
 }
 
-fn filter_search_results(raw: &str) -> String {
-    use std::collections::BTreeMap;
-
-    let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut passthrough = Vec::new();
-    let location = Regex::new(r"^(.+?):([0-9]+):(.*)$").expect("valid search location");
-
-    for line in raw.lines() {
-        if let Some(caps) = location.captures(line) {
-            let file = caps.get(1).expect("file").as_str();
-            let number = caps.get(2).expect("line").as_str();
-            let rest = caps.get(3).expect("content").as_str();
-            by_file
-                .entry(file.to_string())
-                .or_default()
-                .push(format!("{number}:{rest}"));
-        } else {
-            passthrough.push(line.to_string());
-        }
-    }
-
-    let mut out = Vec::new();
-
-    for (file, lines) in by_file {
-        out.push(format!("{file}: {} matches", lines.len()));
-        for line in lines {
-            out.push(format!("  {line}"));
-        }
-    }
-
-    out.extend(passthrough);
-
-    append_omitted(out, 0)
-}
-
 fn filter_listing(raw: &str) -> String {
     let mut out = Vec::new();
     let mut skipped = 0usize;
@@ -4221,28 +4854,8 @@ fn filter_listing(raw: &str) -> String {
 }
 
 fn filter_generic(raw: &str) -> String {
-    let mut out = Vec::new();
-    let mut skipped = 0usize;
-    let mut last = "";
-    let mut repeat_count = 0usize;
-
-    for line in raw.lines() {
-        if line == last {
-            repeat_count += 1;
-            skipped += 1;
-            continue;
-        }
-        if repeat_count > 0 {
-            out.push(format!("... previous line repeated {repeat_count} times"));
-        }
-        repeat_count = 0;
-        last = line;
-        out.push(line.to_string());
-    }
-    if repeat_count > 0 {
-        out.push(format!("... previous line repeated {repeat_count} times"));
-    }
-    append_omitted(out, skipped)
+    // Unknown output has no safe semantic grammar: do not hide facts in a codec.
+    raw.to_string()
 }
 
 fn append_omitted(mut lines: Vec<String>, skipped: usize) -> String {
@@ -4256,14 +4869,66 @@ fn append_omitted(mut lines: Vec<String>, skipped: usize) -> String {
     }
 }
 
-fn tee_raw_output_if_useful(raw: &str, filtered: &str) -> Result<Option<String>> {
-    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") || raw == filtered {
+fn attach_report_recovery(raw: &str, report: &mut ExecReport) -> Result<()> {
+    report.tee_hint = tee_raw_output_if_useful(raw, &report.output)?;
+    if let Some(hint) = &report.tee_hint {
+        if !report.output.contains("lm-resizer tee read ") {
+            append_recovery_instruction(&mut report.output, hint, raw);
+        }
+        report.tokens = TokenCounts::measure(raw, &report.output);
+        report.compressed_bytes = report.output.len();
+        report.bytes_saved = raw.len().saturating_sub(report.output.len());
+    }
+    Ok(())
+}
+
+fn append_recovery_instruction(output: &mut String, hint: &str, raw: &str) {
+    // Unchanged output cannot pay for a trailer. Avoid tokenizing a candidate
+    // which the contract would always reject; final metrics still count raw.
+    if raw == output {
+        return;
+    }
+    let Some(id) = hint
+        .strip_prefix("[raw: ")
+        .and_then(|s| s.strip_suffix(']'))
+    else {
+        return;
+    };
+    let mut candidate = output.clone();
+    if !candidate.ends_with('\n') && !candidate.is_empty() {
+        candidate.push('\n');
+    }
+    candidate.push_str(&format!("[tee:{id}]\n"));
+    // Storage and JSON metadata remain available even when the visible hint
+    // would consume more tokens than the reduction pays for. Reserve a visible
+    // trailer for substantial savings: at least 25% including the trailer.
+    // Small reductions keep their entire token benefit; tee list / JSON still
+    // expose every archive. This threshold is independent of the benchmark.
+    let counts = TokenCounts::measure(raw, &candidate);
+    if counts.compressed_tokens <= counts.original_tokens.saturating_mul(3) / 4 && raw != output {
+        *output = candidate;
+    }
+}
+
+fn tee_raw_output_if_useful(raw: &str, output: &str) -> Result<Option<String>> {
+    tee_raw_bytes_if_useful(raw.as_bytes(), output)
+}
+
+fn tee_raw_bytes_if_useful(raw: &[u8], output: &str) -> Result<Option<String>> {
+    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") || raw == output.as_bytes() {
         return Ok(None);
     }
 
+    archive_raw_bytes(raw)
+}
+
+fn archive_raw_bytes(raw: &[u8]) -> Result<Option<String>> {
+    if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") {
+        return Ok(None);
+    }
     let tee_dir = default_state_dir()?.join("tee");
     std::fs::create_dir_all(&tee_dir)?;
-    let digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
+    let digest = format!("{:x}", Sha256::digest(raw));
     let path = tee_dir.join(format!("{digest}.log"));
     std::fs::write(&path, raw)?;
     Ok(Some(format!("[raw: {}]", &digest[..12])))
@@ -4285,7 +4950,7 @@ fn run_tee_command(command: TeeCommand) -> Result<()> {
         }
         TeeCommand::Read { file } => {
             let path = resolve_tee_file(&file)?;
-            print!("{}", std::fs::read_to_string(path)?);
+            std::io::stdout().write_all(&std::fs::read(path)?)?;
         }
         TeeCommand::Purge { all, file, json } => {
             let report = purge_tee_files(all, file.as_deref())?;
@@ -4390,6 +5055,8 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("exec-history.jsonl");
     let record = ExecHistoryRecord {
+        cwd: std::env::current_dir()?.to_string_lossy().into_owned(),
+        tokens: report.tokens.clone(),
         timestamp_unix: unix_timestamp(),
         command: report.command.clone(),
         exit_code: report.exit_code,
@@ -4446,11 +5113,29 @@ fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
 /// invocation. Pure/testable: takes the parsed event + resolved exe path.
 fn pretooluse_rewrite_json(value: &Value, exe: &str, event: &str) -> Option<Value> {
     let command = extract_hook_command(value)?;
-    let rewritten = rewrite_command_for_hook(&command, exe)?;
+    let mut rewritten = rewrite_command_for_hook(&command, exe)?;
+    let shell = value
+        .pointer("/tool_input/shell")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let tool = value.get("tool_name").and_then(Value::as_str).unwrap_or("");
+    if shell.contains("powershell")
+        || shell.contains("pwsh")
+        || tool.eq_ignore_ascii_case("powershell")
+        || (cfg!(windows) && shell.is_empty() && tool == "exec_command")
+    {
+        rewritten = format!("& '{}' exec -- {}", exe.replace('\'', "''"), command.trim());
+    }
     let updated_input = match value.pointer("/tool_input") {
         Some(Value::Object(map)) => {
             let mut map = map.clone();
-            map.insert("command".to_string(), Value::String(rewritten));
+            let key = if map.contains_key("cmd") && !map.contains_key("command") {
+                "cmd"
+            } else {
+                "command"
+            };
+            map.insert(key.to_string(), Value::String(rewritten));
             Value::Object(map)
         }
         _ => serde_json::json!({ "command": rewritten }),
@@ -4470,7 +5155,7 @@ fn pretooluse_rewrite_json(value: &Value, exe: &str, event: &str) -> Option<Valu
 
 /// PreToolUse hook entry: read the event from stdin, print the rewrite JSON if any, else nothing.
 /// Never-throws / never-blocks — any parse failure silently lets the command run raw.
-fn emit_pretooluse_rewrite(event: &str) {
+fn emit_pretooluse_rewrite(event: &str, client: &str) {
     let mut input = String::new();
     if io::stdin().read_to_string(&mut input).is_err() {
         return;
@@ -4482,7 +5167,24 @@ fn emit_pretooluse_rewrite(event: &str) {
         .ok()
         .and_then(|p| p.to_str().map(String::from))
         .unwrap_or_else(|| "lm-resizer".to_string());
-    if let Some(out) = pretooluse_rewrite_json(&value, &exe, event) {
+    if let Some(out) = agent_hooks::rewrite(&value, &exe, event, client) {
+        if std::env::var("LM_RESIZER_TRACKING").as_deref() != Ok("0") {
+            // Local counters only; no command arguments or remote telemetry.
+            let _ = (|| -> Result<()> {
+                let dir = default_state_dir()?;
+                std::fs::create_dir_all(&dir)?;
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(dir.join("hook-audit.jsonl"))?;
+                writeln!(
+                    file,
+                    "{}",
+                    json!({"timestamp_unix":unix_timestamp(),"client":client,"event":event})
+                )?;
+                Ok(())
+            })();
+        }
         println!("{out}");
     }
 }
@@ -4518,6 +5220,8 @@ fn run_native_hook(client: &str, event: &str) -> NativeHookRunReport {
     match compress_text(&filtered, &format!("{client} {event} hook"), &store).and_then(
         |compressed| {
             let exec_report = ExecReport {
+                streams: None,
+                tokens: TokenCounts::measure(&output, &compressed.output),
                 command: command.clone(),
                 exit_code: extract_hook_exit_code(value.as_ref()).unwrap_or(0),
                 filter: filter.clone(),
@@ -4673,72 +5377,12 @@ fn find_string_by_key(value: &Value, keys: &[&str]) -> Option<String> {
 
 fn summarize_exec_history() -> Result<Value> {
     let path = default_state_dir()?.join("exec-history.jsonl");
-    if !path.exists() {
-        return Ok(json!({
-            "commands": 0,
-            "original_bytes": 0,
-            "compressed_bytes": 0,
-            "bytes_saved": 0,
-            "estimated_tokens_saved": 0,
-            "by_filter": [],
-            "by_command": [],
-        }));
-    }
-
-    let content = std::fs::read_to_string(path)?;
-    let mut commands = 0usize;
-    let mut original_bytes = 0usize;
-    let mut compressed_bytes = 0usize;
-    let mut bytes_saved = 0usize;
-    let mut by_filter = std::collections::BTreeMap::<String, (usize, usize)>::new();
-    let mut by_command = std::collections::BTreeMap::<String, (usize, usize)>::new();
-    for line in content.lines().filter(|line| !line.trim().is_empty()) {
-        let Ok(record) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        commands += 1;
-        original_bytes += record
-            .get("original_bytes")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
-        compressed_bytes += record
-            .get("compressed_bytes")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
-        bytes_saved += record
-            .get("bytes_saved")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
-        let saved = record
-            .get("bytes_saved")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize;
-        let filter = record
-            .get("filter")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_string();
-        let command = record
-            .get("command")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .split_whitespace()
-            .take(2)
-            .collect::<Vec<_>>()
-            .join(" ");
-        add_history_bucket(&mut by_filter, filter, saved);
-        add_history_bucket(&mut by_command, command, saved);
-    }
-
-    Ok(json!({
-        "commands": commands,
-        "original_bytes": original_bytes,
-        "compressed_bytes": compressed_bytes,
-        "bytes_saved": bytes_saved,
-        "estimated_tokens_saved": bytes_saved / 4,
-        "by_filter": history_bucket_json(by_filter),
-        "by_command": history_bucket_json(by_command),
-    }))
+    let content = if path.exists() {
+        std::fs::read_to_string(path)?
+    } else {
+        String::new()
+    };
+    Ok(token_metrics::summarize_history(&content))
 }
 
 fn record_retrieval_feedback(hash: &str, bytes: usize, source: &str) -> Result<()> {
@@ -4812,35 +5456,6 @@ fn summarize_retrieval_feedback() -> Result<Value> {
     }))
 }
 
-fn add_history_bucket(
-    buckets: &mut std::collections::BTreeMap<String, (usize, usize)>,
-    key: String,
-    saved: usize,
-) {
-    let entry = buckets.entry(key).or_insert((0, 0));
-    entry.0 += 1;
-    entry.1 += saved;
-}
-
-fn history_bucket_json(buckets: std::collections::BTreeMap<String, (usize, usize)>) -> Vec<Value> {
-    let mut rows = buckets
-        .into_iter()
-        .map(|(name, (commands, bytes_saved))| {
-            json!({
-                "name": name,
-                "commands": commands,
-                "bytes_saved": bytes_saved,
-                "estimated_tokens_saved": bytes_saved / 4,
-            })
-        })
-        .collect::<Vec<_>>();
-    rows.sort_by_key(|row| {
-        std::cmp::Reverse(row.get("bytes_saved").and_then(Value::as_u64).unwrap_or(0))
-    });
-    rows.truncate(20);
-    rows
-}
-
 fn format_stats_markdown(report: &Value) -> String {
     let history = report.get("exec_history").unwrap_or(&Value::Null);
     let retrieval_feedback = report.get("retrieval_feedback").unwrap_or(&Value::Null);
@@ -4862,11 +5477,27 @@ fn format_stats_markdown(report: &Value) -> String {
             .unwrap_or(0)
     ));
     out.push_str(&format!(
-        "- Estimated tokens saved: {}\n\n",
+        "- Legacy estimated tokens saved (bytes / 4, unmeasured records only): {}\n\n",
         history
             .get("estimated_tokens_saved")
             .and_then(Value::as_u64)
             .unwrap_or(0)
+    ));
+    out.push_str(&format!(
+        "- Tokens saved: {} ({}; exact text count, {} measured / {} unmeasured commands)\n\n",
+        history
+            .get("tokens_saved")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+        TOKENIZER,
+        history
+            .get("measured_commands")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        history
+            .get("unmeasured_commands")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
     ));
     out.push_str(&format!(
         "- CCR retrievals: {}\n",
@@ -4885,17 +5516,18 @@ fn format_stats_markdown(report: &Value) -> String {
 
     if let Some(filters) = history.get("by_filter").and_then(Value::as_array) {
         out.push_str("## Top Filters\n\n");
-        out.push_str("| Filter | Commands | Bytes saved | Est. tokens saved |\n");
-        out.push_str("| --- | ---: | ---: | ---: |\n");
+        out.push_str("| Filter | Commands | Bytes saved | Legacy est. tokens saved (bytes / 4) | Tokens saved (o200k_base) |\n");
+        out.push_str("| --- | ---: | ---: | ---: | ---: |\n");
         for row in filters.iter().take(10) {
             out.push_str(&format!(
-                "| `{}` | {} | {} | {} |\n",
+                "| `{}` | {} | {} | {} | {} |\n",
                 markdown_escape(row.get("name").and_then(Value::as_str).unwrap_or("")),
                 row.get("commands").and_then(Value::as_u64).unwrap_or(0),
                 row.get("bytes_saved").and_then(Value::as_u64).unwrap_or(0),
                 row.get("estimated_tokens_saved")
                     .and_then(Value::as_u64)
-                    .unwrap_or(0)
+                    .unwrap_or(0),
+                row.get("tokens_saved").and_then(Value::as_i64).unwrap_or(0)
             ));
         }
         out.push('\n');
@@ -5171,11 +5803,12 @@ fn discover_exec_savings(paths: &[PathBuf], recursive: bool) -> Result<DiscoverR
         report.rewritable_commands += file_report.rewritable_commands;
         report.original_bytes += file_report.original_bytes;
         report.filtered_bytes += file_report.filtered_bytes;
+        report.tokens.add(&file_report.tokens);
         report.candidates.append(&mut file_report.candidates);
     }
 
     report.estimated_bytes_saved = report.original_bytes.saturating_sub(report.filtered_bytes);
-    report.estimated_tokens_saved = report.estimated_bytes_saved / 4;
+    report.estimated_tokens_saved = report.tokens.tokens_saved;
     report
         .candidates
         .sort_by_key(|candidate| std::cmp::Reverse(candidate.estimated_bytes_saved));
@@ -5200,7 +5833,7 @@ fn format_discover_markdown(report: &DiscoverReport) -> String {
         report.estimated_bytes_saved
     ));
     out.push_str(&format!(
-        "- Estimated tokens saved: {}\n\n",
+        "- Prospective tokens saved (tiktoken-rs/o200k_base; exact text count): {}\n\n",
         report.estimated_tokens_saved
     ));
 
@@ -5331,11 +5964,12 @@ fn run_eval(paths: &[PathBuf], recursive: bool) -> Result<EvalReport> {
     }
     if discover.estimated_tokens_saved > 0 {
         notes.push(format!(
-            "estimated {} tokens saved by command-output filtering",
+            "prospective {} tokens saved by command-output filtering (tiktoken-rs/o200k_base; exact text count)",
             discover.estimated_tokens_saved
         ));
     }
     Ok(EvalReport {
+        tokens: discover.tokens.clone(),
         files_scanned: discover.files_scanned,
         command_outputs: discover.command_outputs,
         candidates: discover.candidates.len(),
@@ -5358,7 +5992,7 @@ fn format_eval_markdown(report: &EvalReport) -> String {
         report.estimated_bytes_saved
     ));
     out.push_str(&format!(
-        "- Estimated tokens saved: {}\n\n",
+        "- Prospective tokens saved (tiktoken-rs/o200k_base; exact text count): {}\n\n",
         report.estimated_tokens_saved
     ));
     if !report.notes.is_empty() {
@@ -5434,7 +6068,7 @@ fn build_learn_recommendations(
         recommendations.push(LearnRecommendation {
             title: "Route noisy commands through lm-resizer".to_string(),
             reason: format!(
-                "Session mining found {} rewritable command outputs with about {} tokens saved.",
+                "Session mining found {} rewritable command outputs with {} prospective tokens saved (tiktoken-rs/o200k_base; exact text count).",
                 discover.rewritable_commands, discover.estimated_tokens_saved
             ),
             instruction: "Before running noisy commands such as tests, builds, searches, package installs, infra CLIs, or large listings, run `lm-resizer rewrite-shell \"<command>\"`; if it returns `lm-resizer exec -- ...`, use the rewritten command.".to_string(),
@@ -5457,14 +6091,14 @@ fn build_learn_recommendations(
         .and_then(Value::as_u64)
         .unwrap_or(0);
     let history_saved = exec_history
-        .get("estimated_tokens_saved")
-        .and_then(Value::as_u64)
+        .get("tokens_saved")
+        .and_then(Value::as_i64)
         .unwrap_or(0);
     if commands > 0 {
         recommendations.push(LearnRecommendation {
             title: "Keep command-output savings visible".to_string(),
             reason: format!(
-                "`lm-resizer exec` history contains {commands} commands and about {history_saved} estimated tokens saved."
+                "`lm-resizer exec` history contains {commands} commands and {history_saved} measured tokens saved (tiktoken-rs/o200k_base; unmeasured legacy commands excluded)."
             ),
             instruction: "Use `lm-resizer stats --markdown` during long agent sessions to review which filters save context and which command families deserve project-specific TOML filters.".to_string(),
             evidence: learn_history_evidence(exec_history),
@@ -5538,7 +6172,7 @@ fn format_learn_markdown(
         discover.command_outputs
     ));
     out.push_str(&format!(
-        "- Estimated discover tokens saved: {}\n",
+        "- Prospective discover tokens saved (tiktoken-rs/o200k_base; exact text count): {}\n",
         discover.estimated_tokens_saved
     ));
     out.push_str(&format!(
@@ -5563,6 +6197,13 @@ fn format_learn_markdown(
     }
 
     out
+}
+
+#[cfg(unix)]
+fn make_script_executable(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
+    Ok(())
 }
 
 fn init_hook_helpers(project_dir: Option<PathBuf>, force: bool) -> Result<InitHooksReport> {
@@ -5590,6 +6231,10 @@ fn init_hook_helpers(project_dir: Option<PathBuf>, force: bool) -> Result<InitHo
             );
         }
         std::fs::write(&path, content)?;
+        #[cfg(unix)]
+        if name.ends_with(".sh") {
+            make_script_executable(&path)?;
+        }
         written.push(path.display().to_string());
     }
 
@@ -5622,7 +6267,9 @@ fn init_native_hooks(
         let content = match target.client.as_str() {
             "codex" => codex_native_hooks_json(&exe_path)?,
             "claude" => claude_native_hooks_json(&exe_path)?,
-            _ => unreachable!("validated native hook target"),
+            client => serde_json::to_string_pretty(
+                &agent_hooks::config(&exe_path, client).context("unknown hook schema")?,
+            )?,
         };
         std::fs::write(&target.path, content)?;
         files.push(target.path.display().to_string());
@@ -5640,6 +6287,14 @@ struct NativeHookTarget {
 
 fn native_hook_targets(client: &str, project_dir: &Path) -> Result<Vec<NativeHookTarget>> {
     match client {
+        "gemini" | "copilot" | "cursor" => Ok(vec![NativeHookTarget {
+            client: client.into(),
+            path: project_dir.join(match client {
+                "gemini" => ".gemini/settings.json",
+                "copilot" => ".github/hooks/lm-resizer.json",
+                _ => ".cursor/hooks.json",
+            }),
+        }]),
         "codex" => Ok(vec![NativeHookTarget {
             client: "codex".to_string(),
             path: project_dir.join(".codex").join("hooks.json"),
@@ -5659,13 +6314,18 @@ fn native_hook_targets(client: &str, project_dir: &Path) -> Result<Vec<NativeHoo
             },
         ]),
         other => {
-            anyhow::bail!("unsupported native hook client '{other}'. Use codex, claude, or all")
+            anyhow::bail!("unsupported native hook client '{other}'. Use codex, claude, gemini, copilot, cursor, or all")
         }
     }
 }
 
 fn codex_native_hooks_json(exe_path: &str) -> Result<String> {
-    native_hooks_json(exe_path, "codex", &["PreToolUse", "PostToolUse"], "Bash")
+    native_hooks_json(
+        exe_path,
+        "codex",
+        &["PreToolUse", "PostToolUse"],
+        "Bash|exec_command",
+    )
 }
 
 fn claude_native_hooks_json(exe_path: &str) -> Result<String> {
@@ -5673,7 +6333,7 @@ fn claude_native_hooks_json(exe_path: &str) -> Result<String> {
 }
 
 /// One hook entry per event: PreToolUse rewrites supported commands through
-/// `exec` (in-place output substitution — the active rtk role; never blocks:
+/// `exec` (in-place output substitution — the active native role; never blocks:
 /// unsupported commands emit nothing and run raw), PostToolUse records
 /// command-output savings telemetry.
 fn native_hooks_json(
@@ -5691,7 +6351,10 @@ fn native_hooks_json(
             "timeout": 30
         });
         if cfg!(windows) {
-            hook["commandWindows"] = hook["command"].clone();
+            hook["commandWindows"] = Value::String(format!(
+                "powershell -NoProfile -Command \"& '{}' hook --client {client} --event {event}\"",
+                exe_path.replace('\'', "''")
+            ));
         }
         hooks.insert(
             (*event).to_string(),
@@ -5770,6 +6433,8 @@ fn init_command_shims(project_dir: Option<PathBuf>, force: bool) -> Result<ShimR
             command_shim_sh(&exe_path, &original)
         };
         std::fs::write(&path, content)?;
+        #[cfg(unix)]
+        make_script_executable(&path)?;
         files.push(path.display().to_string());
     }
 
@@ -5958,7 +6623,9 @@ fn hook_instruction_targets(client: &str, project_dir: &Path) -> Result<Vec<Path
             project_dir.join("AGENTS.md"),
             project_dir.join("CLAUDE.md"),
         ]),
-        other => anyhow::bail!("unsupported hook client '{other}'. Use codex, claude, or all"),
+        other => anyhow::bail!(
+            "unsupported hook client '{other}'. Use codex, claude, gemini, copilot, cursor, or all"
+        ),
     }
 }
 
@@ -6093,7 +6760,8 @@ fn collect_discover_files(paths: &[PathBuf], recursive: bool) -> Result<Vec<Path
             files.push(path.clone());
         } else if path.is_dir() {
             if recursive {
-                for entry in WalkDir::new(path).into_iter().filter_map(Result::ok) {
+                for entry in WalkDir::new(path) {
+                    let entry = entry?;
                     if entry.file_type().is_file() && discover_file_allowed(entry.path()) {
                         files.push(entry.path().to_path_buf());
                     }
@@ -6107,6 +6775,11 @@ fn collect_discover_files(paths: &[PathBuf], recursive: bool) -> Result<Vec<Path
                     }
                 }
             }
+        } else {
+            anyhow::bail!(
+                "session/log path does not exist or is not a file/directory: {}",
+                path.display()
+            );
         }
     }
     Ok(files)
@@ -6158,8 +6831,12 @@ fn add_discover_candidate(report: &mut DiscoverReport, command: &str, output: &s
     report.command_outputs += 1;
     report.original_bytes += output.len();
     report.filtered_bytes += filtered.len();
+    let tokens = TokenCounts::measure(output, &filtered);
+    report.tokens.add(&tokens);
+    report.estimated_tokens_saved = report.tokens.tokens_saved;
     if filter != "generic" || filtered.len() < output.len() {
         report.candidates.push(DiscoverCandidate {
+            tokens,
             command: command.to_string(),
             filter,
             original_bytes: output.len(),
@@ -7259,7 +7936,12 @@ fn handle_mcp_tool_call(id: Value, params: Value, store_path: &Path) -> Value {
         }
         "lm_resizer_stats" => {
             let store = open_store(Some(store_path.to_path_buf()))?;
-            Ok(json!({ "entries": store.len(), "empty": store.is_empty() }))
+            Ok(json!({
+                "entries": store.len(), "empty": store.is_empty(),
+                "exec_history": summarize_exec_history()?,
+                "retrieval_feedback": summarize_retrieval_feedback()?,
+                "proxy_history": summarize_proxy_history()?,
+            }))
         }
         _ => Err(anyhow::anyhow!("unknown tool: {name}")),
     })();
@@ -7640,12 +8322,29 @@ fn resolve_command_path(command: &str) -> Option<PathBuf> {
     for dir in std::env::split_paths(&path_var) {
         for ext in &extensions {
             let candidate = dir.join(format!("{command}{ext}"));
-            if candidate.is_file() {
+            if candidate.is_file() && program_is_executable(&candidate) {
                 return Some(candidate);
             }
         }
     }
     None
+}
+
+fn program_is_executable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        rustix::fs::accessat(
+            rustix::fs::CWD,
+            path,
+            rustix::fs::Access::EXEC_OK,
+            rustix::fs::AtFlags::EACCESS,
+        )
+        .is_ok()
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
 }
 
 fn command_extensions(command: &str) -> Vec<String> {
@@ -7750,9 +8449,12 @@ async fn http_retrieve(
 
 async fn http_stats(State(state): State<Arc<AppState>>) -> Result<Json<Value>, HttpError> {
     let store = open_store(Some(state.store_path.clone()))?;
-    Ok(Json(
-        json!({ "entries": store.len(), "empty": store.is_empty() }),
-    ))
+    Ok(Json(json!({
+        "entries": store.len(), "empty": store.is_empty(),
+        "exec_history": summarize_exec_history()?,
+        "retrieval_feedback": summarize_retrieval_feedback()?,
+        "proxy_history": summarize_proxy_history()?,
+    })))
 }
 
 async fn http_dashboard(State(state): State<Arc<AppState>>) -> Result<Response, HttpError> {
@@ -7782,7 +8484,15 @@ fn dashboard_html(entries: usize, empty: bool, exec_history: &Value) -> String {
         .and_then(Value::as_u64)
         .unwrap_or(0);
     let tokens_saved = exec_history
+        .get("tokens_saved")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let legacy_estimate = exec_history
         .get("estimated_tokens_saved")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let unmeasured = exec_history
+        .get("unmeasured_commands")
         .and_then(Value::as_u64)
         .unwrap_or(0);
     format!(
@@ -7810,7 +8520,8 @@ code{{background:#eef2f7;padding:2px 5px;border-radius:4px}}
 <div class="card"><div>Store empty</div><div class="metric">{empty}</div></div>
 <div class="card"><div>Exec commands</div><div class="metric">{commands}</div></div>
 <div class="card"><div>Bytes saved</div><div class="metric">{bytes_saved}</div></div>
-<div class="card"><div>Est. tokens saved</div><div class="metric">{tokens_saved}</div></div>
+<div class="card"><div>Tokens saved (tiktoken-rs/o200k_base; measured)</div><div class="metric">{tokens_saved}</div></div>
+<div class="card"><div>Legacy estimated tokens saved (bytes / 4; {unmeasured} unmeasured commands)</div><div class="metric">{legacy_estimate}</div></div>
 </section>
 <p>JSON stats remain available at <code>/stats</code>.</p>
 </main>
@@ -8740,18 +9451,41 @@ fn aws_sigv4_timestamp_from_unix(seconds: i64) -> (String, String) {
     (format!("{date}T{hour:02}{minute:02}{second:02}Z"), date)
 }
 
+// Gregorian years repeat every 400 years. Locate the cycle relative to the
+// Unix epoch, then walk its at most 400 years and twelve calendar months.
 fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
-    let z = days_since_epoch + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = mp + if mp < 10 { 3 } else { -9 };
-    let year = y + if m <= 2 { 1 } else { 0 };
-    (year, m, d)
+    let mut year = 1970 + 400 * days_since_epoch.div_euclid(146_097);
+    let mut offset = days_since_epoch.rem_euclid(146_097);
+    let leap = |y: i64| y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    loop {
+        let length = if leap(year) { 366 } else { 365 };
+        if offset < length {
+            break;
+        }
+        offset -= length;
+        year += 1;
+    }
+    let months = [
+        31,
+        if leap(year) { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    for (index, length) in months.into_iter().enumerate() {
+        if offset < length {
+            return (year, index as i64 + 1, offset + 1);
+        }
+        offset -= length;
+    }
+    unreachable!("day must belong to a calendar month")
 }
 
 async fn google_adc_access_token(client: &Client) -> Result<Option<String>> {
@@ -9170,6 +9904,40 @@ mod tests {
     use lm_resizer_core::ccr::InMemoryCcrStore;
 
     #[test]
+    fn powershell_hook_rewrites_the_actual_cmd_field() {
+        let event = json!({"tool_name":"exec_command", "tool_input":{"cmd":"git status", "shell":"powershell.exe", "description":"keep"}});
+        let result =
+            pretooluse_rewrite_json(&event, "C:\\program files\\lm-resizer.exe", "PreToolUse")
+                .unwrap();
+        let input = &result["hookSpecificOutput"]["updatedInput"];
+        assert_eq!(
+            input["cmd"],
+            "& 'C:\\program files\\lm-resizer.exe' exec -- git status"
+        );
+        assert!(input.get("command").is_none());
+        assert_eq!(input["description"], "keep");
+    }
+    #[test]
+    fn pipeline_guard_requires_stream_provenance_even_without_error_keywords() {
+        let before = "ordinary stdout\n[stderr]\nordinary stderr\n";
+        let after = "ordinary stdout\nordinary stderr\n";
+        assert_eq!(
+            first_lost_indispensable_line(before, after, "generic"),
+            Some("[stderr]")
+        );
+    }
+
+    #[test]
+    fn filter_git_status_keeps_untracked_file_named_use() {
+        let input = "On branch main\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\tuse cases.md\n\tuse-me.txt\n\nnothing added to commit but untracked files present (use \"git add\" to track)\n";
+        let filtered = command_views::filter(&["git".into(), "status".into()], input)
+            .unwrap()
+            .1;
+        assert!(filtered.contains("use cases.md"));
+        assert!(filtered.contains("use-me.txt"));
+    }
+
+    #[test]
     fn codex_config_replaces_existing_table() {
         let existing = r#"model = "gpt-test"
 
@@ -9195,6 +9963,20 @@ command = "node"
     }
 
     #[test]
+    fn split_shell_words_keeps_empty_quoted_argument() {
+        assert_eq!(
+            split_shell_words("grep -rn \"\" src").unwrap(),
+            vec!["grep", "-rn", "", "src"]
+        );
+        let report = rewrite_shell_report("grep -rn \"\" src");
+        assert!(
+            report.rewritten.contains("grep -rn \"\" src"),
+            "Rewritten command does not contain empty quotes: {}",
+            report.rewritten
+        );
+    }
+
+    #[test]
     fn command_extensions_include_windows_cmd_variants() {
         let extensions = command_extensions("codex");
         if cfg!(windows) {
@@ -9210,22 +9992,124 @@ command = "node"
     }
 
     #[test]
-    fn exec_generic_filter_collapses_repeated_lines() {
-        let filtered = filter_generic("same\nsame\nsame\nnext\n");
-        assert!(filtered.contains("same"));
-        assert!(filtered.contains("... previous line repeated 2 times"));
-        assert!(filtered.contains("next"));
+    fn indispensable_gate_matches_original_scan() {
+        // Reference the old scan: trim for listings/search, exact for diff.
+        let inputs = [
+            "",
+            "a\nb\n",
+            " a \n\tb\n\n",
+            "a\na\nb",
+            "é\r\n中\n",
+            "+x\n-y\n+++z\n---z\n",
+            "ERROR: fail\ncontext\n",
+        ];
+        for before in inputs {
+            for after in inputs {
+                for filter in [
+                    "listing",
+                    "search_results",
+                    "diff_summary",
+                    "git_show",
+                    "none",
+                ] {
+                    let reference = first_lost_failure_line(before, after).or_else(|| {
+                        if matches!(filter, "listing" | "search_results") {
+                            before
+                                .lines()
+                                .filter(|l| !l.trim().is_empty())
+                                .find(|l| !after.lines().any(|r| r.trim() == l.trim()))
+                        } else if matches!(filter, "diff_summary" | "git_show") {
+                            before.lines().find(|l| {
+                                ((l.starts_with('+') && !l.starts_with("+++"))
+                                    || (l.starts_with('-') && !l.starts_with("---")))
+                                    && !after.lines().any(|r| r == *l)
+                            })
+                        } else {
+                            None
+                        }
+                    });
+                    assert_eq!(
+                        first_lost_indispensable_line(before, after, filter),
+                        reference,
+                        "{filter}: {before:?} -> {after:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn exec_generic_filter_preserves_repeated_lines_visibly() {
+        let raw = "same\n".repeat(100) + "next\n";
+        let filtered = filter_generic(&raw);
+        assert_eq!(filtered, raw);
     }
 
     #[test]
     fn exec_search_filter_groups_matches_by_file() {
         let raw = "src/a.rs:1:match one\nsrc/a.rs:2:match two\nsrc/a.rs:3:match three\nsrc/b.rs:4:match four\n";
-        let filtered = filter_search_results(raw);
-        assert!(filtered.contains("src/a.rs: 3 matches"));
-        assert!(filtered.contains("src/b.rs: 1 matches"));
-        assert!(filtered.contains("  1:match one"));
-        assert!(filtered.contains("  3:match three"));
+        let filtered = file_views::search(raw);
+        assert!(filtered.contains("[file] src/a.rs (3)"));
+        assert!(filtered.contains("[file] src/b.rs (1)"));
+        assert!(filtered.contains("1: match one"));
+        assert!(filtered.contains("3: match three"));
         assert!(!filtered.contains("omitted"));
+    }
+
+    #[test]
+    fn exec_search_filter_context_before() {
+        let raw = "g/a.txt-1-before one\ng/a.txt:2:NEEDLE one\n";
+        let filtered = file_views::search(raw);
+
+        let pos_before = filtered.find("before one").expect("before one not found");
+        let pos_needle = filtered.find("NEEDLE one").expect("needle not found");
+
+        assert!(pos_before < pos_needle, "before should be before needle");
+
+        assert!(filtered.contains("g/a.txt:2:NEEDLE one"));
+        assert!(filtered.contains("g/a.txt-1-before one"));
+        assert!(filtered.contains("g/a.txt:2:NEEDLE one"));
+    }
+
+    #[test]
+    fn exec_search_filter_context_with_numeric_filename() {
+        let file = "docs/compression-native-2026-09-22.md";
+        let raw = format!("{file}-4-before-7-token\n{file}:5:NEEDLE\n{file}-6-after-8-token\n");
+        let filtered = file_views::search(&raw);
+
+        assert!(filtered.contains(&format!("{file}:5:NEEDLE")));
+        assert!(!filtered.contains("docs/compression-native: 0 matches"));
+        let before = filtered.find("-4-before-7-token").expect("before context");
+        let hit = filtered.find(":5:NEEDLE").expect("match");
+        let after = filtered.find("-6-after-8-token").expect("after context");
+        assert!(before < hit && hit < after);
+    }
+
+    #[test]
+    fn exec_search_filter_context_and_groups() {
+        let raw = "g/a.txt:2:NEEDLE one\ng/a.txt-3-after one\n--\ng/b.txt:2:NEEDLE two\ng/b.txt-3-after two\n";
+        let filtered = file_views::search(raw);
+
+        let pos_after_one = filtered.find("after one").expect("after one not found");
+        let pos_b_header = filtered.find("g/b.txt:").expect("b header not found");
+        let pos_after_two = filtered.find("after two").expect("after two not found");
+
+        assert!(
+            pos_after_one < pos_b_header,
+            "after one should be before b header"
+        );
+        assert!(
+            pos_b_header < pos_after_two,
+            "b header should be before after two"
+        );
+
+        assert!(filtered.contains("g/a.txt:2:NEEDLE one"));
+        assert!(filtered.contains("g/b.txt:2:NEEDLE two"));
+        assert!(filtered.contains("-3-after one"));
+        assert!(filtered.contains("-3-after two"));
+        assert!(filtered.contains("\n--\n"));
+        let pos_separator = filtered.find("\n--\n").expect("separator not found");
+        assert!(pos_after_one < pos_separator && pos_separator < pos_b_header);
     }
 
     #[test]
@@ -9306,22 +10190,22 @@ command = "node"
     fn exec_filter_dispatches_known_commands() {
         let (filter, _text) =
             filter_command_output(&["git".into(), "status".into()], "On branch main\n");
-        assert_eq!(filter, "git_status");
+        assert_eq!(filter, "native:git-status");
 
         let (filter, _text) =
             filter_command_output(&["cargo".into(), "test".into()], "test result: ok\n");
-        assert_eq!(filter, "cargo_test");
+        assert_eq!(filter, "native:cargo-test");
 
         let (filter, _text) =
             filter_command_output(&["rg".into(), "needle".into()], "src/main.rs:1:needle\n");
-        assert_eq!(filter, "search_results");
+        assert_eq!(filter, "native:grep");
     }
 
     #[test]
     fn rewrite_reports_supported_command() {
         let report = rewrite_command_report(&["git".into(), "status".into()]);
         assert!(report.supported);
-        assert_eq!(report.filter, "git_status");
+        assert_eq!(report.filter, "native:git-status");
         assert_eq!(
             report.rewritten.as_deref(),
             Some("lm-resizer exec -- git status")
@@ -9332,7 +10216,7 @@ command = "node"
     fn rewrite_leaves_generic_command_unsupported() {
         let report = rewrite_command_report(&["unknown-tool".into(), "arg".into()]);
         assert!(!report.supported);
-        assert_eq!(report.filter, "generic");
+        assert_eq!(report.filter, "lossless:generic");
         assert!(report.rewritten.is_none());
     }
 
@@ -9354,6 +10238,42 @@ command = "node"
             report.rewritten,
             "lm-resizer exec -- git status > status.txt"
         );
+    }
+
+    #[test]
+    fn rewrite_shell_handles_redirect_with_descriptor() {
+        let report = rewrite_shell_report("cargo test 2>&1 | tail -5");
+        assert_eq!(
+            report.rewritten,
+            "lm-resizer exec -- cargo test 2>&1 | tail -5"
+        );
+
+        let report2 = rewrite_shell_report("git status 2>/dev/null");
+        assert_eq!(
+            report2.rewritten,
+            "lm-resizer exec -- git status 2>/dev/null"
+        );
+
+        let report3 = rewrite_shell_report("git status 2>&1");
+        assert_eq!(report3.rewritten, "lm-resizer exec -- git status 2>&1");
+
+        let report4 = rewrite_shell_report("git diff >out.txt 2>&1");
+        assert_eq!(
+            report4.rewritten,
+            "lm-resizer exec -- git diff >out.txt 2>&1"
+        );
+
+        let report5 = rewrite_shell_report("git status &> /dev/null");
+        assert_eq!(
+            report5.rewritten,
+            "lm-resizer exec -- git status &> /dev/null"
+        );
+
+        let report6 = rewrite_shell_report("git log &");
+        assert_eq!(report6.rewritten, "lm-resizer exec -- git log &");
+
+        let report7 = rewrite_shell_report("git status >&2");
+        assert_eq!(report7.rewritten, "lm-resizer exec -- git status >&2");
     }
 
     #[test]
@@ -9861,10 +10781,10 @@ Format complete in 2674ms.\n";
     }
 
     #[test]
-    fn une_sortie_deja_filtree_par_rtk_n_est_pas_refiltree() {
+    fn une_sortie_deja_filtree_par_native_n_est_pas_refiltree() {
         let raw = "Failed Tests:\n  Calc.Tests.X\n    Expected: 201\n    Actual:   202\n";
-        let (filter, out) = route_command_filter(&cmd(&["rtk", "dotnet", "test"]), raw);
-        assert_eq!(filter, "rtk_owned");
+        let (filter, out) = route_command_filter(&cmd(&["lm-resizer", "dotnet", "test"]), raw);
+        assert_eq!(filter, "native_owned");
         assert_eq!(out, raw);
     }
 
@@ -10164,7 +11084,7 @@ expected = "error: bad\n"
             &["npm".into(), "install".into()],
             "Progress: resolved 100\nadded 12 packages\naudited 12 packages\n",
         );
-        assert_eq!(filter, "toml:package-install");
+        assert_eq!(filter, "native:packages");
         assert!(text.contains("added 12 packages"));
         assert!(!text.contains("Progress:"));
 
@@ -10195,12 +11115,12 @@ expected = "error: bad\n"
             (
                 vec!["go", "test"],
                 "=== RUN test\n--- FAIL: TestThing\nFAIL\n",
-                "toml:go-test",
+                "native:go-test",
             ),
             (
                 vec!["dotnet", "test"],
                 "noise\nTotal tests: 3. Passed: 2. Failed: 1\n",
-                "toml:dotnet",
+                "native:dotnet-test",
             ),
             (
                 vec!["mvn", "test"],
@@ -10210,27 +11130,27 @@ expected = "error: bad\n"
             (
                 vec!["uv", "sync"],
                 "Resolved 42 packages\nDownloading wheels\nInstalled 42 packages\n",
-                "toml:python-package",
+                "native:packages",
             ),
             (
                 vec!["ruff", "check"],
                 "src/main.py:1:1: E402 bad\nFound 1 error.\n",
-                "toml:python-lint",
+                "native:python-lint",
             ),
             (
                 vec!["eslint", "."],
                 "file.ts\nError: bad\n",
-                "toml:js-quality",
+                "native:eslint",
             ),
             (
                 vec!["docker", "logs", "app"],
                 "info\nERROR failed\n",
-                "toml:docker-logs",
+                "native:container-logs",
             ),
             (
                 vec!["kubectl", "get", "pods"],
                 "NAME READY STATUS\napp 0/1 CrashLoopBackOff\n",
-                "toml:kubectl",
+                "native:container-table",
             ),
             (
                 vec!["aws", "lambda", "list-functions"],
@@ -10250,17 +11170,26 @@ expected = "error: bad\n"
     #[test]
     fn exec_tsc_filter_groups_by_file() {
         let raw = "src/a.ts(1,2): error TS2322: Type 'string' is not assignable\nsrc/a.ts(2,3): error TS7006: Parameter has any\n";
-        let filtered = filter_tsc(raw);
-        assert!(filtered.contains("TypeScript: 2 diagnostics in 1 files"));
-        assert!(filtered.contains("src/a.ts: 2 diagnostics"));
+        let filtered = diagnostic_views::typescript(raw);
+        assert!(filtered.contains("TypeScript: 2 errors in 1 files"));
+        assert!(filtered.contains("src/a.ts (2 errors)"));
         assert!(filtered.contains("TS2322"));
+    }
+
+    #[test]
+    fn filter_tsc_keeps_parenthesised_paths() {
+        let raw = "app/(auth)/login/page.tsx(3,1): error TS2304: x\napp/(shop)/cart/page.tsx(1,1): error TS2304: y\n";
+        let filtered = diagnostic_views::typescript(raw);
+        assert!(filtered.contains("app/(auth)/login/page.tsx (1 errors)"));
+        assert!(filtered.contains("app/(shop)/cart/page.tsx (1 errors)"));
+        assert!(!filtered.contains("app/: "));
     }
 
     #[test]
     fn exec_cargo_test_filter_summarizes_passes() {
         let raw =
-            "Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n";
-        let filtered = filter_cargo_test(raw);
+            "Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_004 ... ok\ntest detailed::module::case_005 ... ok\ntest detailed::module::case_006 ... ok\ntest detailed::module::case_007 ... ok\ntest detailed::module::case_008 ... ok\ntest detailed::module::case_009 ... ok\ntest detailed::module::case_010 ... ok\ntest detailed::module::case_011 ... ok\ntest detailed::module::case_012 ... ok\ntest detailed::module::case_013 ... ok\ntest detailed::module::case_014 ... ok\ntest detailed::module::case_015 ... ok\ntest detailed::module::case_016 ... ok\ntest detailed::module::case_017 ... ok\ntest detailed::module::case_018 ... ok\ntest detailed::module::case_019 ... ok\ntest detailed::module::case_020 ... ok\ntest detailed::module::case_021 ... ok\ntest detailed::module::case_022 ... ok\ntest detailed::module::case_023 ... ok\ntest detailed::module::case_024 ... ok\ntest detailed::module::case_025 ... ok\ntest detailed::module::case_026 ... ok\ntest detailed::module::case_027 ... ok\ntest detailed::module::case_028 ... ok\ntest detailed::module::case_029 ... ok\ntest result: ok. 4 passed; 0 failed\n";
+        let filtered = test_views::cargo(raw);
         assert!(filtered.contains("test result: ok"));
         assert!(!filtered.contains("Compiling demo"));
     }
@@ -10418,10 +11347,28 @@ expected = "error: bad\n"
         assert!(!v(&["grep", "build", "Dockerfile"]));
     }
 
+    // Regression coverage of the legacy helper remains explicit. Public exec
+    // now uses a reversible view: the helper dropped unclassified RUN output.
+    #[test]
+    fn docker_public_view_preserves_unclassified_run_output_and_every_stage() {
+        for raw in [
+            docker_build_reussi(),
+            docker_build_echoue(),
+            "#1 RUN deploy\ncredential rejected by remote host\n#1 terminated unexpectedly\n"
+                .to_string(),
+        ] {
+            let (name, view) =
+                filter_command_output(&["docker", "build", "."].map(String::from), &raw);
+            assert_eq!(name, "lossless:containers");
+            assert_eq!(lossless_filters::expand(&view).unwrap(), raw);
+            assert!(token_metrics::TokenCounts::measure(&raw, &view).tokens_saved >= 0);
+        }
+    }
+
     #[test]
     fn docker_build_reussi_est_reduit_sans_perdre_ce_qui_sert() {
         let brut = docker_build_reussi();
-        let (filtre, sortie) = filter_command_output(
+        let (filtre, sortie) = route_command_filter(
             &["docker", "build", "-t", "app:latest", "."].map(String::from),
             &brut,
         );
@@ -10461,7 +11408,7 @@ expected = "error: bad\n"
     fn docker_build_echoue_conserve_le_diagnostic_entier() {
         let brut = docker_build_echoue();
         let (filtre, sortie) =
-            filter_command_output(&["docker", "build", "."].map(String::from), &brut);
+            route_command_filter(&["docker", "build", "."].map(String::from), &brut);
         assert_eq!(filtre, "docker_build");
         // Les trois formes du diagnostic doivent être là, en entier : la cause,
         // l'étape fautive, et la ligne du Dockerfile.
@@ -10506,7 +11453,7 @@ Step 1/2 : FROM alpine:3.19\n\
 Step 2/2 : RUN false\n\
  ---> Running in 0abc123def45\n\
 The command '/bin/sh -c false' returned a non-zero code: 1\n";
-        let (filtre, sortie) = filter_command_output(
+        let (filtre, sortie) = route_command_filter(
             &["docker", "build", "--no-cache", "."].map(String::from),
             brut,
         );
@@ -10536,7 +11483,7 @@ Step 2/2 : RUN cc main.c\n\
 /usr/bin/ld: /tmp/ccx.o: undefined reference to `main'\n\
 collect2: error: ld returned 1 exit status\n\
 The command '/bin/sh -c cc main.c' returned a non-zero code: 1\n";
-        let (_, sortie) = filter_command_output(&["docker", "build", "."].map(String::from), brut);
+        let (_, sortie) = route_command_filter(&["docker", "build", "."].map(String::from), brut);
         assert!(
             sortie.contains("undefined reference to `main'"),
             "diagnostic du linker perdu : {sortie:?}"
@@ -10560,7 +11507,7 @@ The command '/bin/sh -c cc main.c' returned a non-zero code: 1\n";
             "Successfully built 6b6e8e0b0c2a9f1c\n\
              Successfully tagged registry.example/app:1.2.3\n",
         );
-        let (filtre, sortie) = filter_command_output(
+        let (filtre, sortie) = route_command_filter(
             &["docker", "build", "-t", "registry.example/app:1.2.3", "."].map(String::from),
             &brut,
         );
@@ -10585,7 +11532,7 @@ The command '/bin/sh -c cc main.c' returned a non-zero code: 1\n";
     #[test]
     fn docker_build_quiet_garde_le_sha_stdout() {
         let brut = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n";
-        let (_, sortie) = filter_command_output(
+        let (_, sortie) = route_command_filter(
             &["docker", "build", "-q", "-t", "app", "."].map(String::from),
             brut,
         );
@@ -10608,7 +11555,7 @@ sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\
 #1 transferring dockerfile: 12B done\n\
 #1 DONE 0.0s\n";
         let (_, sortie) =
-            filter_command_output(&["docker", "build", "--quiet", "."].map(String::from), brut);
+            route_command_filter(&["docker", "build", "--quiet", "."].map(String::from), brut);
         assert!(
             sortie.contains(
                 "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -10624,7 +11571,7 @@ sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\
 #11 pushing layers 0.4s done\n\
 #11 pushing manifest for docker.io/library/app:1@sha256:9f1c2b3a4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8 0.2s done\n\
 #11 DONE 0.7s\n";
-        let (filtre, sortie) = filter_command_output(
+        let (filtre, sortie) = route_command_filter(
             &["docker", "buildx", "build", "--push", "-t", "app:1", "."].map(String::from),
             brut,
         );
@@ -10641,7 +11588,7 @@ sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\
         let brut = "\
 #3 [1/2] RUN sleep 100\n\
 #3 CANCELED\n";
-        let (_, sortie) = filter_command_output(&["docker", "build", "."].map(String::from), brut);
+        let (_, sortie) = route_command_filter(&["docker", "build", "."].map(String::from), brut);
         assert!(
             !sortie.contains("docker build: completed"),
             "annulation presentee comme un succes : {sortie:?}"
@@ -10655,7 +11602,7 @@ sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\
 #4 [1/1] RUN true\n\
 #4 DEPRECATION NOTICE: the legacy builder frontend is going away\n\
 #4 DONE 0.1s\n";
-        let (_, sortie) = filter_command_output(&["docker", "build", "."].map(String::from), brut);
+        let (_, sortie) = route_command_filter(&["docker", "build", "."].map(String::from), brut);
         assert!(
             sortie.contains("DEPRECATION NOTICE"),
             "avertissement de depreciation perdu : {sortie:?}"
@@ -10669,7 +11616,7 @@ STEP 1/1: FROM alpine\n\
 COMMIT localhost/app:latest\n\
 --> 9f1c2b3a4d5e\n\
 Successfully tagged localhost/app:latest\n";
-        let (filtre, sortie) = filter_command_output(
+        let (filtre, sortie) = route_command_filter(
             &["podman", "build", "-t", "localhost/app:latest", "."].map(String::from),
             brut,
         );
@@ -10770,20 +11717,20 @@ Successfully tagged localhost/app:latest\n";
             .collect();
         let raw = " Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Duration  10ms\n";
         let (name, filtered) = filter_command_output(&command, raw);
-        assert_eq!(name, "js_test_runner");
+        assert_eq!(name, "lossless:npm-test");
         assert!(filtered.contains("Tests  3 passed (3)"));
-        assert!(!filtered.contains("Duration"));
+        assert!(filtered.contains("Duration"));
     }
 
     #[test]
-    fn generic_filter_keeps_all_lines_including_late_failure() {
+    fn generic_filter_preserves_every_literal_line() {
         let mut raw = (0..250)
             .map(|n| format!("progress line {n}\n"))
             .collect::<String>();
         raw.push_str("error: src/main.rs:42: missing value\n");
         let command = vec!["unknown-command".to_string()];
         let (name, output) = filter_command_output(&command, &raw);
-        assert_eq!(name, "generic");
+        assert_eq!(name, "lossless:generic");
         assert_eq!(output, raw);
     }
 
@@ -10812,13 +11759,13 @@ Successfully tagged localhost/app:latest\n";
     }
 
     #[test]
-    fn git_diff_capture_omits_redundant_file_headers_without_losing_patch_facts() {
+    fn git_diff_capture_keeps_complete_patch_including_file_headers() {
         let raw = include_str!("../bench/corpus/git_diff.txt");
-        let (name, output) = filter_command_output(&["git".into(), "diff".into()], raw);
-        assert_eq!(name, "diff_summary");
+        let (name, output) = legacy_lossless_filter(&["git".into(), "diff".into()], raw);
+        assert_eq!(name, "lossless:git");
         assert!(
-            !output.contains("diff --git"),
-            "duplicate path headers remain"
+            output.contains("diff --git"),
+            "patch file headers must survive"
         );
         for fact in [
             "--- a/src/billing.py",
@@ -10840,7 +11787,7 @@ Successfully tagged localhost/app:latest\n";
     fn diff_filter_keeps_header_when_patch_has_no_file_markers() {
         let raw =
             "diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n";
-        let (_, output) = filter_command_output(&["git".into(), "diff".into()], raw);
+        let (_, output) = legacy_lossless_filter(&["git".into(), "diff".into()], raw);
         assert!(output.contains("diff --git a/logo.png b/logo.png"));
     }
 
@@ -10848,7 +11795,7 @@ Successfully tagged localhost/app:latest\n";
     fn git_show_keeps_commit_author_and_subject() {
         let raw = "commit abc123\nAuthor: Example <example@example.org>\nDate:   Mon Sep 28 2026\n\n    Repair error handling\n\ndiff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n";
         let (name, output) = filter_command_output(&["git".into(), "show".into()], raw);
-        assert_eq!(name, "git_show");
+        assert_eq!(name, "native:git-show");
         for fact in [
             "commit abc123",
             "Author: Example",
@@ -10948,13 +11895,13 @@ Successfully tagged localhost/app:latest\n";
     #[test]
     fn discover_pairs_jsonl_command_and_output() {
         let content = r#"{"command":"cargo test"}
-{"output":"Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n"}
+{"output":"Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_004 ... ok\ntest detailed::module::case_005 ... ok\ntest detailed::module::case_006 ... ok\ntest detailed::module::case_007 ... ok\ntest detailed::module::case_008 ... ok\ntest detailed::module::case_009 ... ok\ntest detailed::module::case_010 ... ok\ntest detailed::module::case_011 ... ok\ntest detailed::module::case_012 ... ok\ntest detailed::module::case_013 ... ok\ntest detailed::module::case_014 ... ok\ntest detailed::module::case_015 ... ok\ntest detailed::module::case_016 ... ok\ntest detailed::module::case_017 ... ok\ntest detailed::module::case_018 ... ok\ntest detailed::module::case_019 ... ok\ntest detailed::module::case_020 ... ok\ntest detailed::module::case_021 ... ok\ntest detailed::module::case_022 ... ok\ntest detailed::module::case_023 ... ok\ntest detailed::module::case_024 ... ok\ntest detailed::module::case_025 ... ok\ntest detailed::module::case_026 ... ok\ntest detailed::module::case_027 ... ok\ntest detailed::module::case_028 ... ok\ntest detailed::module::case_029 ... ok\ntest result: ok. 4 passed; 0 failed\n"}
 "#;
         let report = discover_in_content(content, "session.jsonl");
         assert_eq!(report.command_outputs, 1);
         assert_eq!(report.rewritable_commands, 1);
         assert_eq!(report.candidates.len(), 1);
-        assert_eq!(report.candidates[0].filter, "cargo_test");
+        assert_eq!(report.candidates[0].filter, "native:cargo-test");
         assert!(report.filtered_bytes < report.original_bytes);
     }
 
@@ -10966,32 +11913,32 @@ Successfully tagged localhost/app:latest\n";
         let report = discover_in_content(content, "claude.jsonl");
         assert_eq!(report.command_outputs, 1);
         assert_eq!(report.rewritable_commands, 1);
-        assert_eq!(report.candidates[0].filter, "git_status");
+        assert_eq!(report.candidates[0].filter, "native:git-status");
     }
 
     #[test]
     fn discover_extracts_codex_style_arguments() {
         let content = r#"{"tool_name":"exec_command","arguments":"{\"command\":\"cargo test\"}"}
-{"tool_output":"Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n"}
+{"tool_output":"Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_004 ... ok\ntest detailed::module::case_005 ... ok\ntest detailed::module::case_006 ... ok\ntest detailed::module::case_007 ... ok\ntest detailed::module::case_008 ... ok\ntest detailed::module::case_009 ... ok\ntest detailed::module::case_010 ... ok\ntest detailed::module::case_011 ... ok\ntest detailed::module::case_012 ... ok\ntest detailed::module::case_013 ... ok\ntest detailed::module::case_014 ... ok\ntest detailed::module::case_015 ... ok\ntest detailed::module::case_016 ... ok\ntest detailed::module::case_017 ... ok\ntest detailed::module::case_018 ... ok\ntest detailed::module::case_019 ... ok\ntest detailed::module::case_020 ... ok\ntest detailed::module::case_021 ... ok\ntest detailed::module::case_022 ... ok\ntest detailed::module::case_023 ... ok\ntest detailed::module::case_024 ... ok\ntest detailed::module::case_025 ... ok\ntest detailed::module::case_026 ... ok\ntest detailed::module::case_027 ... ok\ntest detailed::module::case_028 ... ok\ntest detailed::module::case_029 ... ok\ntest result: ok. 4 passed; 0 failed\n"}
 "#;
         let report = discover_in_content(content, "codex.jsonl");
         assert_eq!(report.command_outputs, 1);
         assert_eq!(report.rewritable_commands, 1);
-        assert_eq!(report.candidates[0].filter, "cargo_test");
+        assert_eq!(report.candidates[0].filter, "native:cargo-test");
     }
 
     #[test]
     fn discover_markdown_summarizes_candidates() {
         let content = r#"{"command":"cargo test"}
-{"output":"Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n"}
+{"output":"Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_004 ... ok\ntest detailed::module::case_005 ... ok\ntest detailed::module::case_006 ... ok\ntest detailed::module::case_007 ... ok\ntest detailed::module::case_008 ... ok\ntest detailed::module::case_009 ... ok\ntest detailed::module::case_010 ... ok\ntest detailed::module::case_011 ... ok\ntest detailed::module::case_012 ... ok\ntest detailed::module::case_013 ... ok\ntest detailed::module::case_014 ... ok\ntest detailed::module::case_015 ... ok\ntest detailed::module::case_016 ... ok\ntest detailed::module::case_017 ... ok\ntest detailed::module::case_018 ... ok\ntest detailed::module::case_019 ... ok\ntest detailed::module::case_020 ... ok\ntest detailed::module::case_021 ... ok\ntest detailed::module::case_022 ... ok\ntest detailed::module::case_023 ... ok\ntest detailed::module::case_024 ... ok\ntest detailed::module::case_025 ... ok\ntest detailed::module::case_026 ... ok\ntest detailed::module::case_027 ... ok\ntest detailed::module::case_028 ... ok\ntest detailed::module::case_029 ... ok\ntest result: ok. 4 passed; 0 failed\n"}
 "#;
         let mut report = discover_in_content(content, "session.jsonl");
         report.files_scanned = 1;
         report.estimated_bytes_saved = report.original_bytes - report.filtered_bytes;
-        report.estimated_tokens_saved = report.estimated_bytes_saved / 4;
+        report.estimated_tokens_saved = report.tokens.tokens_saved;
         let markdown = format_discover_markdown(&report);
         assert!(markdown.contains("# lm-resizer Discover Audit"));
-        assert!(markdown.contains("| `cargo test` | `cargo_test` |"));
+        assert!(markdown.contains("| `cargo test` | `native:cargo-test` |"));
     }
 
     #[test]
@@ -11020,6 +11967,10 @@ Successfully tagged localhost/app:latest\n";
                 filtered_bytes: 40,
                 estimated_bytes_saved: 60,
                 estimated_tokens_saved: 15,
+                tokens: TokenCounts {
+                    tokens_saved: 15,
+                    ..TokenCounts::default()
+                },
                 candidates: Vec::new(),
             },
         };
@@ -11027,18 +11978,18 @@ Successfully tagged localhost/app:latest\n";
         assert!(markdown.contains("Agent: codex"));
         assert!(markdown.contains("Paths scanned: 1"));
         assert!(markdown.contains(".codex/sessions"));
-        assert!(markdown.contains("Estimated tokens saved: 15"));
+        assert!(markdown.contains("exact text count): 15"));
     }
 
     #[test]
     fn learn_recommends_rewrite_for_compressible_sessions() {
         let content = r#"{"command":"cargo test"}
-{"output":"Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n"}
+{"output":"Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_004 ... ok\ntest detailed::module::case_005 ... ok\ntest detailed::module::case_006 ... ok\ntest detailed::module::case_007 ... ok\ntest detailed::module::case_008 ... ok\ntest detailed::module::case_009 ... ok\ntest detailed::module::case_010 ... ok\ntest detailed::module::case_011 ... ok\ntest detailed::module::case_012 ... ok\ntest detailed::module::case_013 ... ok\ntest detailed::module::case_014 ... ok\ntest detailed::module::case_015 ... ok\ntest detailed::module::case_016 ... ok\ntest detailed::module::case_017 ... ok\ntest detailed::module::case_018 ... ok\ntest detailed::module::case_019 ... ok\ntest detailed::module::case_020 ... ok\ntest detailed::module::case_021 ... ok\ntest detailed::module::case_022 ... ok\ntest detailed::module::case_023 ... ok\ntest detailed::module::case_024 ... ok\ntest detailed::module::case_025 ... ok\ntest detailed::module::case_026 ... ok\ntest detailed::module::case_027 ... ok\ntest detailed::module::case_028 ... ok\ntest detailed::module::case_029 ... ok\ntest result: ok. 4 passed; 0 failed\n"}
 "#;
         let mut discover = discover_in_content(content, "session.jsonl");
         discover.files_scanned = 1;
         discover.estimated_bytes_saved = discover.original_bytes - discover.filtered_bytes;
-        discover.estimated_tokens_saved = discover.estimated_bytes_saved / 4;
+        discover.estimated_tokens_saved = discover.tokens.tokens_saved;
 
         let recommendations = build_learn_recommendations(&discover, &json!({"commands": 0}));
         assert!(recommendations
@@ -11050,6 +12001,42 @@ Successfully tagged localhost/app:latest\n";
     }
 
     #[test]
+    fn discover_refuses_missing_explicit_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let valid = root.path().join("session.jsonl");
+        std::fs::write(&valid, "{}\n").unwrap();
+        let missing = root.path().join("missing");
+        assert!(collect_discover_files(std::slice::from_ref(&missing), true).is_err());
+        assert!(collect_discover_files(&[valid, missing], true).is_err());
+    }
+
+    #[test]
+    fn compress_json_recovers_exact_input_before_minification() {
+        let input = serde_json::to_string_pretty(
+            &(0..150)
+                .map(|id| json!({"id": id, "status": "ok", "score": 100}))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let store = InMemoryCcrStore::default();
+        let report = compress_text(&input, "", &store).unwrap();
+        assert!(report.bytes_saved > 0);
+        let key = report.cache_keys.first().expect("original recovery key");
+        assert_eq!(store.get(key).as_deref(), Some(input.as_str()));
+    }
+
+    #[test]
+    fn compress_source_persists_the_original_advertised_by_its_banner() {
+        let input = include_str!("main.rs").to_string();
+        let store = InMemoryCcrStore::default();
+        let report = compress_text(&input, "", &store).unwrap();
+        assert!(report.bytes_saved > 0);
+        let key = lm_resizer_core::ccr::compute_key(input.as_bytes());
+        assert!(report.cache_keys.contains(&key));
+        assert_eq!(store.get(&key).as_deref(), Some(input.as_str()));
+    }
+
+    #[test]
     fn eval_report_summarizes_discover_fixture() {
         let root = std::env::temp_dir().join(format!("lm-resizer-eval-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
@@ -11057,7 +12044,7 @@ Successfully tagged localhost/app:latest\n";
         std::fs::write(
             &path,
             r#"{"command":"cargo test"}
-{"output":"Compiling demo\nrunning 1 test\ntest ok ... ok\ntest result: ok. 1 passed; 0 failed\n"}
+{"output":"Compiling demo\nrunning 4 tests\ntest detailed::module::case_one ... ok\ntest detailed::module::case_two ... ok\ntest detailed::module::case_three ... ok\ntest detailed::module::case_004 ... ok\ntest detailed::module::case_005 ... ok\ntest detailed::module::case_006 ... ok\ntest detailed::module::case_007 ... ok\ntest detailed::module::case_008 ... ok\ntest detailed::module::case_009 ... ok\ntest detailed::module::case_010 ... ok\ntest detailed::module::case_011 ... ok\ntest detailed::module::case_012 ... ok\ntest detailed::module::case_013 ... ok\ntest detailed::module::case_014 ... ok\ntest detailed::module::case_015 ... ok\ntest detailed::module::case_016 ... ok\ntest detailed::module::case_017 ... ok\ntest detailed::module::case_018 ... ok\ntest detailed::module::case_019 ... ok\ntest detailed::module::case_020 ... ok\ntest detailed::module::case_021 ... ok\ntest detailed::module::case_022 ... ok\ntest detailed::module::case_023 ... ok\ntest detailed::module::case_024 ... ok\ntest detailed::module::case_025 ... ok\ntest detailed::module::case_026 ... ok\ntest detailed::module::case_027 ... ok\ntest detailed::module::case_028 ... ok\ntest detailed::module::case_029 ... ok\ntest result: ok. 4 passed; 0 failed\n"}
 "#,
         )
         .unwrap();
@@ -11114,7 +12101,7 @@ Successfully tagged localhost/app:latest\n";
         });
         let markdown = format_stats_markdown(&report);
         assert!(markdown.contains("# lm-resizer Stats"));
-        assert!(markdown.contains("| `cargo_test` | 2 | 100 | 25 |"));
+        assert!(markdown.contains("| `cargo_test` | 2 | 100 | 25 | 0 |"));
         assert!(markdown.contains("- CCR retrievals: 4"));
     }
 
@@ -11167,7 +12154,7 @@ Successfully tagged localhost/app:latest\n";
         let codex = codex_native_hooks_json("lm-resizer").unwrap();
         assert!(codex.contains("PreToolUse"));
         assert!(codex.contains("PostToolUse"));
-        assert!(codex.contains("\"matcher\": \"Bash\""));
+        assert!(codex.contains("\"matcher\": \"Bash|exec_command\""));
         assert!(codex.contains("hook --client codex --event PreToolUse"));
         assert!(codex.contains("hook --client codex --event PostToolUse"));
 
@@ -11203,6 +12190,39 @@ Successfully tagged localhost/app:latest\n";
             extract_hook_output(&claude).as_deref(),
             Some("On branch main\nnothing to commit\n")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generated_hook_helper_is_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        init_hook_helpers(Some(root.path().to_path_buf()), false).unwrap();
+        let script = root.path().join(".lm-resizer/hooks/rewrite.sh");
+        assert_ne!(
+            std::fs::metadata(script).unwrap().permissions().mode() & 0o111,
+            0
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generated_command_shims_are_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let report = init_command_shims(Some(root.path().to_path_buf()), false).unwrap();
+        assert!(
+            !report.files.is_empty(),
+            "test requires a supported command on PATH"
+        );
+        for path in report.files {
+            let permissions = std::fs::metadata(&path).unwrap().permissions();
+            assert_ne!(
+                permissions.mode() & 0o111,
+                0,
+                "shim must be executable: {path}"
+            );
+        }
     }
 
     #[test]
@@ -11752,29 +12772,47 @@ key = value
     #[test]
     fn command_filters_keep_failure_facts_and_collapse_repeated_success() {
         let pytest = include_str!("../bench/corpus/pytest_fail.txt");
-        let (_, filtered) = filter_command_output(&["pytest".into()], pytest);
+        let (_, filtered) = legacy_lossless_filter(&["pytest".into()], pytest);
         assert!(filtered.contains("test_reject_zero"));
         assert!(filtered.contains("status=422"));
         assert!(filtered.contains("status=200"));
         assert!(filtered.contains("1 failed"));
-        assert!(!filtered.contains("test_case 010"));
+        assert!(filtered.contains("test_case 010")); // Unknown success syntax stays visible.
 
         let cargo = include_str!("../bench/corpus/cargo_ok.txt");
-        let (_, filtered) = filter_command_output(&["cargo".into(), "test".into()], cargo);
+        let (_, filtered) = legacy_lossless_filter(&["cargo".into(), "test".into()], cargo);
         assert!(filtered.contains("80 passed; 0 failed"));
         assert!(filtered.contains("0 ignored"));
-        assert!(!filtered.contains("parse::case 000"));
+        assert!(filtered.contains("parse::case 000")); // Not Cargo result syntax.
 
         let with_warning = "warning: unused variable at src/lib.rs:7\n\
 test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
-        let (_, filtered) = filter_command_output(&["cargo".into(), "test".into()], with_warning);
+        let (_, filtered) = legacy_lossless_filter(&["cargo".into(), "test".into()], with_warning);
         assert!(filtered.contains("warning: unused variable"));
         assert!(filtered.contains("0 ignored"));
-        let (_, filtered) = filter_command_output(
+        let (_, filtered) = legacy_lossless_filter(
             &["cargo".into(), "test".into(), "--workspace".into()],
             with_warning,
         );
         assert!(filtered.contains("warning: unused variable"));
+    }
+
+    #[test]
+    fn tee_trailer_only_spends_tokens_on_substantial_savings() {
+        let hint = "[raw: 012345abcdef]";
+        let raw = "word ".repeat(100);
+        let mut small_gain = "word ".repeat(90);
+        let before = small_gain.clone();
+        append_recovery_instruction(&mut small_gain, hint, &raw);
+        assert_eq!(small_gain, before);
+        let mut large_gain = "summary\n".to_string();
+        append_recovery_instruction(&mut large_gain, hint, &raw);
+        assert!(large_gain.ends_with("[tee:012345abcdef]\n"));
+        assert!(TokenCounts::measure(&raw, &large_gain).tokens_saved > 0);
+        let mut expansion = "word ".repeat(120);
+        let before = expansion.clone();
+        append_recovery_instruction(&mut expansion, hint, &raw);
+        assert_eq!(expansion, before);
     }
 
     #[test]
@@ -11788,15 +12826,22 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
             "poetry.lock",
         ];
         let mut forbidden = Vec::new();
-        for entry in WalkDir::new(&root)
-            .into_iter()
-            .filter_entry(|entry| entry.file_name() != "target")
-        {
+        for entry in WalkDir::new(&root).into_iter().filter_entry(|entry| {
+            !matches!(
+                entry.file_name().to_str(),
+                Some("target" | "_qa" | "node_modules" | ".git")
+            )
+        }) {
             let entry = entry.expect("repo walk should succeed");
             if !entry.file_type().is_file() {
                 continue;
             }
             let path = entry.path();
+            // Python is a benchmark dependency, never a product runtime dependency.
+            // The real-token benchmark explicitly requires Python tiktoken.
+            if path.starts_with(root.join("bench/real")) {
+                continue;
+            }
             let file_name = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -12133,5 +13178,39 @@ Prisma CLI Version : 5.15.0
             .and_then(toml::Value::as_str)
             .unwrap_or_else(|| panic!("missing package.version in {}", path.display()))
             .to_string()
+    }
+}
+// Historical lossless-codec regressions remain covered independently of the
+// explicitly requested native view. native parity has its own external binary oracle.
+#[cfg(test)]
+fn legacy_lossless_filter(command: &[String], raw: &str) -> (String, String) {
+    if let Some((name, out)) = lossless_filters::filter(command, raw) {
+        (format!("lossless:{name}"), out)
+    } else {
+        route_command_filter(command, raw)
+    }
+}
+
+#[test]
+fn pytest_filter_keeps_failing_statement_and_test_header() {
+    let raw = "=== FAILURES ===\n___ test_x ___\n\n    def test_x():\n        data = load()\n>       assert check(data)\nE       AssertionError\n\ntests/test_a.py:9: AssertionError\n=== short test summary info ===\nFAILED tests/test_a.py::test_x\n1 failed in 0.1s\n";
+    let filtered = legacy_lossless_filter(&["pytest".into()], raw).1;
+    assert!(filtered.contains(">       assert check(data)"));
+    assert!(filtered.contains("___ test_x ___"));
+    assert!(filtered.contains("tests/test_a.py:9"));
+    assert!(filtered.contains("data = load()"));
+}
+
+#[test]
+fn calendar_cycles_include_leap_centuries_and_pre_epoch_days() {
+    for (days, date) in [
+        (0, (1970, 1, 1)),
+        (-1, (1969, 12, 31)),
+        (11016, (2000, 2, 29)),
+        (-25509, (1900, 2, 28)),
+        (146097, (2370, 1, 1)),
+        (-146097, (1570, 1, 1)),
+    ] {
+        assert_eq!(civil_from_days(days), date);
     }
 }

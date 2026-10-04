@@ -1,0 +1,86 @@
+{
+  "binary_sha256": "833b40068fdecb8036a902cf0b60b5879dfe660978e46286b482344f4e17eeff",
+  "scope": "single sequential sample per size and mode; cold CLI; OS cache not flushed",
+  "samples": [
+    {
+      "bytes": 250000,
+      "mode": "tool-output",
+      "seconds": 0.4562773139914498,
+      "tokens": 31250,
+      "literal_view": true,
+      "raw_sha256": "9cd4941d1cacb02b151e330806e176a8b83fe4c4fa821fafcc5a854978097ec0"
+    },
+    {
+      "bytes": 250000,
+      "mode": "exec",
+      "seconds": 0.08609679498476908,
+      "tokens": 31250,
+      "literal_view": true,
+      "raw_sha256": "9cd4941d1cacb02b151e330806e176a8b83fe4c4fa821fafcc5a854978097ec0"
+    },
+    {
+      "bytes": 500000,
+      "mode": "tool-output",
+      "seconds": 0.18164491999777965,
+      "tokens": 62500,
+      "literal_view": true,
+      "raw_sha256": "c7adf6280412b3f9acbd4759796fdb295f7894b4a2a7a9d3412b3c72d2434442"
+    },
+    {
+      "bytes": 500000,
+      "mode": "exec",
+      "seconds": 0.24304223200306296,
+      "tokens": 62500,
+      "literal_view": true,
+      "raw_sha256": "c7adf6280412b3f9acbd4759796fdb295f7894b4a2a7a9d3412b3c72d2434442"
+    },
+    {
+      "bytes": 1000000,
+      "mode": "tool-output",
+      "seconds": 0.4334282079944387,
+      "tokens": 125000,
+      "literal_view": true,
+      "raw_sha256": "1b977e9f84f1b26b6ed7f68b0498faee2385ea4125bd29adce4a7d9106ba3134"
+    },
+    {
+      "bytes": 1000000,
+      "mode": "exec",
+      "seconds": 0.4447057810029946,
+      "tokens": 125000,
+      "literal_view": true,
+      "raw_sha256": "1b977e9f84f1b26b6ed7f68b0498faee2385ea4125bd29adce4a7d9106ba3134"
+    },
+    {
+      "bytes": 1048576,
+      "mode": "tool-output",
+      "seconds": 0.5276879569864832,
+      "tokens": 131072,
+      "literal_view": true,
+      "raw_sha256": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+    },
+    {
+      "bytes": 1048576,
+      "mode": "exec",
+      "seconds": 0.49877056598779745,
+      "tokens": 131072,
+      "literal_view": true,
+      "raw_sha256": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+    },
+    {
+      "bytes": 20000000,
+      "mode": "tool-output",
+      "seconds": 13.850233493023552,
+      "tokens": 2500000,
+      "literal_view": true,
+      "raw_sha256": "bc01a03f3f505eaf5572211cc8a8c6dcda5f6bb93ecc6697f880a5d24a3ffac7"
+    },
+    {
+      "bytes": 20000000,
+      "mode": "exec",
+      "seconds": 13.171345531998668,
+      "tokens": 2500000,
+      "literal_view": true,
+      "raw_sha256": "bc01a03f3f505eaf5572211cc8a8c6dcda5f6bb93ecc6697f880a5d24a3ffac7"
+    }
+  ]
+}

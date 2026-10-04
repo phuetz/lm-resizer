@@ -41,12 +41,6 @@ impl<'a> Cursor<'a> {
         self.bytes.len().saturating_sub(self.pos)
     }
 
-    fn u8(&mut self) -> Option<u8> {
-        let b = *self.bytes.get(self.pos)?;
-        self.pos += 1;
-        Some(b)
-    }
-
     fn exact(&mut self, len: usize) -> Option<&'a [u8]> {
         if self.rest() < len {
             return None;
@@ -57,31 +51,24 @@ impl<'a> Cursor<'a> {
     }
 
     fn i32_le(&mut self) -> Option<i32> {
-        let b = self.exact(4)?;
-        Some(i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-    }
-
-    fn i64_le(&mut self) -> Option<i64> {
-        let b = self.exact(8)?;
-        Some(i64::from_le_bytes([
-            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-        ]))
+        self.exact(4)?.try_into().ok().map(i32::from_le_bytes)
     }
 
     fn i7(&mut self) -> Option<u32> {
-        let mut value: u32 = 0;
-        let mut shift = 0;
-        loop {
-            let byte = self.u8()?;
-            value |= u32::from(byte & 0x7f) << shift;
-            if byte & 0x80 == 0 {
-                return Some(value);
-            }
-            shift += 7;
-            if shift >= 35 {
-                return None;
-            }
+        // Locate the terminator first. A u32 occupies at most five base-128
+        // digits, with only four payload bits available in the last digit.
+        let available = &self.bytes[self.pos..];
+        let width = available.iter().take(5).position(|b| b & 128 == 0)? + 1;
+        let digits = self.exact(width)?;
+        if width == 5 && digits[4] > 15 {
+            return None;
         }
+        Some(
+            digits
+                .iter()
+                .rev()
+                .fold(0, |value, b| value * 128 + u32::from(b & 127)),
+        )
     }
 
     fn dotnet_string(&mut self) -> Option<String> {
@@ -293,13 +280,13 @@ fn parse_rfc3339_millis(text: &str) -> Option<i64> {
     if text.len() < 19 || text.as_bytes().get(10) != Some(&b'T') {
         return None;
     }
-    let year: i32 = text[0..4].parse().ok()?;
-    let month: u32 = text[5..7].parse().ok()?;
-    let day: u32 = text[8..10].parse().ok()?;
-    let hour: u32 = text[11..13].parse().ok()?;
-    let min: u32 = text[14..16].parse().ok()?;
-    let sec: u32 = text[17..19].parse().ok()?;
-    let mut rest = &text[19..];
+    let year: i32 = text.get(0..4)?.parse().ok()?;
+    let month: u32 = text.get(5..7)?.parse().ok()?;
+    let day: u32 = text.get(8..10)?.parse().ok()?;
+    let hour: u32 = text.get(11..13)?.parse().ok()?;
+    let min: u32 = text.get(14..16)?.parse().ok()?;
+    let sec: u32 = text.get(17..19)?.parse().ok()?;
+    let mut rest = text.get(19..)?;
     let mut millis: i64 = 0;
     if let Some(stripped) = rest.strip_prefix('.') {
         let digits: String = stripped
@@ -311,7 +298,7 @@ fn parse_rfc3339_millis(text: &str) -> Option<i64> {
         while ms.len() < 3 {
             ms.push('0');
         }
-        millis = ms[..3].parse().ok()?;
+        millis = ms.get(..3)?.parse().ok()?;
     }
     let offset_min: i64 = if rest.is_empty() || rest == "Z" {
         0
@@ -335,16 +322,34 @@ fn parse_rfc3339_millis(text: &str) -> Option<i64> {
 
 /// Jours écoulés depuis 1970-01-01 (algorithme de Howard Hinnant).
 fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
-    if !(1..=12).contains(&month) || day == 0 || day > 31 {
+    let year = i64::from(year);
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let months = [
+        31u32,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let index = month.checked_sub(1)? as usize;
+    if day == 0 || day > *months.get(index)? {
         return None;
     }
-    let y = if month <= 2 { year - 1 } else { year };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = (y - era * 400) as u64;
-    let mp = if month > 2 { month - 3 } else { month + 9 };
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + u64::from(doy);
-    Some(i64::from(era) * 146097 + doe as i64 - 719468)
+    let before_year = |y: i64| {
+        let last = y - 1;
+        365 * last + last.div_euclid(4) - last.div_euclid(100) + last.div_euclid(400)
+    };
+    Some(
+        before_year(year) - before_year(1970)
+            + i64::from(months[..index].iter().sum::<u32>() + day - 1),
+    )
 }
 
 fn collect_trx_reports(paths: &[PathBuf]) -> (Vec<TrxReport>, Vec<String>) {
@@ -1054,7 +1059,7 @@ fn inflate_binlog(bytes: &[u8]) -> Option<Vec<u8>> {
 
 fn read_issue(kind: u32, record: &[u8], version: i32, strings: &[String]) -> Option<Issue> {
     let mut cursor = Cursor::new(record);
-    let message = read_event_fields(&mut cursor, version, strings)?;
+    let message = scan_event_header(&mut cursor, version, strings)?;
     let _subcategory = read_string(&mut cursor, strings)?;
     let code = read_string(&mut cursor, strings)?.unwrap_or_default();
     let file = read_string(&mut cursor, strings)?.unwrap_or_default();
@@ -1078,41 +1083,65 @@ fn read_issue(kind: u32, record: &[u8], version: i32, strings: &[String]) -> Opt
     })
 }
 
-fn read_event_fields(
+// The wire format prescribes field order. Express it as a layout interpreted
+// by a small cursor machine instead of a separate conditional parser per flag.
+#[derive(Clone, Copy)]
+enum HeaderCell {
+    Text { retain: bool },
+    Integers(usize),
+    Fixed(usize),
+    TextList,
+}
+
+fn scan_event_header(
     cursor: &mut Cursor<'_>,
     version: i32,
     strings: &[String],
 ) -> Option<Option<String>> {
+    use HeaderCell::*;
     let flags = cursor.i7()?;
+    let layout: &[(bool, &[HeaderCell])] = &[
+        (flags & FLAG_MESSAGE != 0, &[Text { retain: true }]),
+        (
+            flags & FLAG_CONTEXT != 0,
+            &[Integers(if version > 1 { 7 } else { 6 })],
+        ),
+        (flags & FLAG_TIMESTAMP != 0, &[Fixed(8), Integers(1)]),
+        (
+            flags & FLAG_EXTENDED != 0,
+            &[Text { retain: false }, Integers(1), Text { retain: false }],
+        ),
+        (flags & FLAG_ARGUMENTS != 0, &[TextList]),
+        (version < 13 || flags & FLAG_IMPORTANCE != 0, &[Integers(1)]),
+    ];
+    let cells = layout
+        .iter()
+        .filter(|(enabled, _)| *enabled)
+        .flat_map(|(_, cells)| cells.iter());
     let mut message = None;
-    if flags & FLAG_MESSAGE != 0 {
-        message = read_string(cursor, strings)?;
-    }
-    if flags & FLAG_CONTEXT != 0 {
-        let count = if version > 1 { 7 } else { 6 };
-        for _ in 0..count {
-            cursor.i7()?;
+    for cell in cells {
+        match *cell {
+            Text { retain } => {
+                let text = read_string(cursor, strings)?;
+                if retain {
+                    message = text;
+                }
+            }
+            Integers(n) => {
+                for _ in 0..n {
+                    cursor.i7()?;
+                }
+            }
+            Fixed(bytes) => {
+                cursor.exact(bytes)?;
+            }
+            TextList => {
+                let n = cursor.i7()?;
+                for _ in 0..n {
+                    read_string(cursor, strings)?;
+                }
+            }
         }
-    }
-    if flags & FLAG_TIMESTAMP != 0 {
-        cursor.i64_le()?;
-        cursor.i7()?;
-    }
-    if flags & FLAG_EXTENDED != 0 {
-        let _ = read_string(cursor, strings)?;
-        cursor.i7()?;
-        let _ = read_string(cursor, strings)?;
-    }
-    if flags & FLAG_ARGUMENTS != 0 {
-        let count = cursor.i7()? as usize;
-        for _ in 0..count {
-            let _ = read_string(cursor, strings)?;
-        }
-    }
-    // Importance is a message-record field. Format 25 diagnostics do not set
-    // the flag; reading a spare integer here would swallow the error code.
-    if version < 13 || flags & FLAG_IMPORTANCE != 0 {
-        cursor.i7()?;
     }
     Some(message)
 }
@@ -1851,5 +1880,37 @@ Actual:   301</Message>
         format!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<TestRun xmlns=\"http://microsoft.com/schemas/VisualStudio/TeamTest/2010\">\n  <Times creation=\"{finish}\" finish=\"{finish}\" />\n  <Results>{results}</Results>\n  <TestDefinitions>{defs}</TestDefinitions>\n  <ResultSummary outcome=\"Failed\">\n    <Counters total=\"{total}\" passed=\"{passed}\" failed=\"{failed}\" />\n  </ResultSummary>\n</TestRun>\n"
         )
+    }
+
+    #[test]
+    fn parse_rfc3339_paniques_corrigees() {
+        // 1) Test de la fonction parse_rfc3339_millis directement
+        assert_eq!(parse_rfc3339_millis("2026-09-30T10:00:0é"), None);
+        assert_eq!(parse_rfc3339_millis("20é6-09-30T10:00:00Z"), None);
+        assert!(parse_rfc3339_millis("2026-09-30T10:00:00.250+02:00").is_some());
+
+        // 2) Test de times_attr_millis
+        let xml = r#"<TestRun><Times creation="2026-09-30T10:00:0é" /></TestRun>"#;
+        assert_eq!(times_attr_millis(xml, "creation"), None);
+    }
+}
+
+#[test]
+fn binary_integer_boundaries_and_invalid_dates() {
+    for (bytes, expected) in [
+        (&[0][..], Some(0)),
+        (&[127][..], Some(127)),
+        (&[128, 1][..], Some(128)),
+        (&[255, 255, 255, 255, 15][..], Some(u32::MAX)),
+        (&[255, 255, 255, 255, 16][..], None),
+        (&[128][..], None),
+    ] {
+        assert_eq!(Cursor::new(bytes).i7(), expected);
+    }
+    assert_eq!(days_from_civil(1900, 2, 29), None);
+    assert_eq!(days_from_civil(2000, 2, 29), Some(11016));
+    for days in (-146097..146097).step_by(97) {
+        let (y, m, d) = crate::civil_from_days(days);
+        assert_eq!(days_from_civil(y as i32, m as u32, d as u32), Some(days));
     }
 }

@@ -1,0 +1,20 @@
+{
+  "binary_sha256": "b2caff10d8fc8781e0ecfb9f31535f185f853037f25d231867d0c04720115256",
+  "raw_sha256": "98d9a110aa4b1eef16a7e1ea3364ff4e11557f7fab5e0d72ce31d6fbffce2663",
+  "raw_bytes": 165762,
+  "output_bytes": 80923,
+  "matches": 1434,
+  "decoded_exact": true,
+  "tee_exact": true,
+  "home": "empty isolated directory",
+  "tokens": {
+    "cl100k_base": {
+      "raw": 45926,
+      "output": 22616
+    },
+    "o200k_base": {
+      "raw": 46092,
+      "output": 22850
+    }
+  }
+}

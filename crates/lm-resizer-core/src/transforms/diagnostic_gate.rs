@@ -8,7 +8,7 @@
 //! the model.
 //!
 //! The gate does not undo the compression: failure lines that the compressed
-//! text no longer shows are appended, short and in their original order, under
+//! text no longer shows are appended in their original order, under
 //! a marker. One definition of "failure line" serves every path.
 
 use regex::Regex;
@@ -17,19 +17,10 @@ use std::sync::LazyLock;
 /// Lines that report a failure.
 pub static FAILURE_SIGNAL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)##\[error\]|\berror\b|\bfail(ed|ure|s)?\b|\bFAIL\b|✘|✗|×|exception|panic|traceback|\bassertion\b|\b(expected|actual|received)\b|:line\s+[0-9]+|\bvalues differ\b|\bdiff(erence)?\b|exit code [1-9]|timed? ?out",
+        r"(?i)##\[error\]|\berror\b|\bfail(ed|ures?|s)?\b|\bFAIL\b|✘|✗|×|exception|panic|traceback|\bassertion\b|\b(expected|actual|received)\b|:line\s+[0-9]+|\bvalues differ\b|\bdiff(erence)?\b|exit code [1-9]|timed? ?out|\b\w*error\b|(?m)^\s*(E\s+|assert\b)|called .*unwrap\(\)|(?m)^\s*[\w./\\-]+\.[[:alpha:]]\w*:\d+(:\d+)?|(?:\bat\s+|❯\s+).+:\d+(:\d+)?|\breturned a non-zero code\b|\bcancell?ed\b|npm ERR!",
     )
     .expect("valid failure regex")
 });
-
-/// Longest line considered: a minified blob that happens to contain "error"
-/// is not a diagnostic line.
-const MAX_LINE: usize = 400;
-/// At most this many lines are re-injected; beyond, head and tail are kept.
-const MAX_REINJECTED: usize = 200;
-
-/// Lines that follow a failure line and explain it, at most this many.
-const EXPLANATION_WINDOW: usize = 4;
 
 /// `Label: value` — how test frameworks print what they compared:
 /// `Collection: ["alpha", "beta"]`, `Not found: "gamma"`, `Locator: …`,
@@ -40,71 +31,99 @@ static LABELLED: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(\[[^\]]*\]\s*)?[A-Za-z][A-Za-z ]{0,28}:(\s|$)").expect("valid label regex")
 });
 
+static SGR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*m").expect("valid SGR regex"));
+
+fn is_failure_signal(line: &str) -> bool {
+    if line.contains('\u{1b}') {
+        FAILURE_SIGNAL.is_match(&SGR.replace_all(line, ""))
+    } else {
+        FAILURE_SIGNAL.is_match(line)
+    }
+}
+
 fn indent_of(line: &str) -> usize {
     line.len() - line.trim_start().len()
 }
 
 /// Failure lines of `before` that `after` no longer shows, each with the
 /// explanation lines that follow it in `before` and that `after` lost too.
-/// Trimmed, deduplicated, in the original order.
+/// With indentation and multiplicity, in the original order. SGR color codes
+/// do not count as missing information.
 ///
 /// An explanation line comes right after a failure line (or after another
 /// explanation line), before any blank line, and is either labelled
 /// (`Collection: …`) or indented deeper than the failure line. Measured on a
 /// real `dotnet test --logger detailed`: extending the failure word list with
 /// `expected|actual` (review fix of 23/09) left `Collection:` and `Not found:`
-/// lost on the generic paths; the window recovers them without a new word.
+/// lost on the generic paths; following the explanation recovers them.
 pub fn lost_failure_lines(before: &str, after: &str) -> Vec<String> {
+    if before == after {
+        return Vec::new();
+    }
     let lines: Vec<&str> = before.lines().collect();
     let mut keep = vec![false; lines.len()];
-    let usable = |l: &str| !l.trim().is_empty() && l.len() <= MAX_LINE;
+    let usable = |l: &str| !l.trim().is_empty();
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i];
-        if !(usable(line) && FAILURE_SIGNAL.is_match(line)) {
+        if !(usable(line) && is_failure_signal(line))
+            || line.trim().starts_with("% Total    % Received")
+            || line.trim().starts_with("diff --git ")
+            || line.trim().starts_with("test result: ok.")
+        {
             i += 1;
             continue;
         }
-        if !after.contains(line.trim()) {
-            keep[i] = true;
-        }
+        keep[i] = true;
         let base = indent_of(line);
         let mut j = i + 1;
-        while j < lines.len() && j <= i + EXPLANATION_WINDOW {
+        while j < lines.len() {
             let next = lines[j];
-            // Stack frames are not explanations: measured on a real CI log,
-            // 56 of 91 re-injected lines were `at …` frames printed by passing
-            // tests' console.error. The frames that locate a failure are
-            // failure lines already (`:line N`, `❯ file:line:col`).
-            // Nor is a passing test's line (`✓ …`), measured as noise after a
-            // timeout line in a real Vitest log.
+            // Source locations and assertion rows are independent signals.
+            // Unindented panic messages are also explanations; they cannot be
+            // discarded merely because Rust prints them on the next line.
             let t = next.trim_start();
             if !usable(next)
-                || FAILURE_SIGNAL.is_match(next)
-                || t.starts_with("at ")
+                || is_failure_signal(next)
                 || t.starts_with(['✓', '✔', '√'])
                 || t.starts_with("PASS ")
             {
                 break;
             }
-            let explains = LABELLED.is_match(next.trim_start()) || indent_of(next) > base;
+            let explains = LABELLED.is_match(next.trim_start())
+                || indent_of(next) > base
+                || line.contains("panicked at");
             if !explains {
                 break;
             }
-            if !after.contains(next.trim()) {
-                keep[j] = true;
-            }
+            keep[j] = true;
             j += 1;
         }
         i = j.max(i + 1);
     }
-    let mut seen = std::collections::HashSet::new();
+    let mut present = std::collections::HashMap::new();
+    for line in after.lines() {
+        *present
+            .entry(SGR.replace_all(line.trim(), "").into_owned())
+            .or_insert(0_usize) += 1;
+    }
     lines
         .iter()
         .zip(keep)
         .filter(|(_, k)| *k)
-        .map(|(l, _)| l.trim())
-        .filter(|l| seen.insert(l.to_string()))
+        .map(|(l, _)| *l)
+        .filter(|l| {
+            let count = present
+                .entry(SGR.replace_all(l.trim(), "").into_owned())
+                .or_default();
+            if *count > 0 {
+                *count -= 1;
+                false
+            } else {
+                true
+            }
+        })
         .map(str::to_string)
         .collect()
 }
@@ -116,7 +135,7 @@ pub fn reinject_lost_failure_lines(original: &str, compressed: &str) -> (String,
     if lost.is_empty() {
         return (compressed.to_string(), 0);
     }
-    let mut out = String::with_capacity(compressed.len() + 64 * lost.len().min(MAX_REINJECTED));
+    let mut out = String::with_capacity(compressed.len() + 64 * lost.len());
     out.push_str(compressed);
     if !out.is_empty() && !out.ends_with('\n') {
         out.push('\n');
@@ -125,25 +144,9 @@ pub fn reinject_lost_failure_lines(original: &str, compressed: &str) -> (String,
         "[lm-resizer: {} lignes d'échec omises par la compression, réinjectées ci-dessous]\n",
         lost.len()
     ));
-    let half = MAX_REINJECTED / 2;
-    if lost.len() > MAX_REINJECTED {
-        for l in &lost[..half] {
-            out.push_str(l);
-            out.push('\n');
-        }
-        out.push_str(&format!(
-            "[... {} lignes d'échec de plus ...]\n",
-            lost.len() - MAX_REINJECTED
-        ));
-        for l in &lost[lost.len() - half..] {
-            out.push_str(l);
-            out.push('\n');
-        }
-    } else {
-        for l in &lost {
-            out.push_str(l);
-            out.push('\n');
-        }
+    for line in &lost {
+        out.push_str(line);
+        out.push('\n');
     }
     (out, lost.len())
 }
@@ -153,26 +156,95 @@ mod tests {
     use super::*;
 
     #[test]
+    fn la_couleur_ne_cache_ni_assertion_ni_localisation() {
+        let colored = "\x1b[31mE   assert 301 == 300\x1b[0m\n\x1b[31mtests/orders.py:42: in test_total\x1b[0m\n";
+        assert_eq!(lost_failure_lines(colored, "").len(), 2);
+        assert!(lost_failure_lines(
+            colored,
+            "E   assert 301 == 300\ntests/orders.py:42: in test_total\n"
+        )
+        .is_empty());
+        assert!(lost_failure_lines(
+            "[2026-10-02 12:00:00] INFO compile.rs:42 building module\n",
+            ""
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn assertions_messages_et_localisations_hors_budget_restent_visibles() {
+        for diagnostic in [
+            "E   assert 301 == 300",
+            "assert total == 300",
+            "tests/test_orders.py:42: in test_order_total",
+            "called `Option::unwrap()` on a `None` value",
+            "called `Result::unwrap()` on an `Err` value: boom",
+            "      at tests/orders.test.ts:42:9",
+            " ❯ src/foo.test.ts:12:5",
+            "The command '/bin/sh -c npm test' returned a non-zero code: 1",
+            "CANCELED",
+            "npm ERR! code ELIFECYCLE",
+            "valueerror: bad input",
+            "AssertionError: mismatch",
+        ] {
+            let original = format!(
+                "{}{}\n{}",
+                "INFO ok\n".repeat(200),
+                diagnostic,
+                "INFO ok\n".repeat(200)
+            );
+            let (view, count) = reinject_lost_failure_lines(&original, "1 failed");
+            assert!(count > 0, "{diagnostic}");
+            assert!(view.contains(diagnostic.trim()), "{diagnostic}");
+        }
+        let original =
+            "thread 'main' panicked at src/main.rs:10:5:\nmessage libre sans mot clef\n\n";
+        let (view, _) =
+            reinject_lost_failure_lines(original, "thread 'main' panicked at src/main.rs:10:5:");
+        assert!(view.contains("message libre sans mot clef"));
+    }
+
+    #[test]
+    fn ni_plafond_ni_sous_chaine_ne_masquent_un_diagnostic() {
+        let original = (0..350)
+            .map(|n| format!("ERROR diagnostic {n}: {}\n", "x".repeat(500)))
+            .collect::<String>();
+        let (view, count) = reinject_lost_failure_lines(&original, "ERROR diagnostic 123: partial");
+        assert_eq!(count, 350);
+        for line in original.lines() {
+            assert!(view.contains(line));
+        }
+        assert_eq!(
+            lost_failure_lines("ERROR one\nERROR one\n", "ERROR one\n").len(),
+            1
+        );
+        assert_eq!(
+            lost_failure_lines("ERROR one\n", "prefix ERROR one suffix\n").len(),
+            1
+        );
+    }
+
+    #[test]
     fn rien_de_perdu_rien_d_ajoute() {
         let t = "ok\n##[error]boom\n";
         assert_eq!(reinject_lost_failure_lines(t, t), (t.to_string(), 0));
     }
 
     #[test]
-    fn les_erreurs_perdues_reviennent_dans_l_ordre_sans_doublon() {
+    fn les_erreurs_perdues_reviennent_avec_leur_multiplicite() {
         let original = "a\nERROR one\nb\n##[error]two\nERROR one\n";
         let (out, n) = reinject_lost_failure_lines(original, "[3 lines omitted]");
-        assert_eq!(n, 2);
+        assert_eq!(n, 3);
         let i1 = out.find("ERROR one").unwrap();
         let i2 = out.find("##[error]two").unwrap();
         assert!(i1 < i2);
-        assert_eq!(out.matches("ERROR one").count(), 1);
+        assert_eq!(out.matches("ERROR one").count(), 2);
     }
 
     #[test]
-    fn une_ligne_geante_n_est_pas_un_diagnostic() {
+    fn une_ligne_geante_peut_porter_un_diagnostic() {
         let blob = format!("{{\"error\":null,\"data\":\"{}\"}}", "x".repeat(1000));
-        assert!(lost_failure_lines(&blob, "").is_empty());
+        assert_eq!(lost_failure_lines(&blob, ""), vec![blob]);
     }
 
     #[test]
@@ -193,11 +265,14 @@ mod tests {
     }
 
     #[test]
-    fn un_cadre_de_pile_n_est_pas_une_explication() {
+    fn un_cadre_de_pile_localise_le_diagnostic() {
         let original = "Error: Stored value failed validation\n    at StorageService.load (/w/src/s.js:12:3)\n    at Array.forEach (<anonymous>)\n";
         assert_eq!(
             lost_failure_lines(original, ""),
-            vec!["Error: Stored value failed validation".to_string()]
+            vec![
+                "Error: Stored value failed validation".to_string(),
+                "    at StorageService.load (/w/src/s.js:12:3)".to_string()
+            ]
         );
     }
 
@@ -223,5 +298,28 @@ mod tests {
         assert!(out.contains("Expected: 19,90 €"));
         assert!(out.contains("Actual:   20,00 €"));
         assert!(out.contains("PanierTests.cs:line 44"));
+    }
+
+    #[test]
+    fn les_lignes_js_python_error_sont_reinjectees() {
+        let mut original = String::new();
+        for _ in 0..50 {
+            original.push_str("INFO ok\n");
+        }
+        original.push_str("AssertionError: expected 3\n");
+        original.push_str("INFO ok\n");
+        original.push_str("ValueError: bad input\n");
+
+        let (out, n) = reinject_lost_failure_lines(&original, "[omitted]");
+        assert_eq!(n, 2);
+        assert!(out.contains("AssertionError: expected 3"));
+        assert!(out.contains("ValueError: bad input"));
+    }
+
+    #[test]
+    fn les_lignes_info_errorcode_ne_sont_pas_reinjectees() {
+        let original = "INFO ErrorCode=0\nINFO ok\n";
+        let lost = lost_failure_lines(original, "");
+        assert!(lost.is_empty());
     }
 }

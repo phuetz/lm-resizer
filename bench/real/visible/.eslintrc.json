@@ -1,0 +1,1 @@
+{"root":true,"env":{"es2021":true,"node":true},"rules":{"no-undef":"error","no-unused-vars":"error"}}

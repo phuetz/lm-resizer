@@ -66,8 +66,10 @@ fn cases() -> Vec<Case> {
 
 /// A crusher with a tight token budget — forces lossy row-dropping to fit.
 fn budget_crusher(budget_tokens: usize) -> SmartCrusher {
-    let mut cfg = SmartCrusherConfig::default();
-    cfg.budget_tokens = Some(budget_tokens);
+    let cfg = SmartCrusherConfig {
+        budget_tokens: Some(budget_tokens),
+        ..SmartCrusherConfig::default()
+    };
     SmartCrusher::new(cfg)
 }
 

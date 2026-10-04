@@ -1,0 +1,8 @@
+{
+  "name": "lmr-visible-facts-bench",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {"test": "jest --runInBand --no-colors"},
+  "devDependencies": {"typescript": "5.7.3", "eslint": "8.57.1", "jest": "29.7.0"},
+  "jest": {"testMatch": ["**/failures.test.js"]}
+}

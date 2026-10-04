@@ -10,6 +10,7 @@
 //! workers (see `RUST_DEV.md` "Multi-worker deployment").
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -24,7 +25,7 @@ use crate::monotonic::Instant;
 /// In-memory CCR store backed by [`DashMap`] for sharded concurrent
 /// access.
 ///
-/// - **TTL**: 5 minutes by default. Entries past their TTL are dropped
+/// - **TTL**: 30 minutes by default. Entries past their TTL are dropped
 ///   on the next `get` (lazy expiry — no background reaper thread).
 /// - **Capacity**: 1000 entries by default. When `put` would push us
 ///   past capacity, the oldest entry (per insertion order) is evicted.
@@ -38,19 +39,21 @@ pub struct InMemoryCcrStore {
     /// via TTL expiry) are tolerated — `pop_front` + `map.remove` is a
     /// no-op for missing keys, and capacity-bounded sweeps loop until
     /// they actually evict a real entry.
-    order: Mutex<VecDeque<String>>,
+    order: Mutex<VecDeque<(String, usize)>>,
     ttl: Duration,
     capacity: usize,
+    next_generation: AtomicUsize,
 }
 
 #[derive(Clone)]
 struct Entry {
     payload: String,
     inserted: Instant,
+    generation: usize,
 }
 
 impl InMemoryCcrStore {
-    /// Default: 1000 entries, 5-minute TTL.
+    /// Default: 1000 entries, 30-minute TTL.
     pub fn new() -> Self {
         Self::with_capacity_and_ttl(DEFAULT_CAPACITY, DEFAULT_TTL)
     }
@@ -61,6 +64,7 @@ impl InMemoryCcrStore {
             order: Mutex::new(VecDeque::with_capacity(capacity)),
             ttl,
             capacity,
+            next_generation: AtomicUsize::new(0),
         }
     }
 
@@ -71,12 +75,14 @@ impl InMemoryCcrStore {
     fn evict_until_under_capacity(&self) {
         let mut guard = self.order.lock().expect("ccr order mutex poisoned");
         while self.map.len() >= self.capacity {
-            let Some(oldest) = guard.pop_front() else {
+            let Some((oldest, gen)) = guard.pop_front() else {
                 break;
             };
-            // `remove` is a no-op if `oldest` was already lazy-expired.
+            // `remove_if` is a no-op if `oldest` was already lazy-expired
+            // or if it was overwritten by a fresh put (generation mismatch).
             // Loop continues until we actually shrink the map.
-            self.map.remove(&oldest);
+            self.map
+                .remove_if(&oldest, |_, entry| entry.generation == gen);
         }
     }
 }
@@ -100,23 +106,33 @@ impl CcrStore for InMemoryCcrStore {
 
         // New entry. Cap-bound first (may sweep a few stale order
         // entries), then insert and append to the FIFO queue.
+        // We evict before attempting the final insert to avoid deadlocks,
+        // because eviction requires deleting from potentially any shard.
         if self.map.len() >= self.capacity {
             self.evict_until_under_capacity();
         }
-        let entry = Entry {
-            payload: payload.to_string(),
-            inserted: Instant::now(),
-        };
-        let prev = self.map.insert(hash.to_string(), entry);
-        if prev.is_none() {
-            // Truly new key — record in FIFO order. (If `prev.is_some()`
-            // it means another thread re-inserted between our get_mut
-            // miss and this insert; treat that as a fast-path overwrite
-            // and skip the queue append to avoid duplicates.)
-            self.order
-                .lock()
-                .expect("ccr order mutex poisoned")
-                .push_back(hash.to_string());
+
+        use dashmap::mapref::entry::Entry as DashEntry;
+        match self.map.entry(hash.to_string()) {
+            DashEntry::Occupied(mut o) => {
+                // Raced with another thread that inserted it.
+                // Just update the payload/time, keeping the old generation.
+                let existing = o.get_mut();
+                existing.payload = payload.to_string();
+                existing.inserted = Instant::now();
+            }
+            DashEntry::Vacant(v) => {
+                let gen = self.next_generation.fetch_add(1, Ordering::Relaxed);
+                v.insert(Entry {
+                    payload: payload.to_string(),
+                    inserted: Instant::now(),
+                    generation: gen,
+                });
+                self.order
+                    .lock()
+                    .expect("ccr order mutex poisoned")
+                    .push_back((hash.to_string(), gen));
+            }
         }
     }
 
@@ -207,6 +223,22 @@ mod tests {
         std::thread::sleep(Duration::from_millis(25));
         assert_eq!(store.get("a"), None);
         assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn eviction_does_not_remove_reinserted_fresh_entry() {
+        let store = InMemoryCcrStore::with_capacity_and_ttl(2, Duration::from_millis(100));
+        store.put("a", "1");
+        std::thread::sleep(Duration::from_millis(150));
+        assert_eq!(store.get("a"), None);
+        store.put("b", "2");
+        store.put("a", "1_new");
+        store.put("c", "3");
+
+        assert_eq!(store.get("a"), Some("1_new".to_string()));
+        assert_eq!(store.get("b"), None);
+        assert_eq!(store.get("c"), Some("3".to_string()));
+        assert_eq!(store.len(), 2);
     }
 
     #[test]

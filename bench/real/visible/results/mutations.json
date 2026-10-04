@@ -1,0 +1,12 @@
+{
+  "mutation": "restore decoding before fact checks",
+  "baseline_exit": 0,
+  "mutant_exit": 1,
+  "detected_failures": [
+    "test_B1_number_prefix_mutation",
+    "test_B2_author_reference_mutation",
+    "test_B3_literal_dictionary_mutation",
+    "test_B4_error_block_mutation"
+  ],
+  "interpretation": "All four bad views round-trip, but fail the literal-view oracle."
+}

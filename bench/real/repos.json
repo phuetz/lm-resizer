@@ -1,0 +1,5 @@
+[
+  {"name":"ripgrep","url":"https://github.com/BurntSushi/ripgrep","commit":"3fce3b5bb0236da2df6d99672afb8a719642eca7","depth":21},
+  {"name":"fastapi","url":"https://github.com/fastapi/fastapi","commit":"5f9fc5c59a9bb54608aa35376715f3ba9708188e","depth":21},
+  {"name":"TypeScript","url":"https://github.com/microsoft/TypeScript","commit":"09b1db0617311f3b39f165bb3480c0ce2f718b27","depth":21}
+]

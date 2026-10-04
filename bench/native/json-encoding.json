@@ -1,0 +1,8 @@
+{
+  "source": "controlled mixed values, 20 rows",
+  "raw_tokens": 504,
+  "typed_table_tokens": 351,
+  "csv_json_cells_tokens": 453,
+  "csv_exact": true,
+  "decision": "keep typed table; CSV candidate is larger"
+}

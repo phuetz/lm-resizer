@@ -1,0 +1,9 @@
+# Hooks natifs
+
+`lm-resizer init --client gemini|copilot|cursor --project-dir .` crée une configuration locale. Un fichier existant est refusé sans `--force`. Aucun agent n'est démarré par cette commande. `all` garde sa portée historique Codex + Claude ; les trois nouveaux clients sont explicites.
+
+Le pré-hook réécrit seulement une commande simple déjà prise en charge, sans redirection ni opérateur de shell. Les autres arguments de l'outil restent intacts. La commande enveloppée enregistre elle-même le tee et les statistiques ; aucun post-hook supplémentaire ne compte deux fois cette exécution.
+
+Les adaptateurs utilisent `BeforeTool` et `hookSpecificOutput.tool_input` pour Gemini ([référence officielle](https://geminicli.com/docs/hooks/reference/)), `preToolUse` et `modifiedArgs` pour Copilot ([référence officielle](https://docs.github.com/en/copilot/reference/hooks-reference)), `preToolUse` et `updated_input` pour Cursor Agent ([référence officielle](https://prod.cursor.com/docs/hooks)). Schémas consultés le 3 octobre 2026. Cursor CLI n'est pas assimilé à Cursor Agent.
+
+Les tests exécutent le CLI, créent les configurations dans un répertoire temporaire et vérifient les réponses JSON, les arguments conservés et le refus d'écraser un fichier existant. Aucun test de session authentifiée Gemini, Copilot ou Cursor n'est annoncé.

@@ -1,6 +1,6 @@
 # Mesure A/B réelle des jetons de sortie
 
-`docs/JETONS-SORTIE.md` planifie la verbosité et l'effort avec des constantes (75 jetons de concision, 800 jetons de réflexion). Ces constantes ne sont pas une mesure fournisseur.
+`docs/JETONS-SORTIE.md` décrit les primitives de verbosité et d'effort et leurs limites. Les anciennes hypothèses de 75 jetons de concision et 800 jetons de réflexion ne sont pas des mesures fournisseur.
 
 `examples/compare_provider_usage.rs` compare, hors ligne, des compteurs d'usage déjà capturés. Aucun appel LLM, aucun accès réseau, aucune lecture de longueur de texte. Le modèle de fixture `TEST TECHNIQUE` est un test technique, pas une preuve d'économie fournisseur.
 

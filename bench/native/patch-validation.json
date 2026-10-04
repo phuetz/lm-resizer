@@ -1,0 +1,13 @@
+{
+  "passed": 1348,
+  "failed": 0,
+  "ignored": 3,
+  "suites": 35,
+  "tests_raw_sha256": "c1f516641c10cc9206fd51f27b33ec5eb429c8c5f629d46aa0a3baa52f098448",
+  "clippy_exit": 0,
+  "fmt_exit": 0,
+  "similarity_tests": 6,
+  "public_captures_exit": 0,
+  "source_install_docs_exit": 0,
+  "release_paths_exit": 0
+}

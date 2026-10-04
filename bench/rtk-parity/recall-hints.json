@@ -1,0 +1,16 @@
+{
+  "case": "ctest: 25 reported failures emitted by a shim, hidden-tail recall",
+  "raw_sha256": "48c3bed311a5048ee6dacdefcf68e3d396d7539e4ab83defba51bddecc977db7",
+  "lm_sha256": "d05bfe215cee34bf78a2df182c59c49b8df167dbb4c071afb8122b8e85925fd4",
+  "reference": "ctest: 0/25 passed, 25 failed\nfailed (unparsed, raw):\n    1 - broken_1 (Failed)\n    2 - broken_2 (Failed)\n    3 - broken_3 (Failed)\n    4 - broken_4 (Failed)\n    5 - broken_5 (Failed)\n    6 - broken_6 (Failed)\n    7 - broken_7 (Failed)\n    8 - broken_8 (Failed)\n    9 - broken_9 (Failed)\n    10 - broken_10 (Failed)\n    11 - broken_11 (Failed)\n    12 - broken_12 (Failed)\n    13 - broken_13 (Failed)\n    14 - broken_14 (Failed)\n    15 - broken_15 (Failed)\n    16 - broken_16 (Failed)\n    17 - broken_17 (Failed)\n    18 - broken_18 (Failed)\n    19 - broken_19 (Failed)\n    20 - broken_20 (Failed)\n    ... +5 more failed\n    [+5 hidden: rtk recall c7dcc4792e89]\n[full output: rtk recall ed27dd564cbd]\n",
+  "lm_view": "ctest: 0/25 passed, 25 failed\nfailed (unparsed, raw):\n    1 - broken_1 (Failed)\n    2 - broken_2 (Failed)\n    3 - broken_3 (Failed)\n    4 - broken_4 (Failed)\n    5 - broken_5 (Failed)\n    6 - broken_6 (Failed)\n    7 - broken_7 (Failed)\n    8 - broken_8 (Failed)\n    9 - broken_9 (Failed)\n    10 - broken_10 (Failed)\n    11 - broken_11 (Failed)\n    12 - broken_12 (Failed)\n    13 - broken_13 (Failed)\n    14 - broken_14 (Failed)\n    15 - broken_15 (Failed)\n    16 - broken_16 (Failed)\n    17 - broken_17 (Failed)\n    18 - broken_18 (Failed)\n    19 - broken_19 (Failed)\n    20 - broken_20 (Failed)\n    ... +5 more failed\n    [+5 hidden: lm-resizer tee read 48c3bed311a5]\n[lm-resizer tee read 48c3bed311a5]\n",
+  "rtk_tokens": 257,
+  "lm_view_tokens": 261,
+  "lm_total_tokens": 261,
+  "view_token_delta": 4,
+  "authorized_recall_adaptation": true,
+  "tee_verified": true,
+  "producer_exit": 8,
+  "reference_exit": 8,
+  "lm_exit": 8
+}

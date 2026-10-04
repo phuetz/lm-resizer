@@ -1,0 +1,1584 @@
+{
+  "label": "visible-before-public",
+  "tokenizer": "0.14.0",
+  "source_provenance": {
+    "source_commit": "fd22a8fd160e2b831bcf3992b2733aa052ec0404",
+    "source_files": {
+      "Cargo.lock": "09b6e798cafd052bdfc98f61264ea187b1b4282a31c0b5687e05be7aaac725d7",
+      "Cargo.toml": "a0cbc1842f65c8a8e8285c149bea2c25fd583475b08f9dc163a1edc03e482da2",
+      "crates/lm-resizer-core/Cargo.toml": "13b62f62db4ce083e1df978b264f37527b99c68aaf2ba0ede9c19533eb3ead3c",
+      "crates/lm-resizer-core/benches/auth_mode.rs": "71f773dcff694c79881d0e4168da6dee8ab29c6e542698c105aefa71b1a81004",
+      "crates/lm-resizer-core/benches/ccr_store.rs": "9a74d38d99d2ecd0785654f637c4fad4d1c3483d0b19a16579390c101faf0117",
+      "crates/lm-resizer-core/benches/tokenizer.rs": "e82f25f1d40ffb7ffbd5fca4b06972ba9e035b2646cfe60964d7d0959d578b19",
+      "crates/lm-resizer-core/build.rs": "9512f146f2c3d28125317304d6c8f8990519db3719844d33dba15351315d73f9",
+      "crates/lm-resizer-core/config/pipeline.toml": "3f3e39cd469fa4a69ee451d7c43c497bae399cb46d6417edcef7cc7a27453621",
+      "crates/lm-resizer-core/proptest-regressions/transforms/tag_protector.txt": "09da9466baaa595847ffe007a9fb59eafb1477006d3c9daa350edecc2c826a41",
+      "crates/lm-resizer-core/src/auth_mode.rs": "b601040946ee671fcf44e925a85fa39ee4a0f3d81a2ca402ded0a6072cb2ddb8",
+      "crates/lm-resizer-core/src/cache_control.rs": "6504e5c7f0ff29b84110060a156f07ee046d687c1eead9c250f4b5579bfc0f22",
+      "crates/lm-resizer-core/src/ccr/backends/in_memory.rs": "57bb995a080a3da783c4389b38a08d63ab3012b91389fe7e44bd07e76ccc61bd",
+      "crates/lm-resizer-core/src/ccr/backends/mod.rs": "20c1cf5ebf41cb0a29ce25314bf064a36b8cd40a3126f3fe721f1d423b227e90",
+      "crates/lm-resizer-core/src/ccr/backends/redis.rs": "aea3af3d48cebf3a841fdd7250265cd4aa25446372a441dc41d0ff8bbdeaf54e",
+      "crates/lm-resizer-core/src/ccr/backends/sqlite.rs": "37b3208a3c2f628d48467c01967d4320406102021f5583543c89732ed953e593",
+      "crates/lm-resizer-core/src/ccr/mod.rs": "af2c1e5ae8b650dcb8d07107ae259f65be6810d205805ed07abc2862090a053f",
+      "crates/lm-resizer-core/src/compression_policy.rs": "e86f701e6f18c80099a54b8c97eafd3f8e4a28448b38a6e593b3317c64d40313",
+      "crates/lm-resizer-core/src/lib.rs": "19c26b75aef51859c70e5df737fbc0dc969b7c3e48d2372f3cc2309facfb2f12",
+      "crates/lm-resizer-core/src/monotonic.rs": "6292a6ce039eb1397f78d7b7a5767fcd14dab364195db92a7f6001d4502a29df",
+      "crates/lm-resizer-core/src/output.rs": "2b94b4d433a78d8c6aa2ddd46d96abac8ec9504fae1bab5f4e07a459a5c738d8",
+      "crates/lm-resizer-core/src/relevance/base.rs": "7f47485fd9985a0bef985b5c7fb95b97c22cefba6f578f3df22ee7f93d053d92",
+      "crates/lm-resizer-core/src/relevance/bm25.rs": "f92b69d5210d818877398f209085871c6873ac648038fd6b9c87d118a61071be",
+      "crates/lm-resizer-core/src/relevance/embedding.rs": "2d137aa8c54178e56f951763fb8a5e366f7d3c26e5830764b6d5cd3be7541b6a",
+      "crates/lm-resizer-core/src/relevance/hybrid.rs": "baa3d43df5c474b6ca8e6d729d3d67dd4ba8b49c52bb52f3ac602ae1f3f0dc65",
+      "crates/lm-resizer-core/src/relevance/mod.rs": "55b2fb19ad84330761797c91e5101485fe914ccddddf19d148195f246308a11d",
+      "crates/lm-resizer-core/src/signals/README.md": "0a5eb579fb43c74dd226b1e8b410cde0424386c391c9b336cae046ea546d7d97",
+      "crates/lm-resizer-core/src/signals/keyword_detector.rs": "1690fe3e1765de2e403e5b7ed40941f28e21e023da799eb3b2887a3c70b65cb1",
+      "crates/lm-resizer-core/src/signals/line_importance.rs": "a5df5c346ade3cee165f8c9a8bf48accc682b02fa08a54acce714ac6a1eb8e7e",
+      "crates/lm-resizer-core/src/signals/mod.rs": "a731701bbedc7a605947918cf5720f21849365bfe33235c5105432ca5ef65ad9",
+      "crates/lm-resizer-core/src/signals/tiered.rs": "0919c93d8cf72600335ef4aaa7cf352b3e0972f0772527ea2bf39cb611d002b3",
+      "crates/lm-resizer-core/src/tokenizer/count_only.rs": "93716028b3de1dcfd460a8ac83172b16202e07d75ded5cc433ac54c2eba117a0",
+      "crates/lm-resizer-core/src/tokenizer/estimator.rs": "bc34205a51ce3f1c7c552ef8a134ea986a253afda61d2f100f73677f3bbe80d5",
+      "crates/lm-resizer-core/src/tokenizer/hf_impl.rs": "df4ff003b2409e8bed22713e62d813cf61674adbd28ab633770bc6b8c571a24d",
+      "crates/lm-resizer-core/src/tokenizer/mod.rs": "092ff3e3fde1ee0305cd5e1d7a40f6eb8a044087c16fdba2a21121bef4774cd4",
+      "crates/lm-resizer-core/src/tokenizer/registry.rs": "17da59adf986a5216855124033a9e317401b6a56188d16c52010bfa7892b9158",
+      "crates/lm-resizer-core/src/tokenizer/tiktoken_impl.rs": "8ac1b5afc50e25202f35ecfec04a9ffeebc277117ef1a7c787846841d23531ae",
+      "crates/lm-resizer-core/src/transforms/adaptive_sizer.rs": "b66641cdc5e82dce7736a0f2b4416666933be39a7f6641b64985d57c401b2552",
+      "crates/lm-resizer-core/src/transforms/advice_structural.rs": "f9db80d738114b3438102ff144b445078c8f2ecadc133d92e8a5a9a1a9f3c08d",
+      "crates/lm-resizer-core/src/transforms/anchor_selector.rs": "31114e744b29f29ee92dcf227b0a4bc05f52f8cc5f08a7d102954a70e61f690f",
+      "crates/lm-resizer-core/src/transforms/content_detector.rs": "7714e5f052732f831663e664a102b5dfd9784fb9e8d8e4111038235201aa2768",
+      "crates/lm-resizer-core/src/transforms/detection.rs": "5cc41781124d38dfe3995ab7cd7dea3fcde9b235d8e82260faf620929901d277",
+      "crates/lm-resizer-core/src/transforms/diagnostic_gate.rs": "da0ccc1e4d3594cf0481bde09efd43cebdd183ed7b61610b928d141a1968f7e7",
+      "crates/lm-resizer-core/src/transforms/diff_compressor.rs": "0df41ba149b5dffbd911147437280a934441bd2901cf2a0354b34977b2ed0533",
+      "crates/lm-resizer-core/src/transforms/live_zone.rs": "7143263ab27de95170fdd8b1beea3930f1f3d514a9eb30ce9b9ec40ee232d1c4",
+      "crates/lm-resizer-core/src/transforms/log_compressor.rs": "437ca4177ed740d7bef848fee7b27226d5477eb06072df6cab61771562121976",
+      "crates/lm-resizer-core/src/transforms/magika_detector.rs": "2ca56f9b26d8c8a21346fb89b43d923160a3abd68cca68963465e13fd1604a7b",
+      "crates/lm-resizer-core/src/transforms/magika_onnx.rs": "329b774dd80560ca0a6b78157a332fce02282a51e4eb6bf83795d218634889d0",
+      "crates/lm-resizer-core/src/transforms/mod.rs": "65d5b352e1f009100020abc2d71ac4b06132cd2546a3a9fadf330b4dde219851",
+      "crates/lm-resizer-core/src/transforms/pipeline/config.rs": "0c420e78b13dafae9e5044ec3fb7692c3565125d5115a5a1e63241111ba320a4",
+      "crates/lm-resizer-core/src/transforms/pipeline/mod.rs": "abd34212e293f6348500d0177112453c18a8c380176f369be971de12bf373248",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/diff_noise.rs": "58dcefd025e4c4672572d0f865a60008d23506e9dbb6a53e77c406b64f406e65",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/diff_offload.rs": "8bee4b3f2200fdd04cc25121580818d4826f1ce3b0016d5c40d535f2aa981c05",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/json_offload.rs": "d4ee32519af19907fd1a9b9f0fc61df9e59b2d29874d48bedf569c11f0e0f89f",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/log_offload.rs": "d40295ce8337cf7247cb54ec841298da9f27ecdf629e72296ca18ac014124d1a",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/mod.rs": "dd42bb4e9e121e8df0d6da73668405d4a7e2320dd496025c435f189acba6b8a1",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/search_offload.rs": "40faaaec20b43198679682e9c2f1207bbdb3885095649bea782ffc50e1cb3bba",
+      "crates/lm-resizer-core/src/transforms/pipeline/orchestrator.rs": "b3f5d420adb74d8bf64340425747b69c83c2ba1b10d2de4c74380bec0508c6c8",
+      "crates/lm-resizer-core/src/transforms/pipeline/reformats/json_minifier.rs": "44fa315d37890d212c5b6584855204bd79547bca1d0d3ce619b6fcff86dbba19",
+      "crates/lm-resizer-core/src/transforms/pipeline/reformats/log_template.rs": "8b5610a2c792a7b082d1123e9724562f3dfa72187900cf35dfdbf5ae4e0c9c4d",
+      "crates/lm-resizer-core/src/transforms/pipeline/reformats/mod.rs": "10253e4e7e51342222d4746a32b7f8bf86c6906ed58d9ac5d279132393dc5835",
+      "crates/lm-resizer-core/src/transforms/pipeline/traits.rs": "e30abf03e26022c2ed28864e1bcf1fc52eb17c85a6b583b85bcd41273a6add8f",
+      "crates/lm-resizer-core/src/transforms/prose_compressor.rs": "f20dd00c0bad6854fd914d46b188ed90182f2b49d03abba49e5eaa66f5a32928",
+      "crates/lm-resizer-core/src/transforms/recommendations.rs": "513c66cdc4fdcf6fab8571e851f137ad5fc47aeffebcb60c1589e60e29460536",
+      "crates/lm-resizer-core/src/transforms/retention_advice.rs": "77855fbca809c2e292f4c5857f7f810062349dda749f67efaf82c8ba77f681a5",
+      "crates/lm-resizer-core/src/transforms/safety.rs": "c9ae4860b99c3c10e042fc22e978b27e3cfdd2e81e96c76f1234f6d2f06334dc",
+      "crates/lm-resizer-core/src/transforms/search_compressor.rs": "3c035d12e1ee4e5edd8c971558656ea88eb39f15da04e28300d0213d530c9392",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/analyzer.rs": "a3aab28f2a0e1a0b34def7398f63165a1fe8678ecdca378c2c45749b91af76d2",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/anchors.rs": "e3fdaa738e6df2ea7b78d0b9f6be72af89aacd244f891ab72deca0f1f3c553d1",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/builder.rs": "6c0b47b36ccebf3aba00017409234a116a6da98abbaf1ececf7df1404d55a54a",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/classifier.rs": "d23f458f744ffc40c5f7d31e4561e93525a742f9ee9b2c3d61c29ec5eafddedf",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/classifier.rs": "bfed34faf626889ba013cc54e81f902fdc2cc6f72b39e5942be150488a6031b1",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/compactor.rs": "1a90c7a3158a3f3c6226af3f8c8f2fe7d3dfb50c728774b16cc5549f3946cc09",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/formatter.rs": "ef97c12242f12d1ce859f0705abc480ff51ef6f93d663b80455f3b879f996d62",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/ir.rs": "50f5be7413e6a1da1c615b266fcc0e92fbde0fdf0091fddb7590e05ee7fad620",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/mod.rs": "fa7e517c3b0661eb5ff8f707d9be032492baa315980e31aaac63ae96878e3dd0",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/walker.rs": "9520b177832a067d272632e347ac1f8ab4834b51bfbe589ddf07bf2a7eed9219",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/config.rs": "8bd6e1772001d6d51a2022c9fa38e3fd1aa0b83213f4eb57db2d5b05ecd50d8f",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/constraints.rs": "e2ec29dfa8b49c6afcac890658c3ec43c250c962e71c0f2799f89286cc6eaaf8",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/crusher.rs": "fd766c60066c45e9d9174de40138e961d2391ac15c2586e50752362aa5d97d39",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/crushers.rs": "e783516cc3f8f7342e8385098299d1e09d80c7e466a49f9450bed6727c88e5e8",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/error_keywords.rs": "eb3b5028974f015852cdf6ddb6fdde0fdffb51aea857e306f7b713651b5a8e92",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/field_detect.rs": "549994b2443bc968808d03545fe2abc2e6dc171309693456a7bdd4af136235f2",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/hashing.rs": "99b732aff7964b9d5e8854efe26379a217fbfbfdec7ae389c960abb1a18949ae",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/mod.rs": "6a197cde60c904576ba72c74486ddd88cf5534c3aa2c9f3cc24e593da2f5674e",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/observer.rs": "5c93effc7cfe3341a1c728743c9616d64d3e7204b8e3d970837bdcb1fa71d80e",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/orchestration.rs": "db55f1f80cdec3d1be25021a8d368a02a4d9ee4bc33013f73be67815952eb813",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/outliers.rs": "a3a540966219139b15e46e79d0a47bd07c6b0fcb1e5bcc4fe97d1f56e36a94c8",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/planning.rs": "a60c70c2e6b393e5fb901b6dbdad30721e5f375545e7fc5e6b356391e53569e5",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/statistics.rs": "68454fb4502cf7050577a6f5e15798c07b5a8729d6b166ad38d6630c27eac634",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/stats_math.rs": "72dc7c99ae1d73f510073cc1084b0a7b9eb41acf8833983718b774f0c3a19971",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/traits.rs": "9adc8a09f926a1d004cc51dfeccad1bf74cb8e445b9250d6498f9127b8dde177",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/types.rs": "a91f17858d6dad8ce3d45151806659101c7423801024419c7f088f1671c06230",
+      "crates/lm-resizer-core/src/transforms/source_compressor.rs": "4a9b376f18679c119270b5463c7be2b222ae311fe13ea784dee8426900a25561",
+      "crates/lm-resizer-core/src/transforms/tag_protector.rs": "b7e6b0df44aae9feec064574afc086033497cd5ddb651e07696ced9ecbdb69f7",
+      "crates/lm-resizer-core/src/transforms/unidiff_detector.rs": "c72bda093a1f5834edf8f5fb931b5b7d85f7aa32b9fb7533664b0713ed7b75e2",
+      "crates/lm-resizer-core/tests/adversaire_accolades.rs": "3ea759a10c9104a46b683af522e88a5087b2a5cc55206a3ec77419fca87bb6c3",
+      "crates/lm-resizer-core/tests/auth_mode.rs": "3ecd9e8c6561bbdad9e65e8d3e7b1a06508953eb85ed9b7b2349da5a5f6b6f2d",
+      "crates/lm-resizer-core/tests/cache_control.rs": "c439efb4c0244227ad7f64a1e222ed87edd1b08a4be385ea7dd88c16d6b7a659",
+      "crates/lm-resizer-core/tests/ccr_backends.rs": "91db029782197e43f1ff56b67ea20fa3aac3677594c9d029395e59b78fd1c097",
+      "crates/lm-resizer-core/tests/ccr_roundtrip.rs": "726e7ff3d7812bbc41e3acd0a99378e94fd1db1246d2365efa08f72322a01ba1",
+      "crates/lm-resizer-core/tests/corpus_fige.rs": "ac7e75107c32be6f309dee991090fbed18d659e6760612e113cebbc46b0ed02e",
+      "crates/lm-resizer-core/tests/fixtures/critical_comments.rs.txt": "34c22380924393e0f7dd08e04db0e950f5f2b8ee2401fcb66dba9333eb7adaf3",
+      "crates/lm-resizer-core/tests/live_zone_ccr.rs": "c764f6323ddb97e4cb83faade4d67b4309728bfafa5b72364a0aac6352b83605",
+      "crates/lm-resizer-core/tests/live_zone_dispatch.rs": "68e255c61a2cd70687ef1fb471daa1433753d1b90d12197f35072c03657dba8f",
+      "crates/lm-resizer-core/tests/live_zone_thresholds.rs": "54044ab35f1abda54e7f7d7b3e7caae9107eddb432163c0a145199315d2eb8f8",
+      "crates/lm-resizer-core/tests/live_zone_token_validation.rs": "d4f3b642919d888e7b8af212bdb2d04c7551206935e7f42557cded99efa968ef",
+      "crates/lm-resizer-core/tests/proptest_invariants.rs": "1462f6ce5882f41a2470441555d06b98d1f22c896aad7d11d13599e75fa051a0",
+      "crates/lm-resizer-core/tests/recommendations_loader.rs": "23598401be338ec8df65aa79682d1fc000150499d8b70b84861778e49152e00c",
+      "crates/lm-resizer-core/tests/retention.rs": "a123c74d06dae4691fcadce7922430aa1af3d4a26bb003a5cc86cd4f4d35d063",
+      "crates/lm-resizer-core/tests/source_syntax_compression.rs": "41b237261dbfc34e1621a803fabde8bd5f926d4c8aeb6e452ad44b94addd4588",
+      "crates/lm-resizer-core/tests/tokenizer_proptest.rs": "741ddccb068f9f136b6d959d303357d305b42ae25e126fdc00146e2030aaa02b",
+      "crates/lm-resizer-wasm/Cargo.toml": "29a08498d752714cb08c1877ec9c751ec9100d4d056c5786a8ff61b0c04bb6ef",
+      "crates/lm-resizer-wasm/src/lib.rs": "45f7f23572083f84e86d85ea05ec7c9ae1a0c461737f1619bd15740f727797c2",
+      "rust-toolchain.toml": "110444165732cf0c2eb24f96f6ab9229d2f4d3ff99da0778385799d6c60dd7b1",
+      "src/advice_cli.rs": "301f6930c74d70dba7db0f8f6d4f7a0e9133774fc5ba5ad11ee3347c8e5f6843",
+      "src/lossless_filters.rs": "1b48546557844fa5c67d3eb0bbe31d70c46021beea6d23ecec463fceaf4f6099",
+      "src/main.rs": "956d47eaf1634d43dea57e85a3cbce181de13b742feb39c8e9bc4a08cb213004",
+      "src/mcp_proxy.rs": "70815c2f32f7062e80e283faf5e51c66f492e5fbb873058df7d906aa649ef977",
+      "src/parity_filters.rs": "7119d76cdec3b204523decf01a4d97ecc4d2eb5bd9360657cdb95e25d4e1e569",
+      "src/provider_usage.rs": "68e89682928f0bfba4585dbca61cf1884483ce41967ca08dcc345dc8a7d49448",
+      "src/rtk_filters.rs": "7bf14d184e45ec6b0c9fe81bd4994b0c91ca02281be74e5d080570c9aa2e52aa",
+      "src/shared_context.rs": "e4683fb77b53a48a2f67a21e33307d169c5a8af3b06c7fb61716fb226a6682c3",
+      "src/token_metrics.rs": "270aa1fbe58384b64eef430b2398c427bc40cd928309efa06e240681961c6fe9"
+    },
+    "source_tree_clean": true,
+    "build_command": [
+      "cargo",
+      "build",
+      "--release",
+      "--locked"
+    ],
+    "rustc": "rustc 1.86.0 (05f9846f8 2025-03-31)\nbinary: rustc\ncommit-hash: 05f9846f893b09a1be1fc8560e33fc3c815cfecb\ncommit-date: 2025-03-31\nhost: x86_64-unknown-linux-gnu\nrelease: 1.86.0\nLLVM version: 19.1.7\n",
+    "binary_sha256": "b2caff10d8fc8781e0ecfb9f31535f185f853037f25d231867d0c04720115256"
+  },
+  "binary_sha256": "b2caff10d8fc8781e0ecfb9f31535f185f853037f25d231867d0c04720115256",
+  "repositories": [
+    {
+      "name": "ripgrep",
+      "url": "https://github.com/BurntSushi/ripgrep",
+      "commit": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+      "depth": 21
+    },
+    {
+      "name": "fastapi",
+      "url": "https://github.com/fastapi/fastapi",
+      "commit": "5f9fc5c59a9bb54608aa35376715f3ba9708188e",
+      "depth": 21
+    },
+    {
+      "name": "TypeScript",
+      "url": "https://github.com/microsoft/TypeScript",
+      "commit": "09b1db0617311f3b39f165bb3480c0ce2f718b27",
+      "depth": 21
+    }
+  ],
+  "summary": {
+    "cl100k_base": {
+      "median": 7.378008021390375,
+      "mean": 18.337280538078442,
+      "cases": 30
+    },
+    "o200k_base": {
+      "median": 7.378845162399039,
+      "mean": 18.46544373854923,
+      "cases": 30
+    }
+  },
+  "cases": [
+    {
+      "id": "ripgrep-log",
+      "repo": "ripgrep",
+      "kind": "log",
+      "command": [
+        "git",
+        "log",
+        "-20"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0028282940038479865,
+      "stdout_sha256": "d96edfde732a2f98573ec41f57951cbb30ed926cc4d4cdc25ed589e6e2a73563",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 9532,
+      "output_bytes": 8428,
+      "replay_seconds": 0.023733369016554207,
+      "exec_seconds": 0.24421257097856142,
+      "added_seconds": 0.2204792019620072,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2982,
+          "output": 2814
+        },
+        "o200k_base": {
+          "raw": 2973,
+          "output": 2803
+        }
+      },
+      "facts": 183,
+      "missing_count": 18,
+      "missing_sample": [
+        "5055264ae021b5d0e01e55f723622d638ea877f0: Author: Andrew Gallant <jamslam@gmail.com>",
+        "020687a77d13146923333f0beb274eeabd54a270: Author: Andrew Gallant <jamslam@gmail.com>",
+        "020687a77d13146923333f0beb274eeabd54a270: Benchmark 1: rg-master -j32 --files"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "ripgrep-diff",
+      "repo": "ripgrep",
+      "kind": "diff",
+      "command": [
+        "git",
+        "diff",
+        "HEAD~1"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.021439547999762,
+      "stdout_sha256": "8097c54fc84106a3c297a69361930ab841e97a87b0f390089be8cc5bbbfe363e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 668,
+      "output_bytes": 668,
+      "replay_seconds": 0.022765625006286427,
+      "exec_seconds": 0.06779339999775402,
+      "added_seconds": 0.045027774991467595,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 227,
+          "output": 227
+        },
+        "o200k_base": {
+          "raw": 228,
+          "output": 228
+        }
+      },
+      "facts": 24,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "ripgrep-status",
+      "repo": "ripgrep",
+      "kind": "status",
+      "command": [
+        "git",
+        "status"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0114809509832412,
+      "stdout_sha256": "768047aea8b2e058dfe4712117ed0ac8eac2ac0a254b0691ddabc5e3fd5bfddd",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 104,
+      "output_bytes": 104,
+      "replay_seconds": 0.020428524003364146,
+      "exec_seconds": 0.05819285399047658,
+      "added_seconds": 0.03776432998711243,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 23,
+          "output": 23
+        },
+        "o200k_base": {
+          "raw": 23,
+          "output": 23
+        }
+      },
+      "facts": 3,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "ripgrep-show",
+      "repo": "ripgrep",
+      "kind": "show",
+      "command": [
+        "git",
+        "show",
+        "--stat",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0023836299951653928,
+      "stdout_sha256": "8671ead19bb4cfc3997f86f21694cf6ec06a28e0aec1a4008a2e4b619ef3b538",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 265,
+      "output_bytes": 265,
+      "replay_seconds": 0.021913537988439202,
+      "exec_seconds": 0.06055593301425688,
+      "added_seconds": 0.03864239502581768,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 103,
+          "output": 103
+        },
+        "o200k_base": {
+          "raw": 104,
+          "output": 104
+        }
+      },
+      "facts": 7,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "ripgrep-ls",
+      "repo": "ripgrep",
+      "kind": "ls",
+      "command": [
+        "ls",
+        "-la"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0014828109997324646,
+      "stdout_sha256": "0317d3b6d77be3c492b674f48d058821dda6b8d422918d314a888b1e7890b4a3",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 1769,
+      "output_bytes": 1331,
+      "replay_seconds": 0.020589143998222426,
+      "exec_seconds": 0.048494434013264254,
+      "added_seconds": 0.027905290015041828,
+      "filter": "lossless:listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 837,
+          "output": 637
+        },
+        "o200k_base": {
+          "raw": 837,
+          "output": 637
+        }
+      },
+      "facts": 31,
+      "missing_count": 23,
+      "missing_sample": [
+        "drwxrwxr-x 12 user user  4096 Oct  2 15:39 .",
+        "drwxrwxr-x  5 user user  4096 Oct  2 15:39 ..",
+        "drwxrwxr-x  2 user user  4096 Oct  2 15:39 .cargo"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "ripgrep-recursive",
+      "repo": "ripgrep",
+      "kind": "recursive",
+      "command": [
+        "ls",
+        "-R"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0026287800283171237,
+      "stdout_sha256": "aa1d6fcc645c8a22e62d0fa565be98ee88e54a8202c7b1244faf9e6e09af90df",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 4670,
+      "output_bytes": 4545,
+      "replay_seconds": 0.02145414601545781,
+      "exec_seconds": 0.05384202700224705,
+      "added_seconds": 0.03238788098678924,
+      "filter": "lossless:listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 1599,
+          "output": 1563
+        },
+        "o200k_base": {
+          "raw": 1639,
+          "output": 1595
+        }
+      },
+      "facts": 343,
+      "missing_count": 14,
+      "missing_sample": [
+        [
+          "entry",
+          "./benchsuite/runs/2016-12-24-archlinux-cheetah"
+        ],
+        [
+          "entry",
+          "./benchsuite/runs/2016-12-24-archlinux-cheetah-glibc-jemalloc"
+        ],
+        [
+          "entry",
+          "./benchsuite/runs/2016-12-24-archlinux-cheetah-glibc-system"
+        ]
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "ripgrep-find",
+      "repo": "ripgrep",
+      "kind": "find",
+      "command": [
+        "find",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.003066030010813847,
+      "stdout_sha256": "2f10dfa42ac2fbb3430caba910ee61a915b777b1a99e541d7b1472b7b77d333d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 10353,
+      "output_bytes": 7762,
+      "replay_seconds": 0.023188997991383076,
+      "exec_seconds": 0.05276776402024552,
+      "added_seconds": 0.029578766028862447,
+      "filter": "lossless:paths",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 3600,
+          "output": 2673
+        },
+        "o200k_base": {
+          "raw": 3695,
+          "output": 2706
+        }
+      },
+      "facts": 351,
+      "missing_count": 327,
+      "missing_sample": [
+        "./.github",
+        "./.github/workflows",
+        "./.github/workflows/ci.yml"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "ripgrep-grep",
+      "repo": "ripgrep",
+      "kind": "grep",
+      "command": [
+        "grep",
+        "-rn",
+        "--exclude-dir=.git",
+        "TODO",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.005619798990665004,
+      "stdout_sha256": "5742a2fec5576ea7fc3691de6e6546614539e73666f669b293306f8f807bd6be",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 929,
+      "output_bytes": 929,
+      "replay_seconds": 0.019215500011341646,
+      "exec_seconds": 0.05974996299482882,
+      "added_seconds": 0.040534462983487174,
+      "filter": "lossless:search",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 243,
+          "output": 243
+        },
+        "o200k_base": {
+          "raw": 243,
+          "output": 243
+        }
+      },
+      "facts": 9,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "ripgrep-cat",
+      "repo": "ripgrep",
+      "kind": "cat",
+      "command": [
+        "cat",
+        "crates/core/flags/defs.rs"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0024061120057012886,
+      "stdout_sha256": "779953a821d814ba7f66877d0e581f2a7d7b44099b2cd5c6c7a7271b517ebd1f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 246353,
+      "output_bytes": 165169,
+      "replay_seconds": 0.025534794986015186,
+      "exec_seconds": 0.10670034200302325,
+      "added_seconds": 0.08116554701700807,
+      "filter": "lossless:file",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 63962,
+          "output": 48209
+        },
+        "o200k_base": {
+          "raw": 63937,
+          "output": 48174
+        }
+      },
+      "facts": 1,
+      "missing_count": 1,
+      "missing_sample": [
+        "exact file content"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "ripgrep-test",
+      "repo": "ripgrep",
+      "kind": "test",
+      "command": [
+        "cargo",
+        "test"
+      ],
+      "exit_code": 101,
+      "command_seconds": 0.9743359279818833,
+      "stdout_sha256": "c36d631b17472e70b59066afa383b158c6ca7d903892fa0f411ebd1b8df4bc89",
+      "stderr_sha256": "2a8f4a6c3c66506f77683512cfbafe33d4bff0b07e8cb00c0ea8cce9103992c6",
+      "raw_bytes": 19055,
+      "output_bytes": 1050,
+      "replay_seconds": 0.023627982009202242,
+      "exec_seconds": 0.06220059600309469,
+      "added_seconds": 0.038572613993892446,
+      "filter": "lossless:cargo",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 5064,
+          "output": 315
+        },
+        "o200k_base": {
+          "raw": 5081,
+          "output": 318
+        }
+      },
+      "facts": 20,
+      "missing_count": 4,
+      "missing_sample": [
+        "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "fastapi-log",
+      "repo": "fastapi",
+      "kind": "log",
+      "command": [
+        "git",
+        "log",
+        "-20"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.00317285000346601,
+      "stdout_sha256": "18b955abb4dab8ab9cb3a1d5fb3b2bd59b6fc537a11123cfb2eee32a319e5d2c",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 5884,
+      "output_bytes": 2902,
+      "replay_seconds": 0.023702881997451186,
+      "exec_seconds": 0.08254483199561946,
+      "added_seconds": 0.058841949998168275,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2190,
+          "output": 1355
+        },
+        "o200k_base": {
+          "raw": 2172,
+          "output": 1346
+        }
+      },
+      "facts": 110,
+      "missing_count": 56,
+      "missing_sample": [
+        "9ee8f0012d82013eccf2d4bb03de57963fad77ad: Co-authored-by: pr-submit[bot] <pr-submit[bot]@users.noreply.github.com>",
+        "9ee8f0012d82013eccf2d4bb03de57963fad77ad: Co-authored-by: Yurii Motov <yurii.motov.monte@gmail.com>",
+        "1fbfd595984bbc404e188c02af5633c8356e2cee: Author: latest-changes[bot] <313495250+latest-changes[bot]@users.noreply.github.com>"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "fastapi-diff",
+      "repo": "fastapi",
+      "kind": "diff",
+      "command": [
+        "git",
+        "diff",
+        "HEAD~1"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.21036999201169237,
+      "stdout_sha256": "2c4c567c8cd64671746355e5d93179ca3195c28e01190d7a4f08d0b93c6e96c5",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 887,
+      "output_bytes": 887,
+      "replay_seconds": 0.022125855990452692,
+      "exec_seconds": 0.06648517699795775,
+      "added_seconds": 0.04435932100750506,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 259,
+          "output": 259
+        },
+        "o200k_base": {
+          "raw": 279,
+          "output": 279
+        }
+      },
+      "facts": 10,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "fastapi-status",
+      "repo": "fastapi",
+      "kind": "status",
+      "command": [
+        "git",
+        "status"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.08164793401374482,
+      "stdout_sha256": "768047aea8b2e058dfe4712117ed0ac8eac2ac0a254b0691ddabc5e3fd5bfddd",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 104,
+      "output_bytes": 104,
+      "replay_seconds": 0.021683336002752185,
+      "exec_seconds": 0.0554867310274858,
+      "added_seconds": 0.03380339502473362,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 23,
+          "output": 23
+        },
+        "o200k_base": {
+          "raw": 23,
+          "output": 23
+        }
+      },
+      "facts": 3,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "fastapi-show",
+      "repo": "fastapi",
+      "kind": "show",
+      "command": [
+        "git",
+        "show",
+        "--stat",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.005924791999859735,
+      "stdout_sha256": "ebadf0c67a882de172e8104f80c5b23b697327d4e11202d764707a582d0d8e02",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 291,
+      "output_bytes": 291,
+      "replay_seconds": 0.020348302990896627,
+      "exec_seconds": 0.05702385198674165,
+      "added_seconds": 0.03667554899584502,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 106,
+          "output": 106
+        },
+        "o200k_base": {
+          "raw": 107,
+          "output": 107
+        }
+      },
+      "facts": 7,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "fastapi-ls",
+      "repo": "fastapi",
+      "kind": "ls",
+      "command": [
+        "ls",
+        "-la"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.002882325992686674,
+      "stdout_sha256": "83fd635e2b8c39f503801c750aa4e89c65092bf3dbaa73bc18e8db1340a64a8a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 1144,
+      "output_bytes": 1049,
+      "replay_seconds": 0.0210808269912377,
+      "exec_seconds": 0.06198783699073829,
+      "added_seconds": 0.04090700999950059,
+      "filter": "lossless:listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 528,
+          "output": 486
+        },
+        "o200k_base": {
+          "raw": 529,
+          "output": 487
+        }
+      },
+      "facts": 20,
+      "missing_count": 10,
+      "missing_sample": [
+        "drwxrwxr-x 11 user user   4096 Oct  2 15:42 .",
+        "drwxrwxr-x  5 user user   4096 Oct  2 15:39 ..",
+        "drwxrwxr-x  8 user user   4096 Oct  2 15:44 .git"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "fastapi-recursive",
+      "repo": "fastapi",
+      "kind": "recursive",
+      "command": [
+        "ls",
+        "-R"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.005611264001345262,
+      "stdout_sha256": "3ef05164905325a202bd3adbddba7ec2da7a16e87baeed586c4383d6fb3aaf2f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 117867,
+      "output_bytes": 64045,
+      "replay_seconds": 0.021479683986399323,
+      "exec_seconds": 0.07511967301252298,
+      "added_seconds": 0.05363998902612366,
+      "filter": "lossless:listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 35089,
+          "output": 21137
+        },
+        "o200k_base": {
+          "raw": 35310,
+          "output": 21292
+        }
+      },
+      "facts": 4885,
+      "missing_count": 3326,
+      "missing_sample": [
+        [
+          "entry",
+          "./docs/de/docs/advanced/response-change-status-code.md"
+        ],
+        [
+          "entry",
+          "./docs/de/docs/advanced/response-cookies.md"
+        ],
+        [
+          "entry",
+          "./docs/de/docs/advanced/response-directly.md"
+        ]
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "fastapi-find",
+      "repo": "fastapi",
+      "kind": "find",
+      "command": [
+        "find",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.007476602011593059,
+      "stdout_sha256": "b3803f58837179b3780c8d38ee2e9590b463a62b394db3cc350d26ebe0170557",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 225728,
+      "output_bytes": 156898,
+      "replay_seconds": 0.02432722199591808,
+      "exec_seconds": 0.08495953798410483,
+      "added_seconds": 0.06063231598818675,
+      "filter": "lossless:paths",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 61190,
+          "output": 41834
+        },
+        "o200k_base": {
+          "raw": 61723,
+          "output": 42243
+        }
+      },
+      "facts": 4449,
+      "missing_count": 4437,
+      "missing_sample": [
+        "./.github",
+        "./.github/workflows",
+        "./.github/workflows/sponsors.yml"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "fastapi-grep",
+      "repo": "fastapi",
+      "kind": "grep",
+      "command": [
+        "grep",
+        "-rn",
+        "--exclude-dir=.git",
+        "TODO",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.18952638100017793,
+      "stdout_sha256": "b416a38d89b481d108f56bfab263f68a1f705faa9d95ae5c7a766af06fcf33f6",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 2882,
+      "output_bytes": 2679,
+      "replay_seconds": 0.023966093984199688,
+      "exec_seconds": 0.06151717499596998,
+      "added_seconds": 0.03755108101177029,
+      "filter": "lossless:search",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 753,
+          "output": 703
+        },
+        "o200k_base": {
+          "raw": 759,
+          "output": 708
+        }
+      },
+      "facts": 26,
+      "missing_count": 23,
+      "missing_sample": [
+        [
+          "./fastapi/_compat/shared.py",
+          "199",
+          "    # TODO: remove this function once the required version of Pydantic fully"
+        ],
+        [
+          "./fastapi/_compat/v2.py",
+          "58",
+          "    # TODO: remove when this is merged (or equivalent): https://github.com/pydantic/pydantic/pull/12841"
+        ],
+        [
+          "./fastapi/_compat/v2.py",
+          "73",
+          "# TODO: remove when dropping support for Pydantic < v2.12.3"
+        ]
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "fastapi-cat",
+      "repo": "fastapi",
+      "kind": "cat",
+      "command": [
+        "cat",
+        "docs/en/docs/release-notes.md"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0034293009957764298,
+      "stdout_sha256": "967b9544fb7215df3bf425bbf7d8b766a27f387902df8085a7f7a3226bc0b375",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 709704,
+      "output_bytes": 499491,
+      "replay_seconds": 0.023666352994041517,
+      "exec_seconds": 0.12922666798112914,
+      "added_seconds": 0.10556031498708762,
+      "filter": "lossless:file",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 210240,
+          "output": 162870
+        },
+        "o200k_base": {
+          "raw": 223103,
+          "output": 167588
+        }
+      },
+      "facts": 1,
+      "missing_count": 1,
+      "missing_sample": [
+        "exact file content"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "fastapi-test",
+      "repo": "fastapi",
+      "kind": "test",
+      "command": [
+        "pytest",
+        "-q"
+      ],
+      "exit_code": 2,
+      "command_seconds": 5.908245054015424,
+      "stdout_sha256": "5aefa93ca6b595daefecdd0f5a04aae34f3088d1d9496e265323dd3ff118ab70",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 415245,
+      "output_bytes": 104601,
+      "replay_seconds": 0.024723234004341066,
+      "exec_seconds": 0.10590200501610525,
+      "added_seconds": 0.08117877101176418,
+      "filter": "lossless:pytest",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 101036,
+          "output": 26067
+        },
+        "o200k_base": {
+          "raw": 100772,
+          "output": 26232
+        }
+      },
+      "facts": 6324,
+      "missing_count": 5372,
+      "missing_sample": [
+        "==================================== ERRORS ====================================",
+        "<home>/.local/share/uv/python/cpython-3.11.15-linux-x86_64-gnu/lib/python3.11/importlib/__init__.py:126: in import_module",
+        "<home>/.local/share/uv/python/cpython-3.11.15-linux-x86_64-gnu/lib/python3.11/importlib/__init__.py:126: in import_module"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "TypeScript-log",
+      "repo": "TypeScript",
+      "kind": "log",
+      "command": [
+        "git",
+        "log",
+        "-20"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.005251900001894683,
+      "stdout_sha256": "903a3bf986ebf197129686441363774c3ff5e2494be4ecf9d38ea30fb23a68b2",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 4516,
+      "output_bytes": 4052,
+      "replay_seconds": 0.022945982025703415,
+      "exec_seconds": 0.05692618899047375,
+      "added_seconds": 0.03398020696477033,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 1632,
+          "output": 1521
+        },
+        "o200k_base": {
+          "raw": 1628,
+          "output": 1517
+        }
+      },
+      "facts": 82,
+      "missing_count": 8,
+      "missing_sample": [
+        "15dee00a1c6549a4953ab17ccac4c56d252ba4cc: Author: Jake Bailey <5341706+jakebailey@users.noreply.github.com>",
+        "e8fd69fc1e1974f7f7410f79a04adad692dff0dc: Author: Jake Bailey <5341706+jakebailey@users.noreply.github.com>",
+        "237b14a5d98f8e8f748ff36002fdd99786230d90: Author: Jake Bailey <5341706+jakebailey@users.noreply.github.com>"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "TypeScript-diff",
+      "repo": "TypeScript",
+      "kind": "diff",
+      "command": [
+        "git",
+        "diff",
+        "HEAD~1"
+      ],
+      "exit_code": 0,
+      "command_seconds": 1.4788324609980918,
+      "stdout_sha256": "a3c98e918bcc12cedc65dcbfb59731614e53546daa5f5f4cabb8e958ef40ff5c",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 5989,
+      "output_bytes": 4958,
+      "replay_seconds": 0.024063368007773533,
+      "exec_seconds": 0.07592071400722489,
+      "added_seconds": 0.051857345999451354,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2152,
+          "output": 1829
+        },
+        "o200k_base": {
+          "raw": 2174,
+          "output": 1852
+        }
+      },
+      "facts": 200,
+      "missing_count": 57,
+      "missing_sample": [
+        "@@ -316,6 +316,13 @@ func (tx *TypeEraserTransformer) visit(node *ast.Node) *ast.Node {",
+        "@@ -0,0 +1,32 @@",
+        "+//// [tests/cases/compiler/verbatimModuleSyntaxDefaultImportTypeOnlyNamed.ts] ////"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "TypeScript-status",
+      "repo": "TypeScript",
+      "kind": "status",
+      "command": [
+        "git",
+        "status"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.12171710099210031,
+      "stdout_sha256": "09be446dbc2620ee4a90fc59fa9005e726ac3b4c0e8f2939a9aaccc11575dad4",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 100,
+      "output_bytes": 100,
+      "replay_seconds": 0.024234748008893803,
+      "exec_seconds": 0.07001579599454999,
+      "added_seconds": 0.04578104798565619,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 23,
+          "output": 23
+        },
+        "o200k_base": {
+          "raw": 23,
+          "output": 23
+        }
+      },
+      "facts": 3,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "TypeScript-show",
+      "repo": "TypeScript",
+      "kind": "show",
+      "command": [
+        "git",
+        "show",
+        "--stat",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.009597047988791019,
+      "stdout_sha256": "00ae5a998564f6dbe6a3525798bc6aa591120974ab012a8e7b656567ea7cadff",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 706,
+      "output_bytes": 706,
+      "replay_seconds": 0.02242957500857301,
+      "exec_seconds": 0.056098316999850795,
+      "added_seconds": 0.033668741991277784,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 207,
+          "output": 207
+        },
+        "o200k_base": {
+          "raw": 205,
+          "output": 205
+        }
+      },
+      "facts": 11,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "TypeScript-ls",
+      "repo": "TypeScript",
+      "kind": "ls",
+      "command": [
+        "ls",
+        "-la"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0028388140199240297,
+      "stdout_sha256": "8e757ab1b79129b9f1ce5c9dc06569804aa73e6a2f0c057b9cdd53a0404e1521",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 1607,
+      "output_bytes": 1277,
+      "replay_seconds": 0.023159121978096664,
+      "exec_seconds": 0.05838788900291547,
+      "added_seconds": 0.03522876702481881,
+      "filter": "lossless:listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 744,
+          "output": 600
+        },
+        "o200k_base": {
+          "raw": 745,
+          "output": 601
+        }
+      },
+      "facts": 27,
+      "missing_count": 18,
+      "missing_sample": [
+        "-rw-rw-r--  1 user user    532 Oct  2 15:39 .git-blame-ignore-revs",
+        "-rw-rw-r--  1 user user     93 Oct  2 15:39 .gitattributes",
+        "-rw-rw-r--  1 user user   2777 Oct  2 15:39 .gitignore"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "TypeScript-recursive",
+      "repo": "TypeScript",
+      "kind": "recursive",
+      "command": [
+        "ls",
+        "-R"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.042700802005128935,
+      "stdout_sha256": "86326f7f74450781adff0d71614a0eb06892be8b4b3a14adfe809c43aafac8eb",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 2650550,
+      "output_bytes": 1504416,
+      "replay_seconds": 0.02129574998980388,
+      "exec_seconds": 0.18503261700971052,
+      "added_seconds": 0.16373686701990664,
+      "filter": "lossless:listing",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 621835,
+          "output": 400471
+        },
+        "o200k_base": {
+          "raw": 616572,
+          "output": 397296
+        }
+      },
+      "facts": 68412,
+      "missing_count": 59893,
+      "missing_sample": [
+        [
+          "entry",
+          "./tools/scripts/tsc/generate-enums.ts"
+        ],
+        [
+          "entry",
+          "./tools/scripts/tsc/generate-go-ast.ts"
+        ],
+        [
+          "entry",
+          "./tools/scripts/tsc/generate-options.ts"
+        ]
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "TypeScript-find",
+      "repo": "TypeScript",
+      "kind": "find",
+      "command": [
+        "find",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.04954853397794068,
+      "stdout_sha256": "c5bb9e594490269c0ede5624f2490f9e54e636b7061c061575f62a826a18ef1e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 5678963,
+      "output_bytes": 2431464,
+      "replay_seconds": 0.03001540500554256,
+      "exec_seconds": 0.350010261987336,
+      "added_seconds": 0.3199948569817934,
+      "filter": "lossless:paths",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 1368105,
+          "output": 592541
+        },
+        "o200k_base": {
+          "raw": 1361069,
+          "output": 587128
+        }
+      },
+      "facts": 67761,
+      "missing_count": 67740,
+      "missing_sample": [
+        "./tools",
+        "./tools/hooks",
+        "./tools/hooks/post-checkout"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "TypeScript-grep",
+      "repo": "TypeScript",
+      "kind": "grep",
+      "command": [
+        "grep",
+        "-rn",
+        "--exclude-dir=.git",
+        "TODO",
+        "."
+      ],
+      "exit_code": 0,
+      "command_seconds": 3.6494877389923204,
+      "stdout_sha256": "2d177b24ee99202f559df895e6307ca1a029f44fb8079623692a63b18920fab4",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 103655,
+      "output_bytes": 86908,
+      "replay_seconds": 0.022629699989920482,
+      "exec_seconds": 0.0569059920089785,
+      "added_seconds": 0.03427629201905802,
+      "filter": "lossless:search",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 25694,
+          "output": 21105
+        },
+        "o200k_base": {
+          "raw": 25868,
+          "output": 21198
+        }
+      },
+      "facts": 677,
+      "missing_count": 676,
+      "missing_sample": [
+        [
+          "./tsc/internal/project/session.go",
+          "1161",
+          "\t// !!! TODO: sheetal:  Get other projects that contain the file with symlink"
+        ],
+        [
+          "./tsc/internal/project/session.go",
+          "1173",
+          "\t// !!! TODO: sheetal:  Get other projects that contain the file with symlink"
+        ],
+        [
+          "./tsc/internal/project/snapshot.go",
+          "210",
+          "\t// TODO!! sheetal may be change this to handle symlinks!!"
+        ]
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "TypeScript-cat",
+      "repo": "TypeScript",
+      "kind": "cat",
+      "command": [
+        "cat",
+        "tsc/testdata/fixtures/compiler/checker.ts"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.0033025140000972897,
+      "stdout_sha256": "ffe288edd0eae68f65e4b81b5bbfd4fe5fbed62b55246dc140813078555050fb",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 3151774,
+      "output_bytes": 2640276,
+      "replay_seconds": 0.019791831000475213,
+      "exec_seconds": 0.3796063709887676,
+      "added_seconds": 0.3598145399882924,
+      "filter": "lossless:file",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 593089,
+          "output": 581119
+        },
+        "o200k_base": {
+          "raw": 597267,
+          "output": 583734
+        }
+      },
+      "facts": 1,
+      "missing_count": 1,
+      "missing_sample": [
+        "exact file content"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "TypeScript-test",
+      "repo": "TypeScript",
+      "kind": "test",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "exit_code": 127,
+      "command_seconds": 0.5146150890213903,
+      "stdout_sha256": "36cf49c25ed6627fe73de330ff5c271a21372db9f98c8fbd787e8acb45df66ca",
+      "stderr_sha256": "3cb2fc505271a7802f80b579867c47aeac7871bf6605dc693e6c427f4122e061",
+      "raw_bytes": 71,
+      "output_bytes": 81,
+      "replay_seconds": 0.02558909700019285,
+      "exec_seconds": 0.06344612099928781,
+      "added_seconds": 0.03785702399909496,
+      "filter": "lossless:npm-test",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 31,
+          "output": 31
+        },
+        "o200k_base": {
+          "raw": 31,
+          "output": 31
+        }
+      },
+      "facts": 3,
+      "missing_count": 0,
+      "missing_sample": [],
+      "exit_preserved": true,
+      "recovery_verified": null,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "compare-log",
+      "repo": "ripgrep",
+      "kind": "log",
+      "command": [
+        "git",
+        "log",
+        "-n",
+        "40"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.001993298006709665,
+      "stdout_sha256": "eb07352621e942990fc65fda3763277f1a97f93209a17d3a13807dff8900f20d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 9932,
+      "output_bytes": 8774,
+      "replay_seconds": 0.02632670002640225,
+      "exec_seconds": 0.0535853470209986,
+      "added_seconds": 0.027258646994596347,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 3090,
+          "output": 2913
+        },
+        "o200k_base": {
+          "raw": 3083,
+          "output": 2905
+        }
+      },
+      "facts": 191,
+      "missing_count": 19,
+      "missing_sample": [
+        "5055264ae021b5d0e01e55f723622d638ea877f0: Author: Andrew Gallant <jamslam@gmail.com>",
+        "020687a77d13146923333f0beb274eeabd54a270: Author: Andrew Gallant <jamslam@gmail.com>",
+        "020687a77d13146923333f0beb274eeabd54a270: Benchmark 1: rg-master -j32 --files"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "compare-diff",
+      "repo": "ripgrep",
+      "kind": "diff",
+      "command": [
+        "git",
+        "diff",
+        "HEAD~20"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.010303212999133393,
+      "stdout_sha256": "430339376d59822a6a5a92dc24d0adacd903a47b5903c91bf6f516dc8e967d00",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 155164,
+      "output_bytes": 122759,
+      "replay_seconds": 0.024810748000163585,
+      "exec_seconds": 0.08646921798936091,
+      "added_seconds": 0.06165846998919733,
+      "filter": "lossless:git",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 43282,
+          "output": 37594
+        },
+        "o200k_base": {
+          "raw": 43405,
+          "output": 37676
+        }
+      },
+      "facts": 4544,
+      "missing_count": 2790,
+      "missing_sample": [
+        "@@ -171,6 +171,9 @@ jobs:",
+        "+",
+        "+"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "compare-grep",
+      "repo": "fastapi",
+      "kind": "grep",
+      "command": [
+        "grep",
+        "-rn",
+        "async def",
+        "fastapi"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.006781307980418205,
+      "stdout_sha256": "3bcc85ee414a0239773a01eee988b39d9c6ded0ccdc08b2b2c613ae8a32cb132",
+      "stderr_sha256": "adf004b3088d2728ffbcd735f15a9a8f53b2ca0a4e41d0c12c800a81aa529200",
+      "raw_bytes": 11037,
+      "output_bytes": 10008,
+      "replay_seconds": 0.02394011602154933,
+      "exec_seconds": 0.06258131001959555,
+      "added_seconds": 0.03864119399804622,
+      "filter": "lossless:search",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2867,
+          "output": 2552
+        },
+        "o200k_base": {
+          "raw": 2966,
+          "output": 2645
+        }
+      },
+      "facts": 128,
+      "missing_count": 127,
+      "missing_sample": [
+        [
+          "fastapi/concurrency.py",
+          "18",
+          "async def contextmanager_in_threadpool("
+        ],
+        [
+          "fastapi/applications.py",
+          "407",
+          "                async def read_items():"
+        ],
+        [
+          "fastapi/applications.py",
+          "1144",
+          "            async def openapi(req: Request) -> JSONResponse:"
+        ]
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "compare-find",
+      "repo": "fastapi",
+      "kind": "find",
+      "command": [
+        "find",
+        ".",
+        "-name",
+        "*.py"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.00637108800583519,
+      "stdout_sha256": "eacc0c4f9fb358d3fd26668696ae25ca8ba67df8b49babeb1730cb817a74b8df",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 58888,
+      "output_bytes": 42186,
+      "replay_seconds": 0.018990728975040838,
+      "exec_seconds": 0.06815565898432396,
+      "added_seconds": 0.049164930009283125,
+      "filter": "lossless:paths",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 14042,
+          "output": 9803
+        },
+        "o200k_base": {
+          "raw": 14203,
+          "output": 9905
+        }
+      },
+      "facts": 1166,
+      "missing_count": 1164,
+      "missing_sample": [
+        "./scripts/translate.py",
+        "./scripts/prepare_release.py",
+        "./scripts/sponsors.py"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    },
+    {
+      "id": "compare-cat",
+      "repo": "TypeScript",
+      "kind": "cat",
+      "command": [
+        "cat",
+        "tsc/internal/bundled/libs/lib.dom.d.ts"
+      ],
+      "exit_code": 0,
+      "command_seconds": 0.002793509018374607,
+      "stdout_sha256": "d6b1eba8496bdd0eed6fc8a685768fe01b2da4a0388b5fe7df558290bffcf32f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 2349483,
+      "output_bytes": 2046177,
+      "replay_seconds": 0.01676967498497106,
+      "exec_seconds": 0.262065999006154,
+      "added_seconds": 0.24529632402118295,
+      "filter": "lossless:file",
+      "tokens": {
+        "cl100k_base": {
+          "raw": 530260,
+          "output": 470126
+        },
+        "o200k_base": {
+          "raw": 535949,
+          "output": 474299
+        }
+      },
+      "facts": 1,
+      "missing_count": 1,
+      "missing_sample": [
+        "exact file content"
+      ],
+      "exit_preserved": true,
+      "recovery_verified": true,
+      "cli_exact_counts_verified": true
+    }
+  ]
+}

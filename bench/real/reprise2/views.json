@@ -1,0 +1,1678 @@
+{
+  "binary_sha256": "833b40068fdecb8036a902cf0b60b5879dfe660978e46286b482344f4e17eeff",
+  "scope": "supplementary fixtures, excluded from the 30 real-command cases",
+  "cases": [
+    {
+      "name": "docker-compose",
+      "origin": "versioned fixture; not a newly executed tool",
+      "command": "docker compose up",
+      "exact": true,
+      "exit_code": 1,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 61,
+          "output": 61
+        },
+        "o200k_base": {
+          "raw": 61,
+          "output": 61
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "docker-images",
+      "origin": "versioned fixture; not a newly executed tool",
+      "command": "docker images",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 51,
+          "output": 51
+        },
+        "o200k_base": {
+          "raw": 52,
+          "output": 52
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "jest",
+      "origin": "versioned fixture; not a newly executed tool",
+      "command": "jest --runInBand",
+      "exact": true,
+      "exit_code": 1,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 70,
+          "output": 70
+        },
+        "o200k_base": {
+          "raw": 71,
+          "output": 71
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "tsc",
+      "origin": "versioned fixture; not a newly executed tool",
+      "command": "tsc --noEmit",
+      "exact": true,
+      "exit_code": 2,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 50,
+          "output": 50
+        },
+        "o200k_base": {
+          "raw": 51,
+          "output": 51
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "eslint",
+      "origin": "versioned fixture; not a newly executed tool",
+      "command": "eslint src",
+      "exact": true,
+      "exit_code": 1,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 52,
+          "output": 52
+        },
+        "o200k_base": {
+          "raw": 52,
+          "output": 52
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "docker-logs",
+      "origin": "versioned fixture; not a newly executed tool",
+      "command": "docker logs sample-api",
+      "exact": true,
+      "exit_code": 1,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 80,
+          "output": 80
+        },
+        "o200k_base": {
+          "raw": 80,
+          "output": 80
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "docker-ps",
+      "origin": "versioned fixture; not a newly executed tool",
+      "command": "docker ps",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 83,
+          "output": 83
+        },
+        "o200k_base": {
+          "raw": 86,
+          "output": 86
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "vitest",
+      "origin": "versioned fixture; not a newly executed tool",
+      "command": "vitest run",
+      "exact": true,
+      "exit_code": 1,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 98,
+          "output": 98
+        },
+        "o200k_base": {
+          "raw": 100,
+          "output": 100
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-0",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6344,
+          "output": 6344
+        },
+        "o200k_base": {
+          "raw": 6359,
+          "output": 6359
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-1",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4599,
+          "output": 4599
+        },
+        "o200k_base": {
+          "raw": 4742,
+          "output": 4742
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-2",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6306,
+          "output": 6306
+        },
+        "o200k_base": {
+          "raw": 6300,
+          "output": 6300
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-3",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4628,
+          "output": 4628
+        },
+        "o200k_base": {
+          "raw": 4773,
+          "output": 4773
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-4",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6213,
+          "output": 6213
+        },
+        "o200k_base": {
+          "raw": 6201,
+          "output": 6201
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-5",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4665,
+          "output": 4665
+        },
+        "o200k_base": {
+          "raw": 4810,
+          "output": 4810
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-6",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6366,
+          "output": 6366
+        },
+        "o200k_base": {
+          "raw": 6375,
+          "output": 6375
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-7",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4605,
+          "output": 4605
+        },
+        "o200k_base": {
+          "raw": 4748,
+          "output": 4748
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-8",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6464,
+          "output": 6464
+        },
+        "o200k_base": {
+          "raw": 6464,
+          "output": 6464
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-9",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4620,
+          "output": 4620
+        },
+        "o200k_base": {
+          "raw": 4770,
+          "output": 4770
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-10",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6255,
+          "output": 6255
+        },
+        "o200k_base": {
+          "raw": 6246,
+          "output": 6246
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-11",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4598,
+          "output": 4598
+        },
+        "o200k_base": {
+          "raw": 4744,
+          "output": 4744
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-12",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6251,
+          "output": 6251
+        },
+        "o200k_base": {
+          "raw": 6251,
+          "output": 6251
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-13",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4640,
+          "output": 4640
+        },
+        "o200k_base": {
+          "raw": 4789,
+          "output": 4789
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-14",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6294,
+          "output": 6294
+        },
+        "o200k_base": {
+          "raw": 6285,
+          "output": 6285
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-15",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4634,
+          "output": 4634
+        },
+        "o200k_base": {
+          "raw": 4781,
+          "output": 4781
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-16",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6378,
+          "output": 6378
+        },
+        "o200k_base": {
+          "raw": 6369,
+          "output": 6369
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-17",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4589,
+          "output": 4589
+        },
+        "o200k_base": {
+          "raw": 4738,
+          "output": 4738
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-18",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6276,
+          "output": 6276
+        },
+        "o200k_base": {
+          "raw": 6297,
+          "output": 6297
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-19",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4646,
+          "output": 4646
+        },
+        "o200k_base": {
+          "raw": 4797,
+          "output": 4797
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-20",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6317,
+          "output": 6317
+        },
+        "o200k_base": {
+          "raw": 6323,
+          "output": 6323
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-21",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4616,
+          "output": 4616
+        },
+        "o200k_base": {
+          "raw": 4758,
+          "output": 4758
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-22",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6294,
+          "output": 6294
+        },
+        "o200k_base": {
+          "raw": 6294,
+          "output": 6294
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-23",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4656,
+          "output": 4656
+        },
+        "o200k_base": {
+          "raw": 4806,
+          "output": 4806
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-24",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6251,
+          "output": 6251
+        },
+        "o200k_base": {
+          "raw": 6281,
+          "output": 6281
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-25",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4625,
+          "output": 4625
+        },
+        "o200k_base": {
+          "raw": 4770,
+          "output": 4770
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-26",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6372,
+          "output": 6372
+        },
+        "o200k_base": {
+          "raw": 6375,
+          "output": 6375
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-27",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4629,
+          "output": 4629
+        },
+        "o200k_base": {
+          "raw": 4772,
+          "output": 4772
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-28",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6215,
+          "output": 6215
+        },
+        "o200k_base": {
+          "raw": 6209,
+          "output": 6209
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-29",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4610,
+          "output": 4610
+        },
+        "o200k_base": {
+          "raw": 4757,
+          "output": 4757
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-30",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6246,
+          "output": 6246
+        },
+        "o200k_base": {
+          "raw": 6243,
+          "output": 6243
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-31",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4649,
+          "output": 4649
+        },
+        "o200k_base": {
+          "raw": 4796,
+          "output": 4796
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-32",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6147,
+          "output": 6147
+        },
+        "o200k_base": {
+          "raw": 6159,
+          "output": 6159
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-33",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4632,
+          "output": 4632
+        },
+        "o200k_base": {
+          "raw": 4781,
+          "output": 4781
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-34",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6237,
+          "output": 6237
+        },
+        "o200k_base": {
+          "raw": 6225,
+          "output": 6225
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-35",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4663,
+          "output": 4663
+        },
+        "o200k_base": {
+          "raw": 4813,
+          "output": 4813
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-36",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6501,
+          "output": 6501
+        },
+        "o200k_base": {
+          "raw": 6498,
+          "output": 6498
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-37",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4663,
+          "output": 4663
+        },
+        "o200k_base": {
+          "raw": 4811,
+          "output": 4811
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-38",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6243,
+          "output": 6243
+        },
+        "o200k_base": {
+          "raw": 6228,
+          "output": 6228
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-39",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4590,
+          "output": 4590
+        },
+        "o200k_base": {
+          "raw": 4738,
+          "output": 4738
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-40",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6243,
+          "output": 6243
+        },
+        "o200k_base": {
+          "raw": 6255,
+          "output": 6255
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-41",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4627,
+          "output": 4627
+        },
+        "o200k_base": {
+          "raw": 4776,
+          "output": 4776
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-42",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6345,
+          "output": 6345
+        },
+        "o200k_base": {
+          "raw": 6336,
+          "output": 6336
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-43",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4622,
+          "output": 4622
+        },
+        "o200k_base": {
+          "raw": 4763,
+          "output": 4763
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-44",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6320,
+          "output": 6320
+        },
+        "o200k_base": {
+          "raw": 6311,
+          "output": 6311
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-45",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4621,
+          "output": 4621
+        },
+        "o200k_base": {
+          "raw": 4763,
+          "output": 4763
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-46",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6276,
+          "output": 6276
+        },
+        "o200k_base": {
+          "raw": 6282,
+          "output": 6282
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-47",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4609,
+          "output": 4609
+        },
+        "o200k_base": {
+          "raw": 4758,
+          "output": 4758
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-48",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6323,
+          "output": 6323
+        },
+        "o200k_base": {
+          "raw": 6311,
+          "output": 6311
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-49",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4684,
+          "output": 4684
+        },
+        "o200k_base": {
+          "raw": 4837,
+          "output": 4837
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-50",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6198,
+          "output": 6198
+        },
+        "o200k_base": {
+          "raw": 6210,
+          "output": 6210
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-51",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4609,
+          "output": 4609
+        },
+        "o200k_base": {
+          "raw": 4760,
+          "output": 4760
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-52",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6258,
+          "output": 6258
+        },
+        "o200k_base": {
+          "raw": 6261,
+          "output": 6261
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-53",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4641,
+          "output": 4641
+        },
+        "o200k_base": {
+          "raw": 4790,
+          "output": 4790
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-54",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6318,
+          "output": 6318
+        },
+        "o200k_base": {
+          "raw": 6276,
+          "output": 6276
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-55",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4623,
+          "output": 4623
+        },
+        "o200k_base": {
+          "raw": 4765,
+          "output": 4765
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-56",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6287,
+          "output": 6287
+        },
+        "o200k_base": {
+          "raw": 6302,
+          "output": 6302
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-57",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4650,
+          "output": 4650
+        },
+        "o200k_base": {
+          "raw": 4795,
+          "output": 4795
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-58",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6156,
+          "output": 6156
+        },
+        "o200k_base": {
+          "raw": 6174,
+          "output": 6174
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-59",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4607,
+          "output": 4607
+        },
+        "o200k_base": {
+          "raw": 4751,
+          "output": 4751
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-60",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6243,
+          "output": 6243
+        },
+        "o200k_base": {
+          "raw": 6237,
+          "output": 6237
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-61",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4630,
+          "output": 4630
+        },
+        "o200k_base": {
+          "raw": 4782,
+          "output": 4782
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-62",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6399,
+          "output": 6399
+        },
+        "o200k_base": {
+          "raw": 6408,
+          "output": 6408
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-63",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4636,
+          "output": 4636
+        },
+        "o200k_base": {
+          "raw": 4776,
+          "output": 4776
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-64",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6320,
+          "output": 6320
+        },
+        "o200k_base": {
+          "raw": 6311,
+          "output": 6311
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-65",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4679,
+          "output": 4679
+        },
+        "o200k_base": {
+          "raw": 4833,
+          "output": 4833
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-66",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6429,
+          "output": 6429
+        },
+        "o200k_base": {
+          "raw": 6429,
+          "output": 6429
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-67",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4674,
+          "output": 4674
+        },
+        "o200k_base": {
+          "raw": 4823,
+          "output": 4823
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-68",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6380,
+          "output": 6380
+        },
+        "o200k_base": {
+          "raw": 6377,
+          "output": 6377
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-69",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4635,
+          "output": 4635
+        },
+        "o200k_base": {
+          "raw": 4784,
+          "output": 4784
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-70",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6375,
+          "output": 6375
+        },
+        "o200k_base": {
+          "raw": 6360,
+          "output": 6360
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-71",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4606,
+          "output": 4606
+        },
+        "o200k_base": {
+          "raw": 4759,
+          "output": 4759
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-72",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6368,
+          "output": 6368
+        },
+        "o200k_base": {
+          "raw": 6356,
+          "output": 6356
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-73",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4584,
+          "output": 4584
+        },
+        "o200k_base": {
+          "raw": 4729,
+          "output": 4729
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-74",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6420,
+          "output": 6420
+        },
+        "o200k_base": {
+          "raw": 6450,
+          "output": 6450
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-75",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4587,
+          "output": 4587
+        },
+        "o200k_base": {
+          "raw": 4735,
+          "output": 4735
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-76",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6335,
+          "output": 6335
+        },
+        "o200k_base": {
+          "raw": 6311,
+          "output": 6311
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-77",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4655,
+          "output": 4655
+        },
+        "o200k_base": {
+          "raw": 4806,
+          "output": 4806
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-78",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 6273,
+          "output": 6273
+        },
+        "o200k_base": {
+          "raw": 6267,
+          "output": 6267
+        }
+      },
+      "representation": "raw"
+    },
+    {
+      "name": "seed-79",
+      "origin": "deterministic adversarial fixture",
+      "command": "cat input.txt",
+      "exact": true,
+      "exit_code": 0,
+      "tee_verified": null,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 4657,
+          "output": 4657
+        },
+        "o200k_base": {
+          "raw": 4807,
+          "output": 4807
+        }
+      },
+      "representation": "raw"
+    }
+  ]
+}

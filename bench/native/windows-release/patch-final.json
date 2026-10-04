@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "case": "repeated",
+      "command": "log",
+      "raw_tokens": 6642,
+      "before_tokens": 266,
+      "after_tokens": 261,
+      "expanded_exact": true,
+      "tee_exact": true,
+      "raw_sha256": "ae0249428e5b3397e6ed1ff817a8565a07c761b4c76b11d4862ca5af3f80442a"
+    },
+    {
+      "case": "repeated",
+      "command": "show",
+      "raw_tokens": 4281,
+      "before_tokens": 4281,
+      "after_tokens": 130,
+      "expanded_exact": true,
+      "tee_exact": true,
+      "raw_sha256": "0be30a5dee5f7a42260a7f746d962c64ba15db2aeb12cc9d5c4792276c2cd3ab"
+    },
+    {
+      "case": "distinct",
+      "command": "log",
+      "raw_tokens": 7605,
+      "before_tokens": 7586,
+      "after_tokens": 7580,
+      "expanded_exact": true,
+      "tee_exact": true,
+      "raw_sha256": "6a9d42336a0e5052d4f4199d547bab55bd71d1f4f2f15466dd68155f3ba7fd17"
+    },
+    {
+      "case": "distinct",
+      "command": "show",
+      "raw_tokens": 4922,
+      "before_tokens": 4922,
+      "after_tokens": 4897,
+      "expanded_exact": true,
+      "tee_exact": true,
+      "raw_sha256": "d75ed0462e63274d443735d70e82c73f1b8bbf2dd298eaf4abe821165f7b71ae"
+    }
+  ],
+  "tokenizer": "o200k_base",
+  "binaries": {
+    "before": "cc3b84d873f18bc57979385dc8c4cca754b8f4fc7b056e0a8259f112c4b38d63",
+    "binary": "8df6adf99fdac51f8758b7638f4e1e6f909cf89e7e901ac1c3f17a539c9b2474"
+  }
+}

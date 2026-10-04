@@ -61,6 +61,18 @@ assert(
   `expected real pipeline steps, got ${JSON.stringify(report.steps_applied)}`
 );
 
+// Retrieval must use the store of the same WASM instance, through the JS API.
+assert(report.cache_keys.length > 0, "compressed JSON should have a CCR key");
+const restored = lm.retrieve(report.cache_keys[0]);
+assert(restored.content === payload, "CCR retrieval should restore the original JSON");
+let missingRejected = false;
+try {
+  lm.retrieve("missing-smoke-key");
+} catch (error) {
+  missingRejected = /CCR entry not found/.test(error.message);
+}
+assert(missingRejected, "unknown CCR key should throw an explicit error");
+
 // Case 2 — plain text must round-trip without error (and without crashing).
 const plain = lm.compressJson("hello world, this is plain prose with no structure", "");
 assert(!plain.error, `plain text errored: ${plain.error}`);

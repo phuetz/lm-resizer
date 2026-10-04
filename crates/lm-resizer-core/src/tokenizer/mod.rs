@@ -29,6 +29,7 @@
 //! - [`EstimatingCounter`] — last-resort `chars / cpt` fallback for Anthropic
 //!   and Gemini, calibrated to match the Python implementation.
 
+mod count_only;
 mod estimator;
 mod hf_impl;
 mod registry;

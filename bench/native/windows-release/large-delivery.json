@@ -1,0 +1,10 @@
+{
+  "binary_sha256": "a7fb175fafa01d6b8acaed69184bbd77d54d706629df4a0d18357cbc1f5c35e8",
+  "producer_bytes": 11059229,
+  "producer_sha256": "186618d1731f6308cd2838153fbd4c7ea709a39fb5b22171be3499fa470e7282",
+  "producer_exit": 7,
+  "lm_exit": 7,
+  "tee_exact": true,
+  "stdout_and_stderr_interleaved": true,
+  "tail_beyond_ten_mib": true
+}

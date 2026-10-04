@@ -7,11 +7,25 @@ if [ -z "$version" ]; then
   version="$(grep -m1 '^version = ' "$root/Cargo.toml" | sed 's/version = "\(.*\)"/\1/')"
 fi
 
-cargo build --release
-bin="$root/target/release/lm-resizer"
+# LM_RESIZER_BINARY: a binary built elsewhere (the static Linux build, see
+# scripts/build-linux-static.sh). Otherwise build the native one.
+if [ -n "${LM_RESIZER_BINARY:-}" ]; then
+  bin="$LM_RESIZER_BINARY"
+else
+  node "$root/scripts/build-release-artifact.cjs" native
+  bin="$root/target/release/lm-resizer"
+fi
 if [ ! -x "$bin" ]; then
   printf >&2 '%s\n' "release binary not found: $bin"
   exit 1
+fi
+# A published Linux archive must run on any x86_64 distribution: refuse a binary
+# that needs a dynamic loader (glibc/musl) or shared libraries.
+if [ "${LM_RESIZER_REQUIRE_STATIC:-}" = "1" ]; then
+  if readelf -lW "$bin" | grep -q 'INTERP' || readelf -d "$bin" 2>/dev/null | grep -q 'NEEDED'; then
+    printf >&2 '%s\n' "refusing to package $bin: it is dynamically linked (run scripts/build-linux-static.sh)"
+    exit 1
+  fi
 fi
 "$root/scripts/check-wasm-package.sh"
 "$root/scripts/release-evidence.sh"
@@ -27,7 +41,7 @@ for f in LICENSE README.md README.fr.md CHANGELOG.md CONTRIBUTING.md SECURITY.md
   cp "$root/$f" "$stage/"
 done
 mkdir -p "$stage/docs" "$stage/scripts"
-for f in FAQ.md FAQ.fr.md KNOWN-MISSES.md KNOWN-MISSES.fr.md CLAUDE_CODEX.md PROXY-MCP.md lm-resizer-hero.png; do
+for f in FAQ.md FAQ.fr.md KNOWN-MISSES.md KNOWN-MISSES.fr.md CLAUDE_CODEX.md TOKEN-STATISTICS.md PROXY-MCP.md lm-resizer-hero.png; do
   cp "$root/docs/$f" "$stage/docs/"
 done
 cp -R "$root/skills" "$stage/"

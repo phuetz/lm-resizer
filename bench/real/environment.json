@@ -1,0 +1,20 @@
+{
+  "os": "Linux",
+  "architecture": "x86_64",
+  "python": "3.11.15",
+  "tiktoken": "0.14.0",
+  "baseline_commit": "b39f1d55",
+  "rtk_version": "0.50.0",
+  "rtk_commit": "1d87b8e719ce0a50c223cd93ca64dd16921f9aec",
+  "capture_origin": "previous session; immutable stdout/stderr SHA-256 checked on replay",
+  "test_environment": "Python dependencies in python-freeze.txt; FastAPI 457 collection errors, not a passing suite; npm without node_modules; Cargo dependencies prepared before capture",
+  "benchmark_python_requirement": "3.11; requirements and test dependency freeze pinned separately",
+  "rtk_installation": "official installer v0.50.0; SHA-256 verification enabled and successful",
+  "logical_cpus_available": 24,
+  "kernel": "6.17.0-1032-oem",
+  "final_source_commit": "fd22a8fd160e2b831bcf3992b2733aa052ec0404",
+  "latency_conditions": "No concurrent local builds/tests during final measurements; OS caches not flushed; other machine activity not controlled",
+  "final_binary_sha256": "b2caff10d8fc8781e0ecfb9f31535f185f853037f25d231867d0c04720115256",
+  "reprise_measurements": "reprise1/final.json; 5 latency campaigns of 5 samples; all campaigns published; cat threshold indicative",
+  "historical_before": "before.json: original b39f1d5 baseline not rerun in reprise; reprise1/before.json: clean rebuild of pre-reprise sources with manifest"
+}

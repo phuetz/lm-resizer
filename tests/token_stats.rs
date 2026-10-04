@@ -1,0 +1,117 @@
+//! CLI contracts: exact counts persist through JSONL, stats and Markdown.
+#![cfg(unix)]
+use lm_resizer_core::tokenizer::{TiktokenCounter, Tokenizer};
+use serde_json::{json, Value};
+use std::process::Command;
+
+fn cli(state: &std::path::Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+        .env("LM_RESIZER_STATE_DIR", state)
+        .env("LM_RESIZER_TRACKING", "1")
+        .env("LM_RESIZER_TEE", "1")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn exec_history_and_stats_count_final_output_including_recovery_hint() {
+    let state = tempfile::tempdir().unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let raw =
+        "test measured_success ... ok\n".repeat(200) + "test result: ok. 200 passed; 0 failed\n";
+    std::fs::write(state.path().join("raw"), &raw).unwrap();
+    let producer = state.path().join("cargo");
+    std::fs::write(&producer, "#!/bin/sh\ncat \"$(dirname \"$0\")/raw\"\n").unwrap();
+    std::fs::set_permissions(&producer, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let result = cli(
+        state.path(),
+        &["exec", "--json", "--", producer.to_str().unwrap(), "test"],
+    );
+    assert!(result.status.success(), "{:?}", result.stderr);
+    let report: Value = serde_json::from_slice(&result.stdout).unwrap();
+    let tokenizer = TiktokenCounter::for_model("gpt-4o").unwrap();
+    let before = tokenizer.count_text(&raw) as i64;
+    let after = tokenizer.count_text(report["output"].as_str().unwrap()) as i64;
+    assert_eq!(report["original_tokens"], before);
+    assert_eq!(report["compressed_tokens"], after);
+    assert_eq!(report["tokens_saved"], before - after);
+    assert_ne!(
+        report["tokens_saved"],
+        report["bytes_saved"].as_i64().unwrap() / 4
+    );
+    assert_eq!(report["tokenizer"], "tiktoken-rs/o200k_base");
+    assert_eq!(report["token_count_method"], "exact");
+    assert!(report["output"].as_str().unwrap().contains("[tee:"));
+    for key in [
+        "command",
+        "exit_code",
+        "filter",
+        "original_bytes",
+        "filtered_bytes",
+        "compressed_bytes",
+        "bytes_saved",
+        "compression_steps",
+        "cache_keys",
+        "tee_hint",
+        "output",
+    ] {
+        assert!(report.get(key).is_some(), "lost JSON field {key}");
+    }
+    let history = std::fs::read_to_string(state.path().join("exec-history.jsonl")).unwrap();
+    let record: Value = serde_json::from_str(history.trim()).unwrap();
+    assert_eq!(record["tokens_saved"], before - after);
+    let stats = cli(state.path(), &["stats"]);
+    assert!(stats.status.success());
+    let stats: Value = serde_json::from_slice(&stats.stdout).unwrap();
+    let summary = &stats["exec_history"];
+    assert_eq!(summary["tokens_saved"], before - after);
+    assert_eq!(summary["estimated_tokens_saved"], 0);
+    assert_eq!(summary["by_filter"][0]["tokens_saved"], before - after);
+    assert_eq!(summary["by_command"][0]["tokens_saved"], before - after);
+    let markdown = cli(state.path(), &["stats", "--markdown"]);
+    let markdown = String::from_utf8(markdown.stdout).unwrap();
+    assert!(markdown.contains("# lm-resizer Stats"));
+    assert!(markdown.contains("## Top Filters"));
+    assert!(markdown.contains("tiktoken-rs/o200k_base; exact text count"));
+    assert!(markdown.contains("1 measured / 0 unmeasured commands"));
+}
+
+#[test]
+fn discover_and_eval_count_unicode_and_keep_existing_json_fields() {
+    let state = tempfile::tempdir().unwrap();
+    let raw = format!(
+        "{}test result: ok. 1 passed; 0 failed\n",
+        "test 你好🦀aaaaaaaa ... ok\n".repeat(40)
+    );
+    let fixture = state.path().join("session.jsonl");
+    std::fs::write(
+        &fixture,
+        format!("{}\n", json!({"command":"cargo test", "output":raw})),
+    )
+    .unwrap();
+    let path = fixture.to_str().unwrap();
+    let discover = cli(state.path(), &["discover", "--json", path]);
+    assert!(discover.status.success(), "{:?}", discover.stderr);
+    let discover: Value = serde_json::from_slice(&discover.stdout).unwrap();
+    let before = TiktokenCounter::for_model("gpt-4o")
+        .unwrap()
+        .count_text(&raw);
+    assert_eq!(discover["original_tokens"], before);
+    assert_ne!(
+        discover["tokens_saved"],
+        discover["estimated_bytes_saved"].as_i64().unwrap() / 4
+    );
+    // Legacy field is an alias for prospective savings, now tokenized.
+    assert_eq!(discover["estimated_tokens_saved"], discover["tokens_saved"]);
+    assert_eq!(
+        discover["candidates"][0]["tokens_saved"],
+        discover["tokens_saved"]
+    );
+    let eval = cli(state.path(), &["eval", "--json", path]);
+    assert!(eval.status.success(), "{:?}", eval.stderr);
+    let eval: Value = serde_json::from_slice(&eval.stdout).unwrap();
+    assert_eq!(eval["tokens_saved"], discover["tokens_saved"]);
+    assert_eq!(eval["tokenizer"], "tiktoken-rs/o200k_base");
+    assert!(eval["pass"].as_bool().unwrap());
+}

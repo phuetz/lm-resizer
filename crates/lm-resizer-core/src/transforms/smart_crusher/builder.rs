@@ -154,7 +154,7 @@ impl SmartCrusherBuilder {
     }
 
     /// Convenience: install the default in-memory CCR store
-    /// (1000 entries, 5-minute TTL — matches Python).
+    /// (1000 entries, 30-minute TTL — matches Python).
     pub fn with_default_ccr_store(self) -> Self {
         self.with_ccr_store(Arc::new(InMemoryCcrStore::new()))
     }

@@ -219,7 +219,7 @@ struct Segment<'a> {
     body_lines: Vec<&'a str>,
 }
 
-impl<'a> Segment<'a> {
+impl Segment<'_> {
     /// True if every `+` and `-` line in the body, when ASCII-whitespace-
     /// stripped and paired up in order, leaves equal token sequences.
     /// Approach: collect the pluses and the minuses, strip-and-compare.

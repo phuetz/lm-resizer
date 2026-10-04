@@ -21,7 +21,7 @@ no `.py` files, no Python package manifests, and no Python helper scripts.
   - `doctor`
   - `mcp`
   - `install`
-  - `exec` with RTK-inspired command output filtering before compression
+  - `exec` with Native command output filtering before compression
   - `wrap`
   - `serve`
 - Minimal MCP tools:
@@ -30,9 +30,9 @@ no `.py` files, no Python package manifests, and no Python helper scripts.
   - `lm_resizer_stats`
 - MCP config installer for Claude Code, Codex, Cursor, and VS Code.
 - Explicit command wrapper for `git`, `cargo`, `rg`/`grep`, listings, diffs,
-  and generic command output. This adapts the useful RTK idea of reducing noisy
+  and generic command output. This adapts the useful le comparateur idea of reducing noisy
   tool output before agent consumption without installing shell hooks.
-- RTK-inspired declarative TOML filter layer for `exec`, with built-in filters
+- Native declarative TOML filter layer for `exec`, with built-in filters
   and project/user override path via `.lm-resizer/filters.toml` or
   `LM_RESIZER_FILTERS`.
 - Project-local filter trust by content hash via `trust-filters`, with an

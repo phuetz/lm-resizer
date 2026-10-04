@@ -4,8 +4,7 @@ $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $target = "wasm32-unknown-unknown"
 rustup target add $target
 if ($LASTEXITCODE -ne 0) { throw "rustup target add failed" }
-$env:RUSTFLAGS = '--cfg getrandom_backend="wasm_js"'
-cargo build -p lm-resizer-wasm --release --target $target
+node (Join-Path $PSScriptRoot "build-release-artifact.cjs") wasm
 if ($LASTEXITCODE -ne 0) { throw "WASM cargo build failed" }
 $artifact = Join-Path $root "target\$target\release\lm_resizer_wasm.wasm"
 if (-not (Test-Path $artifact)) { throw "WASM artifact not found: $artifact" }

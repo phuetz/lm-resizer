@@ -692,9 +692,8 @@ impl SmartCrusher {
                 };
                 // In budget mode, lossless only wins if its rendering also
                 // fits the budget; otherwise fall through to lossy sampling.
-                let lossless_fits_budget = budget.map_or(true, |b| {
-                    rendered.len() <= b.saturating_mul(BYTES_PER_TOKEN)
-                });
+                let lossless_fits_budget =
+                    budget.is_none_or(|b| rendered.len() <= b.saturating_mul(BYTES_PER_TOKEN));
                 if savings_ratio >= self.config.lossless_min_savings_ratio && lossless_fits_budget {
                     let kind = compaction_kind_str(&c);
                     return CrushArrayResult {
@@ -1000,8 +999,8 @@ fn estimate_array_bytes(item_strings: &[String]) -> usize {
     payload + separators + 2
 }
 
-/// Coarse bytes-per-token estimate (matches the project's `bytes / 4` token
-/// accounting elsewhere). Used to convert a token budget to a byte budget
+/// Coarse bytes-per-token estimate for budget planning only, not measured
+/// token statistics. Used to convert a token budget to a byte budget
 /// without pulling a tokenizer into the (wasm-safe) hot path.
 const BYTES_PER_TOKEN: usize = 4;
 
