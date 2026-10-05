@@ -69,7 +69,7 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
         ]
         .iter()
         .any(|word| lower.contains(word))
-            || rtk_error_pattern(line)
+            || diagnostic_line_pattern(line)
             || diagnostic_marker(line)
             || file_location(line)
             || structured_fact(line)
@@ -169,13 +169,13 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             in_test_list = false;
         }
     }
-    // RTK's error stream keeps every indented continuation in an open
+    // the reference tool's error stream keeps every indented continuation in an open
     // diagnostic block, including the first blank line. Its independently
     // recognizable frames can also reopen a block far from the first error.
     let mut in_block = false;
     let mut blanks = 0;
     for (i, line) in plain.iter().enumerate() {
-        if rtk_error_pattern(line) {
+        if diagnostic_line_pattern(line) {
             keep[i] = true;
             in_block = true;
             blanks = 0;
@@ -225,7 +225,7 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             }
         }
     }
-    // Long Git machine listings are repetitive. RTK keeps their first five
+    // Long Git machine listings are repetitive. the reference tool keeps their first five
     // records and last two; keep those records plus any intervening diagnostic.
     let machine_rows: Vec<usize> = plain
         .iter()
@@ -244,7 +244,7 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
         }
     }
     // Long `git log --oneline` histories are lists. Retain the first five
-    // and last two identities shown by RTK, plus diagnostic subjects.
+    // and last two identities shown by the reference tool, plus diagnostic subjects.
     let oneline_rows: Vec<usize> = plain
         .iter()
         .enumerate()
@@ -261,7 +261,7 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             }
         }
     }
-    // On a long patch RTK shows its head and tail. Commit and stat lines
+    // On a long patch the reference tool shows its head and tail. Commit and stat lines
     // occur before the first `diff --git` and have already been selected.
     if let Some(patch_start) = plain
         .iter()
@@ -340,7 +340,7 @@ fn numeric_summary(line: &str) -> bool {
     TOTAL.is_match(line)
 }
 
-fn rtk_error_pattern(line: &str) -> bool {
+fn diagnostic_line_pattern(line: &str) -> bool {
     static GENERIC: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?i)(?:error[\s:\[]|\berr\b|warning[\s:\[]|\bwarn\b|failed|failure|exception|panic)",
