@@ -103,7 +103,7 @@ Check the install works anywhere, with no repository needed:
 lm-resizer exec -- echo hello
 ~~~
 
-The next examples assume what they wrap is present: `git` and a current directory inside a Git repository (outside one, Git itself fails with exit 128 and there is nothing to shorten), and a Rust project with Cargo for `cargo test`. If a wrapped command is not installed, `exec` says `command not found: <name>` and exits 127.
+The next examples assume what they wrap is present: `git` and a current directory inside a Git repository (outside one, Git itself fails with exit 128 and there is nothing to shorten), and a Rust project with Cargo for `cargo test`. If a wrapped command is not installed, `exec` reports `cannot execute <name>: command not found` and exits 127.
 
 ~~~bash
 lm-resizer git log -20
@@ -178,7 +178,7 @@ New execution history records persist both counts. Stats keep existing byte coun
 
 The product uses its own Rust and TOML filters. Normal `exec` drains a shared stdout/stderr pipe through EOF, without a 10 MiB ceiling. Use `lm-resizer tee list` and `lm-resizer tee read <id>` to recover the complete original. The optional `--stream` and `--raw-on-failure` paths still capture the streams separately.
 
-**Median saving including tee: 22.79%, up from 21.74%, against a 15.81% reference.** Mean saving is 31.78%; all 61 raw recoveries and producer exit codes pass. Interleaved startup measurements give 7.70 ms (7.68 ms before). Windows byte-contract replays pass on Linux; actual Windows installation remains unverified. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
+**Median saving including tee on the official 61-capture corpus: 22.79%, up from 21.74%, against a 15.81% reference.** Mean saving is 31.78%; all 61 raw recoveries and producer exit codes pass. These corpus medians are not a claim about arbitrary live repositories. Interleaved startup measurements give 7.70 ms (7.68 ms before). Windows byte-contract replays pass on Linux; actual Windows installation remains unverified. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
 
 Explicit inspection commands include `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` and `dedup`. File reads remain literal. Reversible path/match folds, JSON tables and identical-line runs supplement command filters; syntax outlines and exact repeated-message folding are opt-in. [Additional agent hooks](docs/AGENT_HOOKS.md) support Gemini, Copilot and Cursor configuration.
 

@@ -103,7 +103,7 @@ Vérifiez que l'installation fonctionne partout, sans dépôt :
 lm-resizer exec -- echo bonjour
 ~~~
 
-Les exemples suivants supposent que ce qu'ils enveloppent est présent : `git` et un répertoire courant dans un dépôt Git (hors dépôt, Git échoue lui-même avec le code 128 et il n'y a rien à raccourcir), et un projet Rust avec Cargo pour `cargo test`. Si une commande enveloppée n'est pas installée, `exec` affiche `command not found: <nom>` et sort avec 127.
+Les exemples suivants supposent que ce qu'ils enveloppent est présent : `git` et un répertoire courant dans un dépôt Git (hors dépôt, Git échoue lui-même avec le code 128 et il n'y a rien à raccourcir), et un projet Rust avec Cargo pour `cargo test`. Si une commande enveloppée n'est pas installée, `exec` affiche `cannot execute <nom>: command not found` et sort avec 127.
 
 ~~~bash
 lm-resizer git log -20
@@ -178,7 +178,7 @@ Les nouvelles entrées d’historique conservent les deux comptes. Les statistiq
 
 Le produit utilise ses propres filtres Rust et TOML. Le chemin normal `exec` archive stdout et stderr entrelacés jusqu’à EOF, sans plafond de 10 Mio. `lm-resizer tee list` et `lm-resizer tee read <id>` retrouvent le brut complet. Les options `--stream` et `--raw-on-failure` conservent une capture séparée des flux.
 
-**Médiane tee compris : 21,74 %, contre 2,17 % avant et 15,81 % pour la référence.** Le format de patch réversible change volontairement les vues de diff ; les 61 bruts et statuts du producteur sont vérifiés. [Mesures actuelles, écarts exacts et limites](bench/native/patch-revision.md).
+**Médiane tee compris sur le corpus officiel de 61 captures : 22,79 % (21,74 % avant), contre 15,81 % pour la référence.** Moyenne : 31,78 % ; les 61 restitutions brutes et codes de sortie du producteur sont vérifiés. Ces médianes de corpus ne sont pas une affirmation sur des dépôts vivants arbitraires. La page liée consigne aussi les temps de démarrage entrelacés (7,68 → 7,70 ms) et les rejeux du contrat d'octets Windows exécutés sous Linux ; l'installation réelle sous Windows reste non vérifiée. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
 
 Les commandes explicites `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` et `dedup` complètent les filtres. Les lectures de fichiers restent littérales. Les plis réversibles de chemins et correspondances, tables JSON et répétitions exactes complètent les vues de commandes ; le contour syntaxique et la déduplication de blocs sont explicites. [Hooks supplémentaires](docs/AGENT_HOOKS.md) : configuration Gemini, Copilot et Cursor.
 
