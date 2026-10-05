@@ -104,6 +104,10 @@ fn generic_tool_output_and_gain_record_a_failed_command() {
     assert!(report["output"]
         .as_str()
         .unwrap()
+        .contains("42 tests, 1 failed"));
+    assert!(!report["output"]
+        .as_str()
+        .unwrap()
         .starts_with("[FAIL] Command failed (exit code: 7)"));
     assert_eq!(report["exit_code"], 7);
     let gain = cli(state.path(), &["gain"]);

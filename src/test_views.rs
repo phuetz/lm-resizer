@@ -2,14 +2,6 @@
 //! grammars stay literal, including compiler errors before a runner starts.
 use std::collections::BTreeMap;
 
-fn clip(text: &str, n: usize) -> String {
-    if text.chars().count() <= n {
-        text.into()
-    } else {
-        text.chars().take(n - 3).collect::<String>() + "..."
-    }
-}
-
 fn counts(line: &str) -> BTreeMap<&str, usize> {
     let words: Vec<_> = line.split_whitespace().collect();
     words
@@ -139,7 +131,7 @@ pub fn cargo(raw: &str) -> String {
     let numbered: String = visible
         .iter()
         .zip(1..)
-        .map(|(block, number)| format!("{number}. {}\n", clip(block, 200)))
+        .map(|(block, number)| format!("{number}. {block}\n"))
         .collect();
     let trailer = match overflow.len() {
         0 => String::new(),
@@ -220,7 +212,7 @@ pub fn pytest(raw: &str) -> String {
     if !expected.is_empty() {
         out.push_str("\n\nExpected-failure outcomes:\n");
         for line in expected {
-            out.push_str(&format!("  {}\n", clip(line, 120)));
+            out.push_str(&format!("  {line}\n"));
         }
         out = out.trim_end().into();
     }
@@ -245,7 +237,7 @@ pub fn pytest(raw: &str) -> String {
                     })
                     .take(3)
                 {
-                    out.push_str(&format!("     {}\n", clip(line, 100)));
+                    out.push_str(&format!("     {line}\n"));
                 }
                 if i + 1 < details.len() {
                     out.push('\n');
@@ -258,7 +250,7 @@ pub fn pytest(raw: &str) -> String {
                     name.split_once(' ').map_or(name, |(_, n)| n)
                 ));
                 if !reason.is_empty() {
-                    out.push_str(&format!("     {}\n", clip(reason, 100)));
+                    out.push_str(&format!("     {reason}\n"));
                 }
             }
         }
@@ -424,6 +416,21 @@ mod tests {
         let view = pytest("ERROR tests/a.py - ImportError\n5 skipped, 457 errors in 1.00s\n");
         assert!(view.contains("457 errors during collection"));
         assert!(view.contains("tests/a.py"));
+    }
+    #[test]
+    fn long_failure_statements_are_preserved_verbatim() {
+        let assertion = format!("assert {} == 43", "42 + ".repeat(25));
+        let pytest_raw = format!(
+            "=== FAILURES ===\n___ test_invoice ___\n>   {assertion}\nE   {assertion}\n=== short test summary ===\nFAILED test_invoice.py::test_invoice - {assertion}\n1 failed in 0.01s\n"
+        );
+        let pytest_view = pytest(&pytest_raw);
+        assert!(pytest_view.contains(&format!(">   {assertion}")));
+        assert!(pytest_view.contains(&format!("E   {assertion}")));
+
+        let cargo_raw = format!(
+            "failures:\n\n---- invoice stdout ----\nthread 'invoice' panicked at src/lib.rs:1:1:\n{assertion}\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; finished in 0.01s\n"
+        );
+        assert!(cargo(&cargo_raw).contains(&assertion));
     }
     #[test]
     fn cargo_unknown_and_compile_errors_stay_literal() {

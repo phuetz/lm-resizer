@@ -86,23 +86,15 @@ pub fn typescript(raw: &str) -> String {
             } else {
                 format!("L{}: ", d.line)
             };
-            out.push_str(&format!("  {location}{} {}\n", d.code, clip(d.message)));
+            out.push_str(&format!("  {location}{} {}\n", d.code, d.message));
             for c in d.context {
-                out.push_str(&format!("    {}\n", clip(c)));
+                out.push_str(&format!("    {c}\n"));
             }
         }
         out.push('\n');
     }
     out.trim_end().into()
 }
-fn clip(s: &str) -> String {
-    if s.chars().count() > 120 {
-        s.chars().take(117).collect::<String>() + "..."
-    } else {
-        s.into()
-    }
-}
-
 pub fn cargo_build(raw: &str, sub: &str) -> String {
     if raw.lines().any(|row| row.starts_with("error[E"))
         && raw.lines().any(|row| row.trim_start().starts_with("--> "))
@@ -176,6 +168,12 @@ mod tests {
         assert!(out.contains("folder/a.ts"));
         let mixed = raw.to_owned() + "permission denied\n";
         assert_eq!(typescript(&mixed), mixed);
+    }
+    #[test]
+    fn long_typescript_error_is_never_cut() {
+        let message = format!("Cannot find name '{}'.", "invoice_identifier".repeat(12));
+        let raw = format!("numbers.ts(181,20): error TS2304: {message}\n");
+        assert!(typescript(&raw).contains(&message));
     }
     #[test]
     fn builds_never_hide_warnings_or_compile_failures() {

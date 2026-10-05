@@ -296,11 +296,28 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
     } else {
         format!("{candidate}\n")
     };
-    if exit != 0 {
+    if exit != 0 && !failure_verdict(&body) {
         format!("[FAIL] Command failed (exit code: {exit})\n{body}")
     } else {
         body
     }
+}
+
+/// The process status already carries the exact exit code. A failed test
+/// verdict in the view makes an extra textual status line redundant.
+pub(crate) fn failure_verdict(output: &str) -> bool {
+    static COUNT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\b[1-9][0-9]*\s+(?:failed|errors?)\b").unwrap());
+    output.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("[FAIL]")
+            || line.starts_with("FAILURES")
+            || line.starts_with("FAILED ")
+            || line.starts_with("test result: FAILED")
+            || (line.starts_with("sh:") || line.starts_with("bash:"))
+                && line.contains(": not found")
+            || COUNT.is_match(line)
+    })
 }
 
 fn strip_ansi(line: &str) -> Cow<'_, str> {
@@ -654,6 +671,21 @@ mod tests {
             summarize(Mode::Errors, "unusual diagnostic", 7),
             "[FAIL] Command failed (exit code: 7)\nunusual diagnostic"
         );
+    }
+    #[test]
+    fn failed_test_verdict_uses_process_exit_code_without_extra_line() {
+        for raw in [
+            "Pytest: 0 passed, 1 failed\nFailures:\n1. [FAIL] invoice\n",
+            "test result: FAILED. 0 passed; 1 failed; 0 ignored\n",
+            "Tests: 1 failed, 2 passed, 3 total\n",
+            "sh: 1: hereby: not found\n",
+        ] {
+            assert!(failure_verdict(raw));
+            assert_eq!(summarize(Mode::Tests, raw, 1), raw);
+        }
+        assert!(!failure_verdict("Tests: 0 failed, 2 passed\n"));
+        assert!(summarize(Mode::Tests, "all tests passed\n", 3)
+            .starts_with("[FAIL] Command failed (exit code: 3)"));
     }
     #[test]
     fn generic_errors_keep_source_carets_and_full_traceback() {

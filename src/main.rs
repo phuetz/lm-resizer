@@ -1429,10 +1429,47 @@ fn provider_label(provider: ProviderKind) -> &'static str {
 }
 
 fn main() {
-    if let Err(error) = run_on_cli_thread() {
-        // Keep contextual errors readable even when RUST_BACKTRACE is enabled.
-        eprintln!("Error: {error:#}");
-        std::process::exit(1);
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if !is_broken_pipe_panic(info.payload()) {
+            previous_hook(info);
+        }
+    }));
+    match std::panic::catch_unwind(run_on_cli_thread) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::BrokenPipe)
+            {
+                std::process::exit(broken_pipe_exit_code());
+            }
+            // Keep contextual errors readable even when RUST_BACKTRACE is enabled.
+            eprintln!("Error: {error:#}");
+            std::process::exit(1);
+        }
+        Err(panic) if is_broken_pipe_panic(panic.as_ref()) => {
+            std::process::exit(broken_pipe_exit_code());
+        }
+        Err(_) => std::process::exit(1),
+    }
+}
+
+fn is_broken_pipe_panic(payload: &(dyn std::any::Any + Send)) -> bool {
+    let message = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied());
+    message.is_some_and(|text| {
+        text.contains("Broken pipe") || text.contains("broken pipe") || text.contains("os error 32")
+    })
+}
+
+fn broken_pipe_exit_code() -> i32 {
+    if cfg!(unix) {
+        141
+    } else {
+        1
     }
 }
 
@@ -2909,11 +2946,14 @@ fn run_exec_command(
     let raw = display_captured_bytes(&raw_bytes);
     perf_stage("capture", started.elapsed());
     let phase = Instant::now();
-    let (filter, filtered) = if raw_on_failure && exit_code != 0 {
+    let (filter, mut filtered) = if raw_on_failure && exit_code != 0 {
         ("raw_on_failure".to_string(), raw.clone())
     } else {
         filter_command_output(command, &raw)
     };
+    if !raw.trim().is_empty() && filtered.trim().is_empty() {
+        filtered = raw.clone();
+    }
 
     perf_stage("filter", phase.elapsed());
     let phase = Instant::now();
@@ -3030,7 +3070,7 @@ fn process_captured_output(
     store: &dyn CcrStore,
 ) -> Result<ExecReport> {
     let keep_raw = raw_on_failure && exit_code != 0;
-    let (filter, filtered) = if keep_raw {
+    let (filter, mut filtered) = if keep_raw {
         ("raw_on_failure".to_string(), raw.to_string())
     } else {
         let (filter, view) = filter_command_output(command, raw);
@@ -3043,6 +3083,9 @@ fn process_captured_output(
             (filter, view)
         }
     };
+    if !raw.trim().is_empty() && filtered.trim().is_empty() {
+        filtered = raw.to_string();
+    }
     let (mut output, mut steps, mut keys) = if keep_raw {
         (raw.to_string(), Vec::new(), Vec::new())
     } else if filter.starts_with("native:")
@@ -3108,7 +3151,10 @@ fn process_captured_output(
 }
 
 fn prepend_failure_status(output: &mut String, exit_code: i32) {
-    if exit_code != 0 && !output.starts_with("[FAIL] Command failed (exit code: ") {
+    if exit_code != 0
+        && !output.starts_with("[FAIL] Command failed (exit code: ")
+        && !inspection_views::failure_verdict(output)
+    {
         output.insert_str(
             0,
             &format!("[FAIL] Command failed (exit code: {exit_code})\n"),
@@ -5144,11 +5190,11 @@ fn append_recovery_instruction(output: &mut String, hint: &str, raw: &str) {
     candidate.push_str(&format!("[tee:{id}]\n"));
     // Storage and JSON metadata remain available even when the visible hint
     // would consume more tokens than the reduction pays for. Reserve a visible
-    // trailer for substantial savings: at least 25% including the trailer.
+    // trailer for substantial savings: at least 30% including the trailer.
     // Small reductions keep their entire token benefit; tee list / JSON still
     // expose every archive. This threshold is independent of the benchmark.
     let counts = TokenCounts::measure(raw, &candidate);
-    if counts.compressed_tokens <= counts.original_tokens.saturating_mul(3) / 4 && raw != output {
+    if counts.compressed_tokens <= counts.original_tokens.saturating_mul(7) / 10 && raw != output {
         *output = candidate;
     }
 }
@@ -10958,10 +11004,18 @@ command = "node"
         }
         let failure = process_captured_output(&command, raw, 1, true, "", &store).unwrap();
         assert_eq!(failure.filter, "raw_on_failure");
-        assert_eq!(
-            failure.output,
-            format!("[FAIL] Command failed (exit code: 1)\n{raw}")
-        );
+        assert_eq!(failure.output, raw);
+    }
+
+    #[test]
+    fn empty_test_filter_cannot_erase_a_shell_failure() {
+        let store = InMemoryCcrStore::default();
+        let raw = "\n> @typescript/repo@0.0.0 test\n> hereby test\n\nsh: 1: hereby: not found\n";
+        let command = vec!["pnpm".into(), "test".into()];
+        let report = process_captured_output(&command, raw, 127, false, "", &store).unwrap();
+        assert!(report.output.contains("> hereby test"));
+        assert!(report.output.contains("sh: 1: hereby: not found"));
+        assert_eq!(report.exit_code, 127);
     }
 
     #[test]

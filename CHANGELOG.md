@@ -7,7 +7,7 @@ La version 0.2.4 n'a jamais été étiquetée ni publiée : son contenu (section
 ### Vues génériques et statistiques
 - `lm-resizer err|test|summary -- <commande>` garde, pour n'importe quel producteur, les diagnostics ou les bilans de tests avec le contexte voisin, conserve le code de sortie et archive la sortie complète (`tee read`). `exec` et `tool-output` résument aussi les commandes sans filtre dédié ; l'outil MCP `lm_resizer_tool_output` marque un statut non nul `isError: true` ([`docs/CLI-REFERENCE.md`](docs/CLI-REFERENCE.md)).
 - `gain` compte toutes les commandes passées par `exec`/`tool-output` (jetons mesurés `o200k_base`, `--json`, `--history`, `--project`).
-- Mesure rejouée sur le corpus de 61 captures : médiane **16,33 %** (RTK 0.50.0 : 15,81 %), moyenne **29,64 %** (RTK : 32,61 %), brut et code du producteur conservés 61/61, vues strictement égales à RTK 37/61. Ces vues ajoutent une ligne d'en-tête d'échec aux commandes de test en échec ; dans un cas pytest du corpus la ligne d'assertion est coupée dans la vue (le brut reste récupérable). Détail : [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md).
+- Mesure rejouée sur le corpus de 61 captures : médiane **25,18 %** (RTK 0.50.0 : 15,81 %), moyenne **34,68 %** (RTK : 32,61 %), brut et code du producteur conservés 61/61, vues strictement égales à RTK 41/61 après correction du découpage du banc. Les bilans de test en échec n'ajoutent plus d'en-tête redondant ; les assertions pytest, les messages TypeScript et les blocs d'échec Cargo restent entiers. Les sorties vers un tube fermé se terminent silencieusement avec le code 141 sous Unix. Détail : [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md).
 
 ### Hooks et agents
 - `install-hooks` et `init` sont idempotents : un contenu identique réussit sans réécriture, un contenu divergent est refusé sans `--force`. `uninstall-hooks` retire aussi les helpers générés et ne retire une configuration native que si elle est encore exactement le JSON généré. Réserve : les helpers sont supprimés sans comparer leur contenu ([`tests/hooks_idempotence.rs`](tests/hooks_idempotence.rs)).
@@ -19,9 +19,9 @@ La version 0.2.4 n'a jamais été étiquetée ni publiée : son contenu (section
 
 ### Distribution
 - Les archives de release incluent désormais `docs/CLI-REFERENCE.md`, `docs/AGENT_HOOKS.md` et `docs/WINDOWS.md`, liés depuis le README ([`scripts/package-release.sh`](scripts/package-release.sh), [`scripts/package-release.ps1`](scripts/package-release.ps1)). Les liens vers `docs/RELEASE.md` et `bench/` restent des liens du dépôt, absents de l'archive.
+- La garde de release télécharge désormais l'archive source RTK épinglée sur un clone neuf et refuse un SHA-256 différent ; l'absence de réseau produit une erreur explicite.
 
 ### Limites connues
-- `lm-resizer … | head` peut se terminer par la panique `failed printing to stdout: Broken pipe` (code 101) quand le lecteur ferme le tube avant la fin.
 - `exec` conserve son état dans `~/lm-resizer` (archives de rappel, base CCR, historique) : ne clonez pas le dépôt directement dans votre dossier personnel.
 - Les médianes du README sont celles du corpus de 61 captures, pas une promesse sur des dépôts arbitraires.
 

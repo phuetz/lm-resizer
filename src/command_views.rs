@@ -1,6 +1,6 @@
 //! Native command-view registry. Renderers consume captured text; they never
 //! launch a second tool or depend on an external executable's filter engine.
-use crate::patch_view::render as git_diff;
+use crate::patch_view;
 
 pub fn direct_args(command: &[String]) -> Option<Vec<String>> {
     let name = super::command_basename(command.first()?);
@@ -50,7 +50,7 @@ pub fn filter(command: &[String], raw: &str) -> Option<(String, String)> {
         ("git", "show") => (
             "git-show",
             if raw.lines().any(|row| row.starts_with("diff --git ")) {
-                git_diff(raw)
+                patch_view::render(raw)
             } else {
                 raw.to_owned()
             },
@@ -94,6 +94,53 @@ pub fn filter(command: &[String], raw: &str) -> Option<(String, String)> {
         raw.to_owned()
     };
     Some((format!("native:{kind}"), output))
+}
+
+fn git_diff(raw: &str) -> String {
+    let rows: Vec<&str> = raw.lines().collect();
+    // Large Git patches can dwarf every other command in an agent transcript.
+    // Keep the opening patch records through the reference tool's visible
+    // window and make the complete producer output recoverable through tee.
+    if rows.len() > 1000 && rows.first().is_some_and(|r| r.starts_with("diff --git ")) {
+        let visible = rows.len().min(350);
+        return format!(
+            "{}\n[{} further patch lines; retrieve the complete output with tee]\n",
+            rows[..visible].join("\n"),
+            rows.len() - visible
+        );
+    }
+    // A short ordinary one-file diff has no need for a transport codec:
+    // its file name, hunk and every changed/context line fit in a plain view.
+    if rows.len() <= 30
+        && rows.iter().filter(|r| r.starts_with("diff --git ")).count() == 1
+        && rows.iter().any(|r| r.starts_with("--- a/"))
+        && rows.iter().any(|r| r.starts_with("+++ b/"))
+        && rows.iter().any(|r| r.starts_with("@@ "))
+    {
+        let mut view = Vec::new();
+        let mut added = 0;
+        let mut removed = 0;
+        for row in &rows {
+            if let Some(path) = row.strip_prefix("+++ b/") {
+                view.push(path.to_string());
+            } else if row.starts_with("diff --git ")
+                || row.starts_with("index ")
+                || row.starts_with("--- a/")
+            {
+                continue;
+            } else {
+                if row.starts_with('+') {
+                    added += 1;
+                } else if row.starts_with('-') {
+                    removed += 1;
+                }
+                view.push((*row).to_string());
+            }
+        }
+        view.push(format!("  +{added} -{removed}"));
+        return view.join("\n");
+    }
+    patch_view::render(raw)
 }
 
 fn clipped(s: &str, width: usize) -> String {

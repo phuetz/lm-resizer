@@ -80,6 +80,18 @@ def adapted_reference(ref_bytes, lm_report):
                   lambda m: (b"[" + (b"" if m[1] == b"full output:" else m[1] + b" ")
                              + f"lm-resizer tee read {key}]".encode()), ref_bytes)
 
+
+def visible_body(report):
+    """Remove only an actual tee trailer, never slice by pre-view byte count."""
+    output = report["output"].encode()
+    hint = report.get("tee_hint")
+    if hint:
+        key = hint.removeprefix("[raw: ").removesuffix("]")
+        trailer = f"[tee:{key}]\n".encode()
+        if output.endswith(trailer):
+            return output[:-len(trailer)]
+    return output
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--import-captures", type=Path, nargs="+")
@@ -158,8 +170,9 @@ def main():
         lm, lm_ms = invoke(lm_args, data=data, env=env, cwd=folder)
         report = json.loads(lm.stdout)
         view = report["output"].encode()
-        # Filtered byte count precedes the optional separator newline and tee line.
-        body = view[:report["filtered_bytes"]]
+        # Filtered byte count belongs to the intermediate filter, not the
+        # final view (which may add an exit status or change line lengths).
+        body = visible_body(report)
         reference = ref.stdout + ref.stderr
         strict_exact = body == reference
         exact = body == adapted_reference(reference, report)
@@ -174,7 +187,7 @@ def main():
             repeated_ref, elapsed_ref = invoke(rtk_args, data=data, env=env, cwd=folder)
             repeated_lm, elapsed_lm = invoke(lm_args, data=data, env=env, cwd=folder)
             repeated_report = json.loads(repeated_lm.stdout)
-            repeated_view = repeated_report["output"].encode()[:repeated_report["filtered_bytes"]]
+            repeated_view = visible_body(repeated_report)
             repeated_reference = repeated_ref.stdout + repeated_ref.stderr
             reference_hashes.append(hashlib.sha256(repeated_reference).hexdigest())
             lm_hashes.append(hashlib.sha256(repeated_view).hexdigest())
