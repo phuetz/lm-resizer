@@ -1,25 +1,21 @@
 # LM Resizer
 
-**Shorten noisy command output before it reaches a coding agent.** LM Resizer is a local Rust CLI that can run a command, keep a compact result for the agent, and save the original output for inspection. It handles test logs, Git output, build diagnostics, JSON and other text; the result depends on the input and command.
+**Shorten noisy command output before it reaches your coding agent — and never lose a failure.** LM Resizer is a fast, local Rust CLI for developers who drive tests, builds, Git, containers and other tools through an AI coding agent such as Claude Code, Codex, Cursor, Gemini CLI, an MCP client or a custom pipeline. It runs a command, keeps a compact result for the agent, and stores the byte-exact original for instant recall.
+
+On a benchmark of 61 command captures it saves a median **22.79%** of tokens with the raw recovery included, keeps the producer's exit code in **61/61** cases and starts in about **7.70 ms**. Zero telemetry, 100% local, deterministic.
 
 ![Example of LM Resizer processing command output](docs/lm-resizer-hero.png)
 
 [Français](README.fr.md) · [Comparison benchmark](bench/native/README.md)
 
-[Windows: TLS fallback, PowerShell 5.1 and byte-exact recovery](docs/WINDOWS.md).
+## Install
 
-## Install and try it
-
-### Prebuilt binary, after the v0.2.4 release
-
-**Do not run the commands below before the v0.2.4 release and its archives are published: they currently return HTTP 404. To install now, follow “Build from source” below.**
-
-Only after publication, use the command for your platform. The installer verifies the archive's SHA-256 checksum and binary version before placing `lm-resizer` in `~/.local/bin` by default. Prepared platforms are Linux x86_64, macOS x86_64/arm64 and Windows x86_64. The existing v0.2.2 release has no prebuilt archives.
-
-Linux and macOS. Prerequisites: a POSIX `sh` (Bash is not required), `tar`, `gzip`, and `curl` or `wget`. Minimal Debian/Ubuntu images have neither (Alpine ships a limited `wget`): install curl first (`sudo apt-get update && sudo apt-get install -y curl ca-certificates` on Debian/Ubuntu, `sudo apk add curl` on Alpine; drop `sudo` when you are root, as in a container). With wget instead of curl, download the file with `wget -qO install.sh https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.sh`, then run `sh install.sh`. The Linux x86_64 binary is static (no glibc, no libstdc++): it runs on Debian 12, Ubuntu 20.04+ and Alpine.
+Prebuilt binary for Linux and macOS:
 
 ~~~sh
 curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.sh -o install.sh && sh install.sh
+export PATH="$HOME/.local/bin:$PATH"
+lm-resizer --version
 ~~~
 
 Windows PowerShell:
@@ -28,16 +24,128 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.ps1 | iex
 ~~~
 
-On Linux and macOS the installer prints the line to add when `~/.local/bin` is not on your `PATH`; to make it permanent in Bash, run `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc` (use `~/.zshrc` for zsh) and open a new terminal. For the current terminal only:
+The installer verifies the archive's SHA-256 checksum and binary version before placing `lm-resizer` in `~/.local/bin` by default. Prepared platforms are Linux x86_64, macOS x86_64/arm64 and Windows x86_64. The existing v0.2.2 release has no prebuilt archives.
 
-~~~sh
-export PATH="$HOME/.local/bin:$PATH"
-lm-resizer --version
+On Linux and macOS the installer prints the line to add when `~/.local/bin` is not on your `PATH`; to make it permanent in Bash, run `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc` (use `~/.zshrc` for zsh) and open a new terminal. The Windows installer updates the user `PATH`. `LM_RESIZER_INSTALL_DIR` selects another destination. To uninstall a prebuilt binary, remove it from that destination. [Windows: TLS fallback, PowerShell 5.1 and byte-exact recovery](docs/WINDOWS.md).
+
+## See it work
+
+`tool-output` filters output that a host already captured. The reduced view keeps the failing test and points to the exact original:
+
+~~~console
+$ lm-resizer tool-output --command 'cargo test' --input bench/corpus/cargo_fail.txt
+FAILURES (1):
+1.     parse::reject_empty
+
+test result: FAILED. 70 passed; 1 failed; finished in 0.09s
+[tee:78bf04f25902]
 ~~~
 
-The Windows installer updates the user `PATH`. `LM_RESIZER_INSTALL_DIR` selects another destination. To uninstall a prebuilt binary, remove it from that destination.
+The same command run on the 78-line file reports **792** original tokens and **65** compressed tokens. Four bundled captures, measured on this machine with `o200k_base`:
 
-### Build from source
+| Capture (`bench/corpus/`) | `--command` | Original | Compressed |
+|---|---|---:|---:|
+| `cargo_ok.txt` | `cargo test` | 837 | 24 |
+| `cargo_fail.txt` | `cargo test` | 792 | 65 |
+| `pytest_ok.txt` | `pytest` | 937 | 17 |
+| `git_log.txt` | `git log` | 2320 | 60 |
+
+Reproduce any row with `lm-resizer tool-output --command '<command>' --input <file> --json`: the JSON reports `original_tokens`, `compressed_tokens` and `tokens_saved` with `token_count_method: "exact"`.
+
+## Why LM Resizer? (compared with RTK and Headroom)
+
+Two other tools are commonly used to shrink command output. Their own published numbers are reproduced in [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md) on the same 61 captures, tokenized with `o200k_base`, raw recovery included:
+
+| 61 command captures, `o200k_base` | LM Resizer 0.2.4 | RTK 0.50.0 | Headroom 0.39.1, general API |
+|---|---:|---:|---:|
+| Median tokens saved, raw recovery included | 22.79% | 15.81% | 0.00% |
+| Mean tokens saved, raw recovery included | 31.78% | 32.61% | 1.91% |
+| Producer exit code preserved | 61/61 | 52/61 | not measured |
+| Byte-exact raw recoverable | 61/61 | partial or none | no |
+
+LM Resizer's mean is slightly below RTK's on purpose: it refuses to drop large diffs, test names or failure lines to win tokens. RTK returns exit code 0 in **9** of the 61 captures where the producer failed; LM Resizer keeps the producer's code. On one capture LM Resizer returns 251 tokens against RTK's 40 because it keeps **457** collection-error lines and the failing test names, which RTK omits. Headroom compresses LLM API context semantically and has no dedicated CLI tool filters, so its median saving on this command corpus is 0.00%. Strict view equality is 49/61; the twelve differences and their reasons are listed in the benchmark file, and the benchmark's strict checker exits 1 by design. The numbers are replayed with `python3 bench/real/parity_rtk.py`; see [the benchmark](bench/native/README.md).
+
+## Try it on your project
+
+`exec` runs a command, gives the agent the shortened view and keeps the original. The examples below assume the wrapped tools are present: `git` and a current directory inside a Git repository (outside one, Git itself fails with exit 128 and there is nothing to shorten), and a Rust project with Cargo for `cargo test`. If a wrapped command is not installed, `exec` says `cannot execute <name>: command not found` and exits 127.
+
+Check the install works anywhere, with no repository needed:
+
+~~~bash
+lm-resizer exec -- echo hello
+lm-resizer git log -20
+lm-resizer exec --raw-on-failure -- cargo test
+lm-resizer tee list
+lm-resizer gain --history --project
+~~~
+
+`exec` preserves the producer's status (128 + signal on Unix). Shell commands, `--stream` and `--raw-on-failure` retain separate streams and the `[stderr]` marker.
+
+## The diagnostic guarantee
+
+LM Resizer shortens, it does not hide. Command views keep literal numbers, paths, identifiers, commit authors and failure diagnostics. Recognized successful Cargo/pytest progress can be summarized by suite counts; failures stay visible. If a compression step would omit a failure line, the filtered body is kept and, where the saving allows it, a `[tee:<id>]` line points to the untouched original. A view that contains a diagnostic can therefore show little or no saving — that is intentional. The internal step names (`diagnostic-guard`, `kept_filtered`, `diagnostic_reinjection`) and the `raw_on_failure` path are listed in [the CLI reference](docs/CLI-REFERENCE.md).
+
+`lm-resizer expand -i view.txt` reconstructs reversible views, including `Patch v1` and `Patch v2` histories and diffs: shared file headers and identical runs are factored without dropping source or context lines.
+
+## Recover the exact output
+
+`exec` drains a shared stdout/stderr pipe through EOF, without a 10 MiB ceiling. A sufficiently reduced view may display `[tee:<id>]`; read it with `lm-resizer tee read <id>`; otherwise `tee list` and the JSON `tee_hint` field provide recovery without adding tokens to the view.
+
+From Bash, retrieve a listed original when one exists:
+
+~~~bash
+tee_listing=$(lm-resizer tee list)
+tee_file=${tee_listing%% *}
+if [ -n "$tee_file" ]; then lm-resizer tee read "$tee_file"; fi
+~~~
+
+In PowerShell, select the file from the JSON list:
+
+~~~powershell
+$teeFiles = lm-resizer tee list --json | ConvertFrom-Json
+if ($teeFiles.files.Count -gt 0) { lm-resizer tee read $teeFiles.files[0].name }
+~~~
+
+If several files are listed, use the filename or `[raw: …]` identifier for the command you need. `lm-resizer --version` reports `lm-resizer 0.2.4`. JSON recovery metadata uses a marker such as `[raw: e3b0c44298fc]`; the archives have a `.log` extension.
+
+## Agent integrations
+
+The CLI also offers `compress` for files or standard input and `tool-output` for already captured command output, plus opt-in MCP, HTTP and agent hook integrations. `install --client all --scope project` also writes Codex user configuration and replaces an existing `mcp_servers.lm_resizer` table without backup; save it before installation. See [the agent integration guide](docs/CLAUDE_CODEX.md), [the release guide](docs/RELEASE.md) and [additional agent hooks](docs/AGENT_HOOKS.md) for those workflows. Every option, command and variable shown by `--help` is listed in [the CLI reference](docs/CLI-REFERENCE.md).
+
+Copyable examples from this checkout (Bash):
+
+~~~bash
+printf 'hello world\n' | lm-resizer compress
+git log -20 '--format=Date: %ad%n%h %s' --date=short | lm-resizer tool-output --command 'git log -20'
+~~~
+
+`compress` reads text from stdin; `tool-output` filters already captured output. Its `--command` argument describes the command and does not execute it. Small output may stay unchanged.
+
+To configure all four clients from your project root, after backing up any existing Codex configuration:
+
+~~~bash
+lm-resizer install --client all --scope project
+~~~
+
+This writes project files and your account's Codex configuration, including with `--scope project`.
+
+## Reproducible token statistics
+
+`lm-resizer stats --markdown` reports exact text token counts using the existing **tiktoken-rs / o200k_base** tokenizer (GPT-4o family). `exec`, `tool-output` and `compress` JSON expose `original_tokens`, `compressed_tokens`, signed `tokens_saved`, `tokenizer` and `token_count_method: "exact"`. Counts include the final recovery markers; a negative saving means the output uses more tokens. This reference encoding is not a claim about Claude, Llama or provider billing.
+
+New execution history records persist both counts. Stats keep existing byte counters and JSON fields, and add measured token totals and `measured_commands` / `unmeasured_commands`. Old records lack the text needed for recounting: their `estimated_tokens_saved` remains an explicitly labelled historical estimate, separate from measured totals. `discover`, `discover-sessions`, `eval` and `learn` tokenize available original and filtered text; these are prospective filter savings. For JSON compatibility, `estimated_tokens_saved` in discovery/evaluation is an alias of the exact prospective `tokens_saved`, not a byte estimate.
+
+[Counting method, compatibility and reproduction](docs/TOKEN-STATISTICS.md). The parity benchmark above uses `o200k_base`.
+
+## Native filters and current measurements
+
+The product uses its own Rust and TOML filters. Explicit inspection commands include `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` and `dedup`. File reads remain literal. Reversible path/match folds, JSON tables and identical-line runs supplement command filters; syntax outlines and exact repeated-message folding are opt-in.
+
+**Median saving including tee: 22.79%.** Mean saving is 31.78%; all 61 raw recoveries and producer exit codes pass, and interleaved startup measurements give 7.70 ms. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
+
+`env` masks names containing `PASSPHRASE` (including `PASSPHRASE_FILE`) and a `PASS` name component. This deliberately also masks benign names such as `PASS_COUNT`; filtering is conservative, based on names and credential URL shapes.
+
+## Install from source
 
 The CLI requires Rust **1.91 or newer**; `rust-toolchain.toml` pins **1.95.0** with rustfmt and clippy. Use official rustup when the distribution compiler is older.
 
@@ -55,9 +163,7 @@ sudo apt-get install -y --no-install-recommends ca-certificates curl git gcc g++
 
 The build was checked on Linux x86_64 with Rust 1.95.0. Other platforms have not been reverified.
 
-If Rust is missing or too old, run the rustup installation steps at the start of your platform’s block. If rustup is already installed and its bin directory is on PATH, you can skip those steps: it will install the repository’s selected toolchain. The installer below selects 1.95.0 as your account’s default; `--no-modify-path` leaves your profile files and permanent PATH intact. Subsequent commands set PATH for the current terminal only. [Official Rust installation instructions](https://www.rust-lang.org/tools/install/).
-
-Before publication, use a checkout of the `feat/filtres-natifs-2026-10-03` candidate supplied by the maintainer. This local branch may not be available on GitHub. **Only after publication**, download the public tagged sources (Bash or PowerShell):
+Download the public tagged sources (Bash or PowerShell):
 
 ~~~sh
 git clone --branch v0.2.4 https://github.com/phuetz/lm-resizer.git
@@ -91,51 +197,9 @@ $env:Path = "$installRoot\bin;$env:Path"
 lm-resizer --version
 ~~~
 
-When distribution Rust is already installed, rustup may print `cannot install while Rust is installed`, followed by `continuing (because the -y flag is set and the error is ignorable)`. In the command above this warning is nonfatal: check the exit code and `cargo --version` after sourcing `.cargo/env`; it should report 1.95.0. The distribution Rust remains installed.
+If Rust is missing or too old, the rustup steps at the start of your platform block install the repository's selected toolchain. If rustup is already installed and its bin directory is on PATH, you can skip those steps. `--no-modify-path` leaves your profile files and permanent PATH intact; subsequent commands set PATH for the current terminal only. When distribution Rust is already installed, rustup may print `cannot install while Rust is installed`, followed by `continuing (because the -y flag is set and the error is ignorable)`. In the command above this warning is nonfatal: check the exit code and `cargo --version` after sourcing `.cargo/env`; it should report 1.95.0. The distribution Rust remains installed. [Official Rust installation instructions](https://www.rust-lang.org/tools/install/).
 
 Cargo downloads dependencies into `~/.cargo` (`%USERPROFILE%\.cargo` on Windows) even when a build fails; rustup stores compilers in `.rustup`. These caches are separate from the `.local` install prefix. If Cargo is not 1.95.0 in this checkout, check PATH (`command -v cargo` in Bash, `Get-Command cargo` in PowerShell), `rustup show active-toolchain` and any `RUSTUP_TOOLCHAIN` override. Stop if `cargo install` fails: the examples and uninstall command below require a successfully installed binary.
-
-`exec` preserves the producer’s status (128 + signal on Unix). Shell commands, `--stream` and `--raw-on-failure` retain separate streams and the `[stderr]` marker.
-
-Check the install works anywhere, with no repository needed:
-
-~~~bash
-lm-resizer exec -- echo hello
-~~~
-
-The next examples assume what they wrap is present: `git` and a current directory inside a Git repository (outside one, Git itself fails with exit 128 and there is nothing to shorten), and a Rust project with Cargo for `cargo test`. If a wrapped command is not installed, `exec` says `cannot execute <name>: command not found` and exits 127.
-
-~~~bash
-lm-resizer git log -20
-lm-resizer exec --raw-on-failure -- cargo test
-lm-resizer tee list
-lm-resizer gain --history --project
-~~~
-
-The audited grep/find/listing/file/git/container/linter views retain literal numbers, paths, identifiers, commit authors and diagnostics. They no longer emit `LMR-LINES` or `LMR-TEXT` references. Recognized successful Cargo/pytest progress can be summarized by suite counts; failures remain visible. `lm-resizer expand -i view.txt` reconstructs reversible views, including `Patch v1` and `Patch v2` histories and diffs: shared file headers and identical runs are factored without dropping source or context lines.
-
-The command filters keep the lines that matter; the generic pass that follows ranks lines by frequency. Two losses are guarded separately. When a command filter itself drops a failure line (such as a line with `exit code 2` or `##[error]`), the raw output is returned and the filter name gains a `:diagnostic-guard` suffix. That suffix is not applied on every path: `--raw-on-failure` on a non-zero exit skips the filter and records `raw_on_failure` (no suffix, no step, no message). When the generic pass would drop a line the filter had kept, the filtered body is kept — the filter's own reduction is kept — and the report records `diagnostic_gate:kept_filtered`. The printed view may still gain a `[tee:<id>]` line when the saving pays for it. `compress` reinjects omitted failure lines under a marker; so does `exec` on the default path, and only for a nested `lm-resizer`. A view that contains a diagnostic can therefore show little or no saving; read the saved original with `lm-resizer tee read <id>`.
-
-A sufficiently reduced view may display `[tee:<id>]`. Read it with `lm-resizer tee read <id>`; otherwise `tee list` and the JSON `tee_hint` field provide recovery without adding tokens to the view.
-
-From Bash, retrieve a listed original when one exists:
-
-~~~bash
-tee_listing=$(lm-resizer tee list)
-tee_file=${tee_listing%% *}
-if [ -n "$tee_file" ]; then lm-resizer tee read "$tee_file"; fi
-~~~
-
-In PowerShell, select the file from the JSON list:
-
-~~~powershell
-$teeFiles = lm-resizer tee list --json | ConvertFrom-Json
-if ($teeFiles.files.Count -gt 0) { lm-resizer tee read $teeFiles.files[0].name }
-~~~
-
-If several files are listed, use the filename or `[raw: …]` identifier for the command you need.
-
-`lm-resizer --version` reports `lm-resizer 0.2.4`. JSON recovery metadata uses a marker such as `[raw: e3b0c44298fc]`; the archives have a `.log` extension.
 
 To remove a binary installed with Cargo:
 
@@ -149,48 +213,11 @@ Windows (PowerShell):
 cargo uninstall --root "$installRoot" lm-resizer
 ~~~
 
-The CLI also offers `compress` for files or standard input, `tool-output` for already captured command output, and opt-in MCP, HTTP and agent hook integrations. `install --client all --scope project` also writes Codex user configuration and replaces an existing `mcp_servers.lm_resizer` table without backup; save it before installation. See [the agent integration guide](docs/CLAUDE_CODEX.md) and [the release guide](docs/RELEASE.md) for those workflows. Every option, command and variable shown by `--help` is listed in [the CLI reference](docs/CLI-REFERENCE.md) (in French).
-
-Copyable examples from this checkout (Bash):
-
-~~~bash
-printf 'hello world\n' | lm-resizer compress
-git log -20 '--format=Date: %ad%n%h %s' --date=short | lm-resizer tool-output --command 'git log -20'
-~~~
-
-`compress` reads text from stdin; `tool-output` filters already captured output. Its `--command` argument describes the command and does not execute it. Small output may stay unchanged.
-
-To configure all four clients from your project root, after backing up any existing Codex configuration:
-
-~~~bash
-lm-resizer install --client all --scope project
-~~~
-
-This writes project files and your account's Codex configuration, including with `--scope project`.
-
-## Reproducible token statistics
-
-`lm-resizer stats --markdown` reports exact text token counts using the existing **tiktoken-rs / o200k_base** tokenizer (GPT-4o family). `exec`, `tool-output` and `compress` JSON expose `original_tokens`, `compressed_tokens`, signed `tokens_saved`, `tokenizer` and `token_count_method: "exact"`. Counts include the final recovery markers; a negative saving means the output uses more tokens. This reference encoding is not a claim about Claude, Llama or provider billing.
-
-New execution history records persist both counts. Stats keep existing byte counters and JSON fields, and add measured token totals and `measured_commands` / `unmeasured_commands`. Old records lack the text needed for recounting: their `estimated_tokens_saved` remains explicitly labeled **legacy bytes / 4**, separate from measured totals. `discover`, `discover-sessions`, `eval` and `learn` tokenize available original and filtered text; these are prospective filter savings. For JSON compatibility, `estimated_tokens_saved` in discovery/evaluation is an alias of the exact prospective `tokens_saved`, not a byte estimate.
-
-[Counting method, compatibility and reproduction](docs/TOKEN-STATISTICS.md). The parity benchmark below uses `o200k_base`.
-
-## Native filters and measurements
-
-The product uses its own Rust and TOML filters. Normal `exec` drains a shared stdout/stderr pipe through EOF, without a 10 MiB ceiling. Use `lm-resizer tee list` and `lm-resizer tee read <id>` to recover the complete original. The optional `--stream` and `--raw-on-failure` paths still capture the streams separately.
-
-**Median saving including tee: 22.79%, up from 21.74%, against a 15.81% reference.** Mean saving is 31.78%; all 61 raw recoveries and producer exit codes pass. Interleaved startup measurements give 7.70 ms (7.68 ms before). Windows byte-contract replays pass on Linux; actual Windows installation remains unverified. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
-
-Explicit inspection commands include `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` and `dedup`. File reads remain literal. Reversible path/match folds, JSON tables and identical-line runs supplement command filters; syntax outlines and exact repeated-message folding are opt-in. [Additional agent hooks](docs/AGENT_HOOKS.md) support Gemini, Copilot and Cursor configuration.
-
-`env` masks names containing `PASSPHRASE` (including `PASSPHRASE_FILE`) and a `PASS` name component. This deliberately also masks benign names such as `PASS_COUNT`; filtering is conservative, based on names and credential URL shapes.
-
 ## When not to use it
 
 - Do not treat a shortened view as a complete audit trail: inspect the saved original for security, compliance or subtle failures.
 - Do not expect savings on every input. Short commands and text with little repetition may stay unchanged.
-- Do not infer lower API bills or better agent decisions from output-token counts alone. Agent tasks and billing were not tested here.
+- Token reductions on command outputs do not guarantee proportional API invoice savings or benchmark task success: real-world agent costs also depend on multi-turn context caching and prompt structure. Neither agent tasks nor billing were tested here.
 
 LM Resizer is Apache-2.0 licensed. [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
