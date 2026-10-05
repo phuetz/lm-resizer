@@ -34,6 +34,8 @@ with tempfile.TemporaryDirectory(prefix='windows contract été ') as folder:
         ('long-failure', journal.encode(), 23, ['--raw-on-failure']),
         ('long-success', journal.encode(), 0, []),
     ]:
+        # Since the generic views, a failing producer's view starts with one status line.
+        shown = (f'[FAIL] Command failed (exit code: {code})\n'.encode() + raw) if code else raw
         source = root/'résumé avec espaces.bin'
         source.write_bytes(raw)
         report = json.loads(run(['exec', '--json', *flags, '--', sys.executable, str(emitter), str(source), str(code)], code=code))
@@ -43,10 +45,10 @@ with tempfile.TemporaryDirectory(prefix='windows contract été ') as folder:
             key = re.search(r'[0-9a-f]{12}', hint)[0]
             assert run(['tee', 'read', key]) == raw, name
         else:
-            assert report['output'].encode() == raw, name
+            assert report['output'].encode() == shown, name
         assert '\ufffd' not in report['output']
         if flags:
-            assert report['output'].encode() == raw
+            assert report['output'].encode() == shown
             assert not report['compression_steps']
         results.append(dict(case=name, bytes=len(raw), exit=code, recovered_exact=True))
     source = root/'journal.txt'
