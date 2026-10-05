@@ -17,7 +17,21 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
         return raw.into();
     }
     let lines: Vec<&str> = raw.lines().collect();
-    let plain: Vec<Cow<'_, str>> = lines.iter().map(|line| strip_ansi(line)).collect();
+    let uncolored: Vec<Cow<'_, str>> = lines.iter().map(|line| strip_ansi(line)).collect();
+    let git_graph = uncolored.iter().any(|line| {
+        let content = strip_git_graph_prefix(line);
+        content != line.as_ref() && (git_commit_header(content) || git_oneline(content))
+    });
+    // Decide on graph-free, colour-free text, while `lines` remains untouched
+    // for the user-facing view and tee recovery.
+    let plain: Vec<Cow<'_, str>> = if git_graph {
+        uncolored
+            .iter()
+            .map(|line| Cow::Owned(strip_git_graph_prefix(line).to_owned()))
+            .collect()
+    } else {
+        uncolored
+    };
     let mut keep = vec![false; lines.len()];
     let traceback_start = plain.iter().position(|line| {
         line.trim_start()
@@ -107,11 +121,18 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
     // Keep merge parents and message trailers even when dates or paths later
     // in the output happen to trigger the generic diagnostic rules.
     let mut in_commit = false;
+    let mut in_stat_section = false;
     for (i, line) in plain.iter().enumerate() {
         if git_commit_header(line) {
             in_commit = true;
-        } else if in_commit && (line.starts_with("diff --git ") || git_stat_row(line)) {
+            in_stat_section = false;
+        } else if in_commit && line.trim() == "---" {
+            in_stat_section = true;
+        } else if in_commit
+            && (line.starts_with("diff --git ") || (in_stat_section && git_stat_boundary(line)))
+        {
             in_commit = false;
+            in_stat_section = false;
         }
         if in_commit || git_oneline(line) || git_commit_metadata(line) {
             keep[i] = true;
@@ -222,6 +243,24 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             }
         }
     }
+    // Long `git log --oneline` histories are lists. Retain the first five
+    // and last two identities shown by RTK, plus diagnostic subjects.
+    let oneline_rows: Vec<usize> = plain
+        .iter()
+        .enumerate()
+        .filter_map(|(i, line)| git_oneline(line).then_some(i))
+        .collect();
+    if git_graph && oneline_rows.len() > 10 {
+        for &i in &oneline_rows[5..oneline_rows.len() - 2] {
+            let lower = plain[i].to_ascii_lowercase();
+            if !["error", "fail", "warn", "panic", "fatal"]
+                .iter()
+                .any(|word| lower.contains(word))
+            {
+                keep[i] = false;
+            }
+        }
+    }
     // On a long patch RTK shows its head and tail. Commit and stat lines
     // occur before the first `diff --git` and have already been selected.
     if let Some(patch_start) = plain
@@ -247,7 +286,10 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
         .filter_map(|(line, selected)| selected.then_some(*line))
         .collect::<Vec<_>>()
         .join("\n");
-    let body = if candidate.is_empty()
+    let short_http =
+        lines.len() <= 20 && raw.len() <= 2048 && plain.iter().any(|line| http_status(line));
+    let body = if short_http
+        || candidate.is_empty()
         || crate::token_metrics::TokenCounts::measure(raw, &candidate).tokens_saved <= 0
     {
         raw.to_owned()
@@ -350,9 +392,28 @@ fn git_stat_row(line: &str) -> bool {
         .is_some_and(|(path, _value)| !path.trim().is_empty())
 }
 
+fn git_stat_boundary(line: &str) -> bool {
+    line.rsplit_once(" | ").is_some_and(|(path, value)| {
+        !path.trim().is_empty()
+            && (value.trim_start().starts_with("Bin ")
+                || value.trim_start().starts_with("Unmerged")
+                || value
+                    .trim_start()
+                    .starts_with(|ch: char| ch.is_ascii_digit()))
+    })
+}
+
+fn strip_git_graph_prefix(line: &str) -> &str {
+    static PREFIX: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[|*/\\_ .-]*[|*/\\_][|*/\\_.-]* +").unwrap());
+    PREFIX
+        .find(line)
+        .map_or(line, |matched| &line[matched.end()..])
+}
+
 fn git_commit_header(line: &str) -> bool {
     static HEADER: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^commit [0-9a-fA-F]{7,64}(?: \([^\r\n]*\))?$").unwrap());
+        LazyLock::new(|| Regex::new(r"^commit [0-9a-fA-F]{4,64}(?: \([^\r\n]*\))?$").unwrap());
     HEADER.is_match(line)
 }
 
@@ -837,6 +898,53 @@ mod tests {
         let out = summarize(Mode::Summary, &raw, 0);
         assert!(out.contains("abcde000 (tag: release-0) Subject 0"));
         assert!(out.contains("abcde01d (tag: release-29) Subject 29"));
+    }
+    #[test]
+    fn git_graph_prefixes_keep_commit_identity_and_message_with_pipe() {
+        for (prefix, expected) in [
+            ("* ", "commit 5262"),
+            ("| ", "Author: A"),
+            ("|\\  ", "Merge: abcdef1 1234567"),
+            ("/ ", "Date: Mon Oct 5"),
+            ("* | ", "commit abcdef1"),
+            ("*-------.   ", "commit abcdef1234567"),
+        ] {
+            assert!(strip_git_graph_prefix(&format!("{prefix}{expected}")).starts_with(expected));
+        }
+        let raw = format!(
+            "* commit 5262 (HEAD -> main)\n| Merge: abcdef1 1234567\n| Author: A <a@example.com>\n| Date: Mon Oct 5 14:05:50 2026 +0200\n|\n|     fix | the parser\n|     Co-Authored-By: B <b@example.com>\n|\n| ---\n| file.txt | 2 +-\n| 1 file changed\n{}",
+            "progress phase\n".repeat(30)
+        );
+        let out = summarize(Mode::Summary, &raw, 0);
+        for expected in [
+            "* commit 5262 (HEAD -> main)",
+            "| Merge: abcdef1 1234567",
+            "|     fix | the parser",
+            "|     Co-Authored-By: B <b@example.com>",
+            "| file.txt | 2 +-",
+        ] {
+            assert!(out.contains(expected), "lost {expected}");
+        }
+    }
+    #[test]
+    fn long_git_graph_oneline_keeps_head_tail_and_original_prefixes() {
+        let raw = (0..30)
+            .map(|i| {
+                format!(
+                    "| * {:08x} (tag: release-{i}) Subject {i}\n",
+                    i + 0xabcde000_u32
+                )
+            })
+            .collect::<String>();
+        let out = summarize(Mode::Summary, &raw, 0);
+        assert!(out.contains("| * abcde000 (tag: release-0) Subject 0"));
+        assert!(out.contains("| * abcde01d (tag: release-29) Subject 29"));
+        assert!(!out.contains("Subject 20"));
+    }
+    #[test]
+    fn short_http_response_keeps_its_body() {
+        let raw = "HTTP/1.1 200 OK\nContent-Length: 5\n\nhello\n";
+        assert_eq!(summarize(Mode::Summary, raw, 0), raw);
     }
     #[test]
     fn patch_metadata_tail_and_chunked_trailers_survive_reduction() {
