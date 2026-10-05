@@ -38,7 +38,7 @@ $env:Path = "$installRoot\bin;$env:Path"
 lm-resizer --version
 ```
 
-Then add MCP configuration:
+Then add MCP configuration (Claude Code writes project `.mcp.json`; Codex always writes user `~/.codex/config.toml`):
 
 ```bash
 lm-resizer install --client claude --scope project
