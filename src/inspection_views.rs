@@ -103,6 +103,20 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             }
         }
     }
+    // An HTTP response is a structured block: every field has the same
+    // `name: value` shape, regardless of the field name or value type.
+    let mut in_http_headers = false;
+    for (i, line) in plain.iter().enumerate() {
+        if http_status(line) {
+            in_http_headers = true;
+        } else if in_http_headers && line.trim().is_empty() {
+            in_http_headers = false;
+        } else if in_http_headers && http_header(line) {
+            keep[i] = true;
+        } else if in_http_headers {
+            in_http_headers = false;
+        }
+    }
     // RTK's error stream keeps every indented continuation in an open
     // diagnostic block, including the first blank line. Its independently
     // recognizable frames can also reopen a block far from the first error.
@@ -157,7 +171,7 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
 fn strip_ansi(line: &str) -> Cow<'_, str> {
     static ANSI: LazyLock<Regex> = LazyLock::new(|| {
         // CSI colour/cursor controls and OSC title/hyperlink controls.
-        Regex::new(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))").unwrap()
+        Regex::new(r"(?:\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))|\x{009b}[0-?]*[ -/]*[@-~])").unwrap()
     });
     ANSI.replace_all(line, "")
 }
@@ -208,7 +222,7 @@ fn structured_fact(line: &str) -> bool {
     static FACT: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?ix)^(?:
-            \s*[^|\r\n]+\|\s*(?:\d+(?:\s|$)|Bin\s+\d+\s*->\s*\d+\s+bytes\b) # git diff --stat file row
+            \s*[^|\r\n]*\S\s+\|\s*.*$ # git diff --stat: path | any status
             |\s*[a-z][a-z0-9-]*:\s*\d+(?:\s|$) # numeric HTTP header
             |HTTP/\d(?:\.\d)?\s+\d{3}(?:\s|$) # HTTP status
             |\s*Start\s+\d+\s*:           # CTest test start
@@ -219,6 +233,18 @@ fn structured_fact(line: &str) -> bool {
         .unwrap()
     });
     FACT.is_match(line)
+}
+
+fn http_status(line: &str) -> bool {
+    static STATUS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^HTTP/\d(?:\.\d)?\s+\d{3}(?:\s|$)").unwrap());
+    STATUS.is_match(line)
+}
+
+fn http_header(line: &str) -> bool {
+    static HEADER: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[A-Za-z][A-Za-z0-9-]*:\s*\S.*$").unwrap());
+    HEADER.is_match(line)
 }
 
 fn python_exception_line(line: &str) -> bool {
@@ -525,6 +551,36 @@ mod tests {
             let raw = format!("{noise}{line}\n{noise}");
             assert!(summarize(mode, &raw, 0).contains(line), "lost {line}");
         }
+    }
+    #[test]
+    fn git_stat_keeps_any_value_after_a_path() {
+        let noise = "progress phase\n".repeat(25);
+        for line in [
+            " conflict.txt | Unmerged",
+            " old name.txt => new name.txt | 0",
+            " {old => new}/logo.png | Bin 12 -> 8 bytes",
+            " module | Submodule abcd..efgh",
+            " mode change.txt | Mode 100644 => 100755",
+            " path with spaces.txt | arbitrary future status",
+        ] {
+            let raw = format!("{noise}{line}\n0 files changed\n{noise}");
+            assert!(
+                summarize(Mode::Summary, &raw, 0).contains(line),
+                "lost {line}"
+            );
+        }
+    }
+    #[test]
+    fn http_headers_use_field_shape_within_response() {
+        let raw = format!(
+            "HTTP/2 200\nTransfer-Encoding: chunked\nETag: abc-123\nX-Trace-Id: 42a\n\n{}",
+            "progress phase\n".repeat(30)
+        );
+        let out = summarize(Mode::Summary, &raw, 0);
+        assert!(out.contains("Transfer-Encoding: chunked"));
+        assert!(out.contains("ETag: abc-123"));
+        assert!(out.contains("X-Trace-Id: 42a"));
+        assert!(!out.contains("progress phase\nprogress phase\nprogress phase"));
     }
     #[test]
     fn ansi_decoration_does_not_change_diagnostic_or_fact_selection() {
