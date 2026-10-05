@@ -2,7 +2,7 @@
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, path::Path, sync::LazyLock};
+use std::{borrow::Cow, collections::BTreeMap, path::Path, sync::LazyLock};
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum Mode {
@@ -17,15 +17,16 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
         return raw.into();
     }
     let lines: Vec<&str> = raw.lines().collect();
+    let plain: Vec<Cow<'_, str>> = lines.iter().map(|line| strip_ansi(line)).collect();
     let mut keep = vec![false; lines.len()];
-    let traceback_start = lines.iter().position(|line| {
+    let traceback_start = plain.iter().position(|line| {
         line.trim_start()
             .starts_with("Traceback (most recent call last):")
     });
     if let Some(start) = traceback_start {
         // Keep every frame through the terminal exception (including chained
         // tracebacks), without treating unrelated progress after it as a frame.
-        let end = lines
+        let end = plain
             .iter()
             .enumerate()
             .skip(start)
@@ -33,7 +34,7 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             .find_map(|(i, line)| python_exception_line(line).then_some(i));
         keep[start..=end.unwrap_or(lines.len() - 1)].fill(true);
     }
-    for (i, line) in lines.iter().enumerate() {
+    for (i, line) in plain.iter().enumerate() {
         let lower = line.to_ascii_lowercase();
         let diagnostic = [
             "error",
@@ -107,7 +108,7 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
     // recognizable frames can also reopen a block far from the first error.
     let mut in_block = false;
     let mut blanks = 0;
-    for (i, line) in lines.iter().enumerate() {
+    for (i, line) in plain.iter().enumerate() {
         if rtk_error_pattern(line) {
             keep[i] = true;
             in_block = true;
@@ -129,7 +130,7 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
     // A true numeric total can precede a long trailing log. Its syntax,
     // rather than its distance from the end, distinguishes it from progress.
     for i in 0..lines.len() {
-        if numeric_summary(lines[i]) {
+        if numeric_summary(&plain[i]) {
             keep[i] = true;
         }
     }
@@ -151,6 +152,14 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
     } else {
         body
     }
+}
+
+fn strip_ansi(line: &str) -> Cow<'_, str> {
+    static ANSI: LazyLock<Regex> = LazyLock::new(|| {
+        // CSI colour/cursor controls and OSC title/hyperlink controls.
+        Regex::new(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))").unwrap()
+    });
+    ANSI.replace_all(line, "")
 }
 
 fn diagnostic_marker(line: &str) -> bool {
@@ -199,7 +208,7 @@ fn structured_fact(line: &str) -> bool {
     static FACT: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?ix)^(?:
-            \s*[^|\r\n]+\|\s*\d+(?:\s|$)  # git diff --stat file row
+            \s*[^|\r\n]+\|\s*(?:\d+(?:\s|$)|Bin\s+\d+\s*->\s*\d+\s+bytes\b) # git diff --stat file row
             |\s*[a-z][a-z0-9-]*:\s*\d+(?:\s|$) # numeric HTTP header
             |HTTP/\d(?:\.\d)?\s+\d{3}(?:\s|$) # HTTP status
             |\s*Start\s+\d+\s*:           # CTest test start
@@ -507,6 +516,7 @@ mod tests {
             ("100% tests passed, 0 tests failed out of 1", Mode::Tests),
             ("Total Test time (real) =   0.12 sec", Mode::Summary),
             (" tracked.txt | 2 +-", Mode::Summary),
+            (" logo.png | Bin 1234 -> 5678 bytes", Mode::Summary),
             ("Content-Length: 31", Mode::Summary),
             ("1/2 Test #1: alpha ... Passed", Mode::Summary),
             ("not ok 2 - total", Mode::Tests),
@@ -514,6 +524,41 @@ mod tests {
         ] {
             let raw = format!("{noise}{line}\n{noise}");
             assert!(summarize(mode, &raw, 0).contains(line), "lost {line}");
+        }
+    }
+    #[test]
+    fn ansi_decoration_does_not_change_diagnostic_or_fact_selection() {
+        let noise = "progress phase\n".repeat(25);
+        for (line, fact, mode) in [
+            (
+                "\x1b[0;32m100% tests passed\x1b[0;0m out of 1",
+                "100% tests passed out of 1",
+                Mode::Tests,
+            ),
+            (
+                "\x1b[33m logo.png | Bin 1234 -> 5678 bytes\x1b[0m",
+                " logo.png | Bin 1234 -> 5678 bytes",
+                Mode::Summary,
+            ),
+            (
+                "\x1b[31m  File \"bad.py\", line 7\x1b[0m",
+                "  File \"bad.py\", line 7",
+                Mode::Errors,
+            ),
+            (
+                "\x1b[33mContent-Length: 31\x1b[0m",
+                "Content-Length: 31",
+                Mode::Summary,
+            ),
+            (
+                "\x1b[33mwarning: unused value\x1b[0m",
+                "warning: unused value",
+                Mode::Errors,
+            ),
+        ] {
+            let raw = format!("{noise}{line}\n{noise}");
+            let shown = summarize(mode, &raw, 0);
+            assert!(strip_ansi(&shown).contains(fact), "lost {fact}");
         }
     }
     #[test]
