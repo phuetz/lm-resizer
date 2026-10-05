@@ -280,7 +280,7 @@ pub fn pytest(raw: &str) -> String {
         let same_file = !file.is_empty()
             && sections
                 .iter()
-                .any(|(n, text)| *n == id && text.contains(&format!("{file}:")));
+                .any(|(n, text)| *n == id && cites_file_location(text, file));
         let unambiguous = rows_per_id.get(&id).copied().unwrap_or(0) <= 1;
         !(same_file || unambiguous)
     });
@@ -469,6 +469,24 @@ pub fn go(raw: &str) -> String {
     out
 }
 
+/// True when `text` has a `file:LINE` location for exactly this path: the path
+/// must start at a segment boundary (line start or a character that cannot be
+/// part of a path), so `tests/a.py:2` does not count as a location in `a.py`.
+fn cites_file_location(text: &str, file: &str) -> bool {
+    let needle = format!("{file}:");
+    text.match_indices(&needle).any(|(i, _)| {
+        let before_ok = text[..i]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_alphanumeric() || matches!(c, '/' | '\\' | '_' | '-' | '.')));
+        let after_ok = text[i + needle.len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit());
+        before_ok && after_ok
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,6 +520,14 @@ mod tests {
         assert!(view.contains("b.py::test_foo"), "{view}");
         assert!(view.contains("a.py:2: AssertionError"), "{view}");
         assert_eq!(view.matches("a.py::test_foo").count(), 0, "{view}");
+    }
+    #[test]
+    fn a_path_that_is_the_suffix_of_another_is_not_the_same_file() {
+        let raw = "============================= test session starts ==============================\ncollected 2 items\n\n=================================== FAILURES ===================================\n_________________________________ test_foo _________________________________\n\n>       assert False\nE       AssertionError\n\ntests/a.py:2: AssertionError\n=========================== short test summary info ============================\nFAILED tests/a.py::test_foo - AssertionError\nFAILED a.py::test_foo - ValueError: only in the summary\n========================= 2 failed in 0.10s ==========================\n";
+        let view = pytest(raw);
+        assert!(view.contains("only in the summary"), "{view}");
+        assert!(view.contains("tests/a.py:2: AssertionError"), "{view}");
+        assert_eq!(view.matches("tests/a.py::test_foo").count(), 0, "{view}");
     }
     #[test]
     fn successful_test_views_state_zero_failures_and_retain_unknown_diagnostics() {
