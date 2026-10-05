@@ -141,7 +141,7 @@ Les nouvelles entrées d'historique conservent les deux comptes. Les statistique
 
 Le produit utilise ses propres filtres Rust et TOML. Les commandes d'inspection explicites incluent `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` et `dedup`. Les lectures de fichiers restent littérales. Les plis réversibles de chemins et correspondances, tables JSON et répétitions exactes complètent les filtres de commandes ; le contour syntaxique et la déduplication de blocs sont explicites.
 
-**Médiane tee compris : 22,79 %.** La moyenne est de 31,78 % ; les 61 récupérations du brut et les codes de sortie du producteur passent tous, et les mesures de démarrage entrelacées donnent 7,70 ms. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
+**Médiane tee compris : 22,79 %.** La moyenne est de 31,78 % ; les 61 récupérations du brut et les codes de sortie du producteur passent tous, et les mesures de démarrage entrelacées donnent 7,70 ms. Ces médianes de corpus ne sont pas une affirmation sur des dépôts vivants arbitraires. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
 
 `env` masque les noms contenant `PASSPHRASE` (y compris `PASSPHRASE_FILE`) et un composant de nom `PASS`. Cela masque volontairement aussi des noms inoffensifs comme `PASS_COUNT` ; le filtrage est prudent, fondé sur les noms et les formes d'URL à identifiants.
 

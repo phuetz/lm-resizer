@@ -141,7 +141,7 @@ New execution history records persist both counts. Stats keep existing byte coun
 
 The product uses its own Rust and TOML filters. Explicit inspection commands include `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` and `dedup`. File reads remain literal. Reversible path/match folds, JSON tables and identical-line runs supplement command filters; syntax outlines and exact repeated-message folding are opt-in.
 
-**Median saving including tee: 22.79%.** Mean saving is 31.78%; all 61 raw recoveries and producer exit codes pass, and interleaved startup measurements give 7.70 ms. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
+**Median saving including tee: 22.79%.** Mean saving is 31.78%; all 61 raw recoveries and producer exit codes pass, and interleaved startup measurements give 7.70 ms. These corpus medians are not a claim about arbitrary live repositories. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
 
 `env` masks names containing `PASSPHRASE` (including `PASSPHRASE_FILE`) and a `PASS` name component. This deliberately also masks benign names such as `PASS_COUNT`; filtering is conservative, based on names and credential URL shapes.
 
