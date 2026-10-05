@@ -111,10 +111,27 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             in_http_headers = true;
         } else if in_http_headers && line.trim().is_empty() {
             in_http_headers = false;
-        } else if in_http_headers && http_header(line) {
+        } else if in_http_headers
+            && (http_header(line) || line.starts_with(' ') || line.starts_with('\t'))
+        {
             keep[i] = true;
         } else if in_http_headers {
             in_http_headers = false;
+        }
+    }
+    // CTest follows its result heading with an indented list of test names.
+    // Keep the entire list, including successes, until its blank terminator.
+    let mut in_test_list = false;
+    for (i, line) in plain.iter().enumerate() {
+        if line.trim_start().starts_with("The following tests ") && line.ends_with(':') {
+            keep[i] = true;
+            in_test_list = true;
+        } else if in_test_list && line.trim().is_empty() {
+            in_test_list = false;
+        } else if in_test_list && (line.starts_with(' ') || line.starts_with('\t')) {
+            keep[i] = true;
+        } else {
+            in_test_list = false;
         }
     }
     // RTK's error stream keeps every indented continuation in an open
@@ -146,6 +163,24 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
     for i in 0..lines.len() {
         if numeric_summary(&plain[i]) {
             keep[i] = true;
+        }
+    }
+    // Long Git machine listings are repetitive. RTK keeps their first five
+    // records and last two; keep those records plus any intervening diagnostic.
+    let machine_rows: Vec<usize> = plain
+        .iter()
+        .enumerate()
+        .filter_map(|(i, line)| git_machine_fact(line).then_some(i))
+        .collect();
+    if machine_rows.len() > 20 {
+        for &i in &machine_rows[5..machine_rows.len() - 2] {
+            let lower = plain[i].to_ascii_lowercase();
+            if !["error", "fail", "warn", "panic", "fatal"]
+                .iter()
+                .any(|word| lower.contains(word))
+            {
+                keep[i] = false;
+            }
         }
     }
     let candidate = lines
@@ -222,17 +257,39 @@ fn structured_fact(line: &str) -> bool {
     static FACT: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?ix)^(?:
-            \s*[^|\r\n]*\S\s+\|\s*.*$ # git diff --stat: path | any status
-            |\s*[a-z][a-z0-9-]*:\s*\d+(?:\s|$) # numeric HTTP header
+            \s*[a-z][a-z0-9-]*:\s*\d+(?:\s|$) # numeric HTTP header
             |HTTP/\d(?:\.\d)?\s+\d{3}(?:\s|$) # HTTP status
+            |\s*(?:mode\s+change|create\s+mode|delete\s+mode|rename|copy|rewrite)(?:\s|$) # git diff --summary
             |\s*Start\s+\d+\s*:           # CTest test start
             |\s*\d+/\d+\s+Test\s+\x23\d+: # CTest test result
-            |\s*(?:not\s+ok|ok)\s+\d+(?:\s|$) # TAP result
+            |\s*(?:not\s+ok|ok)(?:\s+\d+)?(?:\s|$) # TAP result, numbering optional
+            |\s*Bail\s+out!(?:\s|$) # TAP abort
+            |\s*\d+(?:\.\d+)?%\s+\S.*$ # git diff --dirstat
         )",
         )
         .unwrap()
     });
+    FACT.is_match(line) || git_stat_row(line) || git_machine_fact(line)
+}
+
+fn git_machine_fact(line: &str) -> bool {
+    static FACT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?x)^(?:
+              (?:\d+|-)\t(?:\d+|-)\t\S.* # git diff --numstat
+              |[A-Z][0-9]*\t\S.* # git diff --name-status
+              |:{1,2}[0-7]{6}\s+[0-7]{6}\s+[0-9a-f]{7,64}\s+[0-9a-f]{7,64}\s+[A-Z][0-9]*\t\S.* # git diff --raw
+            )$",
+        )
+        .unwrap()
+    });
     FACT.is_match(line)
+}
+
+fn git_stat_row(line: &str) -> bool {
+    // A Git path may itself contain '|'. The separator is the last " | ".
+    line.rsplit_once(" | ")
+        .is_some_and(|(path, _value)| !path.trim().is_empty())
 }
 
 fn http_status(line: &str) -> bool {
@@ -243,7 +300,7 @@ fn http_status(line: &str) -> bool {
 
 fn http_header(line: &str) -> bool {
     static HEADER: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^[A-Za-z][A-Za-z0-9-]*:\s*\S.*$").unwrap());
+        LazyLock::new(|| Regex::new(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+:.*$").unwrap());
     HEADER.is_match(line)
 }
 
@@ -562,6 +619,8 @@ mod tests {
             " module | Submodule abcd..efgh",
             " mode change.txt | Mode 100644 => 100755",
             " path with spaces.txt | arbitrary future status",
+            " a|b.txt | 2 +-",
+            " dir | with | pipes.txt | Unmerged",
         ] {
             let raw = format!("{noise}{line}\n0 files changed\n{noise}");
             assert!(
@@ -581,6 +640,86 @@ mod tests {
         assert!(out.contains("ETag: abc-123"));
         assert!(out.contains("X-Trace-Id: 42a"));
         assert!(!out.contains("progress phase\nprogress phase\nprogress phase"));
+    }
+    #[test]
+    fn http_headers_keep_empty_values_token_names_and_folds() {
+        let raw = format!(
+            "HTTP/1.1 200 OK\nContent-Type: text/plain\nX-Request-Id:\nX_Request_Id: abc\nX-Long: hello\n world\nETag: \"abc-123\"\n\n{}",
+            "progress phase\n".repeat(30)
+        );
+        let out = summarize(Mode::Summary, &raw, 0);
+        for expected in [
+            "X-Request-Id:",
+            "X_Request_Id: abc",
+            " world",
+            "ETag: \"abc-123\"",
+        ] {
+            assert!(out.contains(expected), "lost {expected}");
+        }
+    }
+    #[test]
+    fn git_summary_and_unnumbered_tap_lines_survive_distant_noise() {
+        let noise = "progress phase\n".repeat(30);
+        for line in [
+            " mode change 100755 => 100644 executable file.sh",
+            " create mode 100644 new name.txt",
+            " delete mode 100644 old name.txt",
+            " rename {old => new}/logo.png (100%)",
+            " copy old.txt => copy.txt (100%)",
+            "ok - bare result",
+            "not ok - bare mismatch",
+            "Bail out! parser died",
+        ] {
+            let raw = format!("{noise}{line}\n{noise}");
+            assert!(
+                summarize(Mode::Summary, &raw, 1).contains(line),
+                "lost {line}"
+            );
+        }
+    }
+    #[test]
+    fn git_machine_formats_and_ctest_result_list_survive_distant_noise() {
+        let noise = "progress phase\n".repeat(30);
+        for line in [
+            "2\t1\ta|b.txt",
+            "-\t-\tlogo image.bin",
+            "R100\told name.txt\tnew name.txt",
+            ":100644 100644 1234567 89abcde M\ta|b.txt",
+            "  12.5% bulk/dir 1/",
+        ] {
+            let raw = format!("{noise}{line}\n{noise}");
+            assert!(
+                summarize(Mode::Summary, &raw, 0).contains(line),
+                "lost {line}"
+            );
+        }
+        let raw = format!("The following tests passed:\n\tPass\n\tAnother test\n\n{noise}");
+        let out = summarize(Mode::Tests, &raw, 0);
+        assert!(out.contains("\tPass"));
+        assert!(out.contains("\tAnother test"));
+    }
+    #[test]
+    fn long_git_machine_listing_keeps_head_tail_and_middle_diagnostic() {
+        let raw = (0..30)
+            .map(|n| {
+                if n == 15 {
+                    "1\t1\tbulk/error-file.txt\n".to_owned()
+                } else {
+                    format!("1\t1\tbulk/file {n}.txt\n")
+                }
+            })
+            .collect::<String>();
+        let out = summarize(Mode::Summary, &raw, 0);
+        for path in [
+            "file 0.txt",
+            "file 4.txt",
+            "error-file.txt",
+            "file 28.txt",
+            "file 29.txt",
+        ] {
+            assert!(out.contains(path), "lost {path}");
+        }
+        assert!(!out.contains("file 20.txt"));
     }
     #[test]
     fn ansi_decoration_does_not_change_diagnostic_or_fact_selection() {
