@@ -112,10 +112,26 @@ fn new_agent_hooks_install_and_rewrite_without_losing_arguments() {
             .arg(dir.path())
             .output()
             .unwrap();
-        assert!(!again.status.success());
+        // Identical content is idempotent; a divergent file still needs --force.
+        assert!(
+            again.status.success(),
+            "idempotent init: {:?}",
+            again.stderr
+        );
         assert_eq!(
             std::fs::read_to_string(dir.path().join(file)).unwrap(),
             original
+        );
+        std::fs::write(dir.path().join(file), "{\"foreign\":true}\n").unwrap();
+        let diverged = cli(dir.path())
+            .args(["init", "--client", client, "--project-dir"])
+            .arg(dir.path())
+            .output()
+            .unwrap();
+        assert!(!diverged.status.success());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(file)).unwrap(),
+            "{\"foreign\":true}\n"
         );
         let input = if client == "copilot" {
             serde_json::json!({"toolName":tool,"toolArgs":{"command":"git status","description":"keep this"}})

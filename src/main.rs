@@ -734,9 +734,9 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Remove generated lm-resizer hook instructions from project agent files.
+    /// Remove generated lm-resizer hook instructions, helpers, and matching native configs.
     UninstallHooks {
-        /// Agent to unconfigure: codex, claude, or all.
+        /// Agent to unconfigure: codex, claude, gemini, copilot, cursor, or all.
         #[arg(long, default_value = "codex")]
         client: String,
         /// Project directory containing AGENTS.md / CLAUDE.md.
@@ -1250,6 +1250,8 @@ struct ShimReport {
 struct UninstallHooksReport {
     instruction_files: Vec<String>,
     removed: usize,
+    helpers_removed: Vec<String>,
+    native_files_removed: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2349,6 +2351,12 @@ async fn run(cli: Cli) -> Result<()> {
                 println!("Removed {} lm-resizer hook blocks", report.removed);
                 for file in report.instruction_files {
                     println!("  updated {file}");
+                }
+                for file in report.helpers_removed {
+                    println!("  removed helper {file}");
+                }
+                for file in report.native_files_removed {
+                    println!("  removed native config {file}");
                 }
             }
         }
@@ -6635,13 +6643,7 @@ fn init_hook_helpers(project_dir: Option<PathBuf>, force: bool) -> Result<InitHo
     let mut written = Vec::new();
     for (name, content) in files {
         let path = hook_dir.join(name);
-        if path.exists() && !force {
-            anyhow::bail!(
-                "hook helper already exists: {} (rerun with --force to overwrite)",
-                path.display()
-            );
-        }
-        std::fs::write(&path, content)?;
+        write_managed_text_file(&path, &content, force, "hook helper")?;
         #[cfg(unix)]
         if name.ends_with(".sh") {
             make_script_executable(&path)?;
@@ -6666,15 +6668,6 @@ fn init_native_hooks(
         .unwrap_or_else(|_| "lm-resizer".to_string());
     let mut files = Vec::new();
     for target in native_hook_targets(client, &project_dir)? {
-        if target.path.exists() && !force {
-            anyhow::bail!(
-                "native hook config already exists: {} (rerun with --force to overwrite)",
-                target.path.display()
-            );
-        }
-        if let Some(parent) = target.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let content = match target.client.as_str() {
             "codex" => codex_native_hooks_json(&exe_path)?,
             "claude" => claude_native_hooks_json(&exe_path)?,
@@ -6682,7 +6675,7 @@ fn init_native_hooks(
                 &agent_hooks::config(&exe_path, client).context("unknown hook schema")?,
             )?,
         };
-        std::fs::write(&target.path, content)?;
+        write_managed_text_file(&target.path, &content, force, "native hook config")?;
         files.push(target.path.display().to_string());
     }
     Ok(NativeHooksReport {
@@ -7021,9 +7014,19 @@ fn uninstall_agent_hooks(
             updated.push(path.display().to_string());
         }
     }
+    // Helpers are produced by install-hooks for instruction clients; native-only
+    // clients (gemini/copilot/cursor) leave them alone so a mixed setup survives.
+    let helpers_removed = if matches!(client, "codex" | "claude" | "claude-code" | "all") {
+        uninstall_hook_helpers(&project_dir)?
+    } else {
+        Vec::new()
+    };
+    let native_files_removed = uninstall_native_hook_files(client, &project_dir)?;
     Ok(UninstallHooksReport {
         instruction_files: updated,
         removed,
+        helpers_removed,
+        native_files_removed,
     })
 }
 
@@ -7031,6 +7034,7 @@ fn hook_instruction_targets(client: &str, project_dir: &Path) -> Result<Vec<Path
     match client {
         "codex" => Ok(vec![project_dir.join("AGENTS.md")]),
         "claude" | "claude-code" => Ok(vec![project_dir.join("CLAUDE.md")]),
+        "gemini" | "copilot" | "cursor" => Ok(vec![]),
         "all" => Ok(vec![
             project_dir.join("AGENTS.md"),
             project_dir.join("CLAUDE.md"),
@@ -7039,6 +7043,80 @@ fn hook_instruction_targets(client: &str, project_dir: &Path) -> Result<Vec<Path
             "unsupported hook client '{other}'. Use codex, claude, gemini, copilot, cursor, or all"
         ),
     }
+}
+
+fn uninstall_hook_helpers(project_dir: &Path) -> Result<Vec<String>> {
+    let hook_dir = project_dir.join(".lm-resizer").join("hooks");
+    let mut removed = Vec::new();
+    for name in ["rewrite.sh", "rewrite.ps1", "AGENT_RULES.md", "README.md"] {
+        let path = hook_dir.join(name);
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+            removed.push(path.display().to_string());
+        }
+    }
+    let _ = std::fs::remove_dir(&hook_dir);
+    let lm = project_dir.join(".lm-resizer");
+    if lm.is_dir() && std::fs::read_dir(&lm)?.next().is_none() {
+        let _ = std::fs::remove_dir(&lm);
+    }
+    Ok(removed)
+}
+
+fn uninstall_native_hook_files(client: &str, project_dir: &Path) -> Result<Vec<String>> {
+    let exe_path = std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "lm-resizer".to_string());
+    let mut removed = Vec::new();
+    for target in native_hook_targets(client, project_dir)? {
+        if !target.path.exists() {
+            continue;
+        }
+        let expected = match target.client.as_str() {
+            "codex" => codex_native_hooks_json(&exe_path)?,
+            "claude" => claude_native_hooks_json(&exe_path)?,
+            name => serde_json::to_string_pretty(
+                &agent_hooks::config(&exe_path, name).context("unknown hook schema")?,
+            )?,
+        };
+        let existing = std::fs::read_to_string(&target.path)?;
+        if existing != expected {
+            // Leave a hand-edited or foreign config alone; uninstall stays safe.
+            continue;
+        }
+        std::fs::remove_file(&target.path)?;
+        removed.push(target.path.display().to_string());
+        if let Some(parent) = target.path.parent() {
+            let _ = std::fs::remove_dir(parent);
+            if let Some(grand) = parent.parent() {
+                if grand.ends_with(".github") {
+                    let _ = std::fs::remove_dir(grand);
+                }
+            }
+        }
+    }
+    Ok(removed)
+}
+
+/// Write `content` when missing; leave identical content alone; refuse a divergent
+/// file unless `force` overwrites it. Creates parent directories as needed.
+fn write_managed_text_file(path: &Path, content: &str, force: bool, kind: &str) -> Result<()> {
+    if path.exists() {
+        let existing = std::fs::read_to_string(path)?;
+        if existing == content {
+            return Ok(());
+        }
+        if !force {
+            anyhow::bail!(
+                "{kind} already exists: {} (rerun with --force to overwrite)",
+                path.display()
+            );
+        }
+    } else if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, content)?;
+    Ok(())
 }
 
 fn hook_instruction_block() -> String {
