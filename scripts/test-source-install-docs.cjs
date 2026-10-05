@@ -32,11 +32,11 @@ for (const file of ['README.md', 'README.fr.md']) {
       `${file}: every installer must match rust-toolchain.toml`);
   }
   assert.match(doc, /\. "\$HOME\/\.cargo\/env"/);
-  assert.match(doc, /git clone --branch v0\.2\.4 https:\/\/github\.com\/phuetz\/lm-resizer\.git/);
+  assert.match(doc, /git clone --branch v0\.2\.5 https:\/\/github\.com\/phuetz\/lm-resizer\.git/);
   assert.match(doc, /cd lm-resizer/);
   assert.match(doc, /ca-certificates curl git gcc g\+\+ libc6-dev/);
   assert.match(doc, /rust-toolchain\.toml/);
-  assert.match(doc, /lm-resizer 0\.2\.4/);
+  assert.match(doc, /lm-resizer 0\.2\.5/);
   assert.match(doc, /\[raw: [a-f0-9]{12}\]/);
   assert.match(doc, /\.log/);
   for (const m of doc.matchAll(/(?:```|~~~)(?:bash|sh)\r?\n([\s\S]*?)(?:```|~~~)/g)) {

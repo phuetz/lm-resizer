@@ -15,7 +15,7 @@ practical ways:
 
 ## Install
 
-Follow the [README](../README.md) for the exact clone command, official Rustup setup and native build prerequisites. Its prebuilt installer is usable only after v0.2.4 is published. Once the repository is cloned and Rustup is on PATH, build and
+Follow the [README](../README.md) for the exact clone command, official Rustup setup and native build prerequisites. Its prebuilt installer is usable only after v0.2.5 is published. Once the repository is cloned and Rustup is on PATH, build and
 install from its root. Source builds require Rust 1.91 or newer for the CLI (core/wasm: 1.86; pinned toolchain: 1.95.0), Git and native C/C++ build tools (MSVC C++ tools and Windows SDK in Visual Studio Build Tools on Windows):
 
 Linux/macOS (Bash):
