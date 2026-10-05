@@ -16,7 +16,7 @@
 
 Only after publication, use the command for your platform. The installer verifies the archive's SHA-256 checksum and binary version before placing `lm-resizer` in `~/.local/bin` by default. Prepared platforms are Linux x86_64, macOS x86_64/arm64 and Windows x86_64. The existing v0.2.2 release has no prebuilt archives.
 
-Linux and macOS. Prerequisites: a POSIX `sh` (Bash is not required), `tar`, `gzip`, and `curl` or `wget`. Minimal Debian/Ubuntu images have neither (Alpine ships a limited `wget`): install curl first (`sudo apt-get update && sudo apt-get install -y curl ca-certificates` on Debian/Ubuntu, `sudo apk add curl` on Alpine; drop `sudo` when you are root, as in a container). With wget instead of curl, download the file with `wget -qO install.sh https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.sh`, then run `sh install.sh`. The Linux x86_64 binary is static (no glibc, no libstdc++): it runs on Debian 12, Ubuntu 20.04+ and Alpine.
+Linux and macOS. Prerequisites: a POSIX `sh` (Bash is not required), `tar`, `gzip`, and `curl` or `wget`. Minimal Debian/Ubuntu images have neither (Alpine ships a limited `wget`): install curl first (`sudo apt-get update && sudo apt-get install -y curl ca-certificates` on Debian/Ubuntu, `sudo apk add curl` on Alpine; drop `sudo` when you are root, as in a container). With wget instead of curl, download the file with `wget -qO install.sh https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.sh`, then run `sh install.sh`. The release workflow builds the Linux x86_64 binary as a static musl executable (`.github/workflows/prepare-binary-release.yml`).
 
 ~~~sh
 curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.sh -o install.sh && sh install.sh
@@ -91,7 +91,7 @@ $env:Path = "$installRoot\bin;$env:Path"
 lm-resizer --version
 ~~~
 
-When distribution Rust is already installed, rustup may print `cannot install while Rust is installed`, followed by `continuing (because the -y flag is set and the error is ignorable)`. In the command above this warning is nonfatal: check the exit code and `cargo --version` after sourcing `.cargo/env`; it should report 1.95.0. The distribution Rust remains installed.
+When distribution Rust is already installed, rustup may print `cannot install while Rust is installed`, followed by `continuing (because the -y flag is set and the error is ignorable)`. rustup reports the error as ignorable and continues because of `-y`: check the exit code and `cargo --version` after sourcing `.cargo/env`; it should report 1.95.0. The distribution Rust remains installed.
 
 Cargo downloads dependencies into `~/.cargo` (`%USERPROFILE%\.cargo` on Windows) even when a build fails; rustup stores compilers in `.rustup`. These caches are separate from the `.local` install prefix. If Cargo is not 1.95.0 in this checkout, check PATH (`command -v cargo` in Bash, `Get-Command cargo` in PowerShell), `rustup show active-toolchain` and any `RUSTUP_TOOLCHAIN` override. Stop if `cargo install` fails: the examples and uninstall command below require a successfully installed binary. If `~/.local/bin/lm-resizer` already exists (for example after a prebuilt install), Cargo refuses with `binary lm-resizer already exists in destination`; remove that file or rerun with `--force`.
 

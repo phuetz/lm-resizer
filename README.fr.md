@@ -16,7 +16,7 @@
 
 Après cette publication seulement, utilisez la commande de votre plateforme. L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire avant de poser `lm-resizer` dans `~/.local/bin` par défaut. Plateformes préparées : Linux x86_64, macOS x86_64/arm64 et Windows x86_64. La release v0.2.2 existante n'a pas d'archives précompilées.
 
-Linux et macOS. Prérequis : un `sh` POSIX (Bash n'est pas nécessaire), `tar`, `gzip`, et `curl` ou `wget`. Les images minimales Debian/Ubuntu n'ont ni l'un ni l'autre (Alpine fournit un `wget` limité) : installez d'abord curl (`sudo apt-get update && sudo apt-get install -y curl ca-certificates` sous Debian/Ubuntu, `sudo apk add curl` sous Alpine ; sans `sudo` si vous êtes root, comme dans un conteneur). Avec wget à la place de curl, téléchargez le fichier par `wget -qO install.sh https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.sh`, puis lancez `sh install.sh`. Le binaire Linux x86_64 est statique (ni glibc ni libstdc++) : il démarre sur Debian 12, Ubuntu 20.04+ et Alpine.
+Linux et macOS. Prérequis : un `sh` POSIX (Bash n'est pas nécessaire), `tar`, `gzip`, et `curl` ou `wget`. Les images minimales Debian/Ubuntu n'ont ni l'un ni l'autre (Alpine fournit un `wget` limité) : installez d'abord curl (`sudo apt-get update && sudo apt-get install -y curl ca-certificates` sous Debian/Ubuntu, `sudo apk add curl` sous Alpine ; sans `sudo` si vous êtes root, comme dans un conteneur). Avec wget à la place de curl, téléchargez le fichier par `wget -qO install.sh https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.sh`, puis lancez `sh install.sh`. Le workflow de publication construit le binaire Linux x86_64 en exécutable statique musl (`.github/workflows/prepare-binary-release.yml`).
 
 ~~~sh
 curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.sh -o install.sh && sh install.sh
@@ -91,7 +91,7 @@ $env:Path = "$installRoot\bin;$env:Path"
 lm-resizer --version
 ~~~
 
-Avec le Rust de la distribution déjà installé, rustup peut afficher `cannot install while Rust is installed`, puis `continuing (because the -y flag is set and the error is ignorable)`. Dans la commande ci-dessus, cet avertissement est non bloquant : vérifiez le code de sortie et `cargo --version` après activation de `.cargo/env` ; il doit afficher 1.95.0. Le Rust système reste installé.
+Avec le Rust de la distribution déjà installé, rustup peut afficher `cannot install while Rust is installed`, puis `continuing (because the -y flag is set and the error is ignorable)`. rustup déclare l'erreur ignorable et continue grâce à `-y` : vérifiez le code de sortie et `cargo --version` après activation de `.cargo/env` ; il doit afficher 1.95.0. Le Rust système reste installé.
 
 Cargo télécharge ses dépendances dans `~/.cargo` (`%USERPROFILE%\.cargo` sous Windows) même si une compilation échoue ; rustup conserve les compilateurs dans `.rustup`. Ces caches sont distincts du préfixe `.local`. Si Cargo n’est pas en 1.95.0 dans ce checkout, vérifiez le PATH (`command -v cargo` sous Bash, `Get-Command cargo` sous PowerShell), `rustup show active-toolchain` et toute surcharge `RUSTUP_TOOLCHAIN`. Arrêtez-vous si `cargo install` échoue : les exemples et la désinstallation ci-dessous nécessitent un binaire effectivement installé. Si `~/.local/bin/lm-resizer` existe déjà (par exemple après une installation précompilée), Cargo refuse avec `binary lm-resizer already exists in destination` ; retirez ce fichier ou relancez avec `--force`.
 
