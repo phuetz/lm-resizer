@@ -13,7 +13,7 @@ On a benchmark of 61 command captures it saves a median **22.79%** of tokens wit
 Prebuilt binary for Linux and macOS:
 
 ~~~sh
-curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.sh -o install.sh && sh install.sh
+curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.5/install.sh -o install.sh && sh install.sh
 export PATH="$HOME/.local/bin:$PATH"
 lm-resizer --version
 ~~~
@@ -21,7 +21,7 @@ lm-resizer --version
 Windows PowerShell:
 
 ~~~powershell
-irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.ps1 | iex
+irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.5/install.ps1 | iex
 ~~~
 
 The installer verifies the archive's SHA-256 checksum and binary version before placing `lm-resizer` in `~/.local/bin` by default. Prepared platforms are Linux x86_64, macOS x86_64/arm64 and Windows x86_64. The existing v0.2.2 release has no prebuilt archives.
@@ -56,7 +56,7 @@ Reproduce any row with `lm-resizer tool-output --command '<command>' --input <fi
 
 Two other tools are commonly used to shrink command output. Their own published numbers are reproduced in [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md) on the same 61 captures, tokenized with `o200k_base`, raw recovery included:
 
-| 61 command captures, `o200k_base` | LM Resizer 0.2.4 | RTK 0.50.0 | Headroom 0.39.1, general API |
+| 61 command captures, `o200k_base` | LM Resizer 0.2.5 | RTK 0.50.0 | Headroom 0.39.1, general API |
 |---|---:|---:|---:|
 | Median tokens saved, raw recovery included | 22.79% | 15.81% | 0.00% |
 | Mean tokens saved, raw recovery included | 31.78% | 32.61% | 1.91% |
@@ -106,7 +106,7 @@ $teeFiles = lm-resizer tee list --json | ConvertFrom-Json
 if ($teeFiles.files.Count -gt 0) { lm-resizer tee read $teeFiles.files[0].name }
 ~~~
 
-If several files are listed, use the filename or `[raw: …]` identifier for the command you need. `lm-resizer --version` reports `lm-resizer 0.2.4`. JSON recovery metadata uses a marker such as `[raw: e3b0c44298fc]`; the archives have a `.log` extension.
+If several files are listed, use the filename or `[raw: …]` identifier for the command you need. `lm-resizer --version` reports `lm-resizer 0.2.5`. JSON recovery metadata uses a marker such as `[raw: e3b0c44298fc]`; the archives have a `.log` extension.
 
 ## Agent integrations
 
@@ -166,7 +166,7 @@ The build was checked on Linux x86_64 with Rust 1.95.0. Other platforms have not
 Download the public tagged sources (Bash or PowerShell):
 
 ~~~sh
-git clone --branch v0.2.4 https://github.com/phuetz/lm-resizer.git
+git clone --branch v0.2.5 https://github.com/phuetz/lm-resizer.git
 cd lm-resizer
 ~~~
 

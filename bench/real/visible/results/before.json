@@ -204,8 +204,8 @@
       "facts": 183,
       "missing_count": 18,
       "missing_sample": [
-        "5055264ae021b5d0e01e55f723622d638ea877f0: Author: Andrew Gallant <jamslam@gmail.com>",
-        "020687a77d13146923333f0beb274eeabd54a270: Author: Andrew Gallant <jamslam@gmail.com>",
+        "5055264ae021b5d0e01e55f723622d638ea877f0: Author: Andrew Gallant <email-redacted>",
+        "020687a77d13146923333f0beb274eeabd54a270: Author: Andrew Gallant <email-redacted>",
         "020687a77d13146923333f0beb274eeabd54a270: Benchmark 1: rg-master -j32 --files"
       ],
       "exit_preserved": true,
@@ -593,7 +593,7 @@
       "missing_count": 56,
       "missing_sample": [
         "9ee8f0012d82013eccf2d4bb03de57963fad77ad: Co-authored-by: pr-submit[bot] <pr-submit[bot]@users.noreply.github.com>",
-        "9ee8f0012d82013eccf2d4bb03de57963fad77ad: Co-authored-by: Yurii Motov <yurii.motov.monte@gmail.com>",
+        "9ee8f0012d82013eccf2d4bb03de57963fad77ad: Co-authored-by: Yurii Motov <email-redacted>",
         "1fbfd595984bbc404e188c02af5633c8356e2cee: Author: latest-changes[bot] <313495250+latest-changes[bot]@users.noreply.github.com>"
       ],
       "exit_preserved": true,
@@ -1401,8 +1401,8 @@
       "facts": 191,
       "missing_count": 19,
       "missing_sample": [
-        "5055264ae021b5d0e01e55f723622d638ea877f0: Author: Andrew Gallant <jamslam@gmail.com>",
-        "020687a77d13146923333f0beb274eeabd54a270: Author: Andrew Gallant <jamslam@gmail.com>",
+        "5055264ae021b5d0e01e55f723622d638ea877f0: Author: Andrew Gallant <email-redacted>",
+        "020687a77d13146923333f0beb274eeabd54a270: Author: Andrew Gallant <email-redacted>",
         "020687a77d13146923333f0beb274eeabd54a270: Benchmark 1: rg-master -j32 --files"
       ],
       "exit_preserved": true,

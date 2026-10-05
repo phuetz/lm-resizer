@@ -1,6 +1,22 @@
 # Changelog
 
-## [0.2.4] - publication prévue le 2026-10-08
+## [0.2.5] - publication prévue le 2026-10-08
+
+La version 0.2.4 n'a jamais été étiquetée ni publiée : son contenu (section suivante) est livré avec 0.2.5, qui est la première version publiée depuis 0.2.3.
+
+### Filtres
+- `git log` par défaut, `grep`, `find`, `tree`, `pytest` et `cargo test` ne perdent plus de commits, de correspondances ni de lignes de résumé : le regroupement se fait sans perte dans des bornes de 200 éléments, avec une indentation compacte pour `tree` ([`src/command_views.rs`](src/command_views.rs), [`src/file_views.rs`](src/file_views.rs), [`src/test_views.rs`](src/test_views.rs)).
+- Pytest : une ligne `FAILED fichier::test` n'est retirée que si la section détaillée cite le même fichier (ou si le nom court est seul dans le résumé) ; les chemins sont comparés par segments entiers, `tests/a.py:2` n'est plus pris pour un emplacement dans `a.py`. Un test échoue sur chacune des deux logiques précédentes.
+
+### Hooks et agents
+- `install-hooks` et `init` sont idempotents : un contenu identique réussit sans réécriture, un contenu divergent est refusé sans `--force`. `uninstall-hooks` retire aussi les helpers générés et ne retire une configuration native que si elle est encore exactement le JSON généré. Réserve : les helpers sont supprimés sans comparer leur contenu ([`tests/hooks_idempotence.rs`](tests/hooks_idempotence.rs)).
+- `rewrite-shell` partage le refus du hook PreToolUse : redirection, tube, substitution, here-doc et commande interactive restent la ligne d'origine ; `&&`, `||` et `;` sont toujours réécrits segment par segment.
+
+### Documentation
+- README FR/EN réécrits (accroche, installation en tête, comparaison sourcée avec RTK 0.50.0 et Headroom 0.39.1, commande de rejeu), référence CLI complète ([`docs/CLI-REFERENCE.md`](docs/CLI-REFERENCE.md)) et contrôles de cohérence ([`scripts/check-cli-reference.sh`](scripts/check-cli-reference.sh), [`scripts/check-readme-parity.cjs`](scripts/check-readme-parity.cjs), [`tests/cli_doc_alignment.rs`](tests/cli_doc_alignment.rs)).
+- Précisions : `cargo install` refuse si `~/.local/bin/lm-resizer` existe déjà ; message exact de `exec` pour une commande absente ; les médianes sont celles du corpus de 61 captures, pas une promesse sur des dépôts arbitraires ; `install --client all` écrit toujours la configuration Codex de l'utilisateur.
+
+## [0.2.4] - jamais publiée, incluse dans 0.2.5
 
 ### Installation et distribution
 - Versions Cargo, npm, WASM, plugin et installateurs alignées ; contrôle centralisé dans [`scripts/check-release-version.cjs`](scripts/check-release-version.cjs).

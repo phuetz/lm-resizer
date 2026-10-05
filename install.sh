@@ -2,7 +2,7 @@
 # Install a prebuilt, checksum-verified lm-resizer binary. No Rust toolchain needed.
 set -eu
 
-version="${LM_RESIZER_VERSION:-0.2.4}"
+version="${LM_RESIZER_VERSION:-0.2.5}"
 case "$version" in
   ''|*[!0-9A-Za-z.+-]*) echo "invalid version: $version" >&2; exit 2 ;;
 esac

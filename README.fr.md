@@ -13,7 +13,7 @@ Sur un banc de 61 captures de commandes, il économise une médiane de **22,79 %
 Binaire précompilé pour Linux et macOS :
 
 ~~~sh
-curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.sh -o install.sh && sh install.sh
+curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.5/install.sh -o install.sh && sh install.sh
 export PATH="$HOME/.local/bin:$PATH"
 lm-resizer --version
 ~~~
@@ -21,7 +21,7 @@ lm-resizer --version
 Windows PowerShell :
 
 ~~~powershell
-irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.4/install.ps1 | iex
+irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.5/install.ps1 | iex
 ~~~
 
 L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire avant de poser `lm-resizer` dans `~/.local/bin` par défaut. Plateformes préparées : Linux x86_64, macOS x86_64/arm64 et Windows x86_64. La release v0.2.2 existante n'a pas d'archives précompilées.
@@ -56,7 +56,7 @@ Reproduisez n'importe quelle ligne avec `lm-resizer tool-output --command '<comm
 
 Deux autres outils servent souvent à réduire les sorties de commande. Leurs chiffres publiés sont reproduits dans [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md) sur les mêmes 61 captures, tokenisées avec `o200k_base`, rappel du brut compris :
 
-| 61 captures de commandes, `o200k_base` | LM Resizer 0.2.4 | RTK 0.50.0 | Headroom 0.39.1, API générale |
+| 61 captures de commandes, `o200k_base` | LM Resizer 0.2.5 | RTK 0.50.0 | Headroom 0.39.1, API générale |
 |---|---:|---:|---:|
 | Médiane de jetons économisés, rappel du brut compris | 22,79 % | 15,81 % | 0,00 % |
 | Moyenne de jetons économisés, rappel du brut compris | 31,78 % | 32,61 % | 1,91 % |
@@ -106,7 +106,7 @@ $teeFiles = lm-resizer tee list --json | ConvertFrom-Json
 if ($teeFiles.files.Count -gt 0) { lm-resizer tee read $teeFiles.files[0].name }
 ~~~
 
-Si plusieurs fichiers sont listés, utilisez le nom ou l'identifiant `[raw: …]` correspondant à la commande recherchée. `lm-resizer --version` affiche `lm-resizer 0.2.4`. Le rappel JSON porte un identifiant tel que `[raw: e3b0c44298fc]` ; les archives ont l'extension `.log`.
+Si plusieurs fichiers sont listés, utilisez le nom ou l'identifiant `[raw: …]` correspondant à la commande recherchée. `lm-resizer --version` affiche `lm-resizer 0.2.5`. Le rappel JSON porte un identifiant tel que `[raw: e3b0c44298fc]` ; les archives ont l'extension `.log`.
 
 ## Intégrations agents
 
@@ -166,7 +166,7 @@ La compilation est vérifiée sous Linux x86_64 avec Rust 1.95.0. Les autres pla
 Téléchargez les sources du tag public (Bash ou PowerShell) :
 
 ~~~sh
-git clone --branch v0.2.4 https://github.com/phuetz/lm-resizer.git
+git clone --branch v0.2.5 https://github.com/phuetz/lm-resizer.git
 cd lm-resizer
 ~~~
 
