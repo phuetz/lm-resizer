@@ -80,6 +80,10 @@ lm-resizer tee list
 lm-resizer gain --history --project
 ~~~
 
+Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagnostics ou bilans de tests avec une ligne de contexte et le code d’échec en tête. `exec` et `tool-output` résument aussi les commandes sans filtre dédié. Chaque sortie reste récupérable avec `tee read`. `gain` affiche les commandes et jetons mesurés ; `gain --json` donne les compteurs complets. Voir la [référence CLI](docs/CLI-REFERENCE.md).
+
+Pour les scripts, utiliser `lm-resizer gain --json`.
+
 `exec` conserve le statut du producteur (128 + signal sous Unix). Les routes shells, `--stream` et `--raw-on-failure` conservent leurs flux séparés et le marqueur `[stderr]`.
 
 ## La garantie diagnostique

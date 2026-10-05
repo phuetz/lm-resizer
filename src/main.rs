@@ -469,9 +469,6 @@ enum Commands {
         /// Emit a Markdown stats summary.
         #[arg(long, conflicts_with = "json")]
         markdown: bool,
-        /// Emit JSON (already the default; accepted for explicitness).
-        #[arg(long)]
-        json: bool,
     },
     /// Inspect image payload size and dimensions for context-budget decisions.
     Image {
@@ -1892,7 +1889,6 @@ async fn run(cli: Cli) -> Result<()> {
             json,
             store,
             markdown,
-            json: _,
             history,
             project,
             limit,
