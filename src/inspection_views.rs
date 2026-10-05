@@ -103,6 +103,20 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             }
         }
     }
+    // Git's commit identity and message form a block before the diff/stat.
+    // Keep merge parents and message trailers even when dates or paths later
+    // in the output happen to trigger the generic diagnostic rules.
+    let mut in_commit = false;
+    for (i, line) in plain.iter().enumerate() {
+        if git_commit_header(line) {
+            in_commit = true;
+        } else if in_commit && (line.starts_with("diff --git ") || git_stat_row(line)) {
+            in_commit = false;
+        }
+        if in_commit || git_oneline(line) || git_commit_metadata(line) {
+            keep[i] = true;
+        }
+    }
     // An HTTP response is a structured block: every field has the same
     // `name: value` shape, regardless of the field name or value type.
     let mut in_http_headers = false;
@@ -165,6 +179,31 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             keep[i] = true;
         }
     }
+    // A patch's metadata and final context lines are useful even when a
+    // nearby --stat line has caused the rest of a long patch to be reduced.
+    if plain.iter().any(|line| line.starts_with("diff --git ")) {
+        for (i, line) in plain.iter().enumerate() {
+            if git_patch_metadata(line) {
+                keep[i] = true;
+            }
+        }
+        for slot in keep.iter_mut().rev().take(2) {
+            *slot = true;
+        }
+    }
+    // Chunked HTTP output may end in trailers after the blank line that
+    // closes its header block. Keep a bounded tail, including curl's final
+    // chunk and trailer lines.
+    if plain
+        .iter()
+        .any(|line| line.eq_ignore_ascii_case("Transfer-Encoding: chunked"))
+    {
+        for i in (0..lines.len()).rev().take(5) {
+            if http_header(&plain[i]) || plain[i].trim() == "0" {
+                keep[i] = true;
+            }
+        }
+    }
     // Long Git machine listings are repetitive. RTK keeps their first five
     // records and last two; keep those records plus any intervening diagnostic.
     let machine_rows: Vec<usize> = plain
@@ -180,6 +219,25 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
                 .any(|word| lower.contains(word))
             {
                 keep[i] = false;
+            }
+        }
+    }
+    // On a long patch RTK shows its head and tail. Commit and stat lines
+    // occur before the first `diff --git` and have already been selected.
+    if let Some(patch_start) = plain
+        .iter()
+        .position(|line| line.starts_with("diff --git "))
+    {
+        if lines.len() > 20 {
+            for (i, slot) in keep
+                .iter_mut()
+                .enumerate()
+                .take(lines.len() - 2)
+                .skip(patch_start)
+            {
+                if i >= 5 {
+                    *slot = false;
+                }
             }
         }
     }
@@ -290,6 +348,32 @@ fn git_stat_row(line: &str) -> bool {
     // A Git path may itself contain '|'. The separator is the last " | ".
     line.rsplit_once(" | ")
         .is_some_and(|(path, _value)| !path.trim().is_empty())
+}
+
+fn git_commit_header(line: &str) -> bool {
+    static HEADER: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^commit [0-9a-fA-F]{7,64}(?: \([^\r\n]*\))?$").unwrap());
+    HEADER.is_match(line)
+}
+
+fn git_commit_metadata(line: &str) -> bool {
+    static FIELD: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(?:Merge|Author|AuthorDate|Commit|CommitDate|Date):\s+\S.*$").unwrap()
+    });
+    FIELD.is_match(line)
+}
+
+fn git_oneline(line: &str) -> bool {
+    static ONELINE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[0-9a-fA-F]{4,64}\s+(?:\([^\r\n]*\)\s+)?\S.*$").unwrap());
+    ONELINE.is_match(line)
+}
+
+fn git_patch_metadata(line: &str) -> bool {
+    static META: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(?:diff --git |(?:dis)?similarity index |index [0-9a-fA-F]|old mode |new mode |new file mode |deleted file mode |rename from |rename to |copy from |copy to |--- |\+\+\+ |@@)").unwrap()
+    });
+    META.is_match(line)
 }
 
 fn http_status(line: &str) -> bool {
@@ -720,6 +804,59 @@ mod tests {
             assert!(out.contains(path), "lost {path}");
         }
         assert!(!out.contains("file 20.txt"));
+    }
+    #[test]
+    fn git_commit_identity_merge_parents_and_message_trailer_survive_stat() {
+        let raw = format!(
+            "commit 0123456789abcdef (HEAD -> main, tag: v1)\nMerge: abcdef1 1234567\nAuthor: A <a@example.com>\nDate: Mon Oct 5 14:05:50 2026 +0200\n\n    Merge the branch\n\n    Co-Authored-By: B <b@example.com>\n\n---\n file.txt | 2 +-\n 1 file changed\n{}",
+            "progress phase\n".repeat(30)
+        );
+        let out = summarize(Mode::Summary, &raw, 0);
+        for expected in [
+            "commit 0123456789abcdef (HEAD -> main, tag: v1)",
+            "Merge: abcdef1 1234567",
+            "Author: A <a@example.com>",
+            "Date: Mon Oct 5 14:05:50 2026 +0200",
+            "    Merge the branch",
+            "    Co-Authored-By: B <b@example.com>",
+            "file.txt | 2 +-",
+        ] {
+            assert!(out.contains(expected), "lost {expected}");
+        }
+    }
+    #[test]
+    fn git_oneline_short_sha_and_decoration_survive_long_history() {
+        let raw = (0..30)
+            .map(|i| {
+                format!(
+                    "{:08x} (tag: release-{i}) Subject {i}\n",
+                    i + 0xabcde000_u32
+                )
+            })
+            .collect::<String>();
+        let out = summarize(Mode::Summary, &raw, 0);
+        assert!(out.contains("abcde000 (tag: release-0) Subject 0"));
+        assert!(out.contains("abcde01d (tag: release-29) Subject 29"));
+    }
+    #[test]
+    fn patch_metadata_tail_and_chunked_trailers_survive_reduction() {
+        let noise = "body line\n".repeat(30);
+        let patch = format!(
+            "file.txt | 80 +-\ndiff --git a/file.txt b/file.txt\nindex abcdef1..1234567 100644\ndissimilarity index 100%\n--- a/file.txt\n+++ b/file.txt\n@@ -1,2 +1,2 @@\n{noise}+last added line\n+final added line\n"
+        );
+        let out = summarize(Mode::Summary, &patch, 0);
+        for expected in [
+            "dissimilarity index 100%",
+            "diff --git",
+            "+last added line",
+            "+final added line",
+        ] {
+            assert!(out.contains(expected), "lost {expected}");
+        }
+        let http = format!(
+            "HTTP/1.1 200 OK\nTransfer-Encoding: chunked\n\n{noise}helloX-Checksum: abc\n0\n"
+        );
+        assert!(summarize(Mode::Summary, &http, 0).contains("helloX-Checksum: abc"));
     }
     #[test]
     fn ansi_decoration_does_not_change_diagnostic_or_fact_selection() {
