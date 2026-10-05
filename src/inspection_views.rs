@@ -54,8 +54,11 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
         ]
         .iter()
         .any(|word| lower.contains(word))
+            || rtk_error_pattern(line)
             || diagnostic_marker(line)
             || file_location(line)
+            || structured_fact(line)
+            || line.starts_with("[non-UTF-8 capture:")
             || line.trim_start().starts_with('^');
         let test_signal = diagnostic
             || [
@@ -86,7 +89,9 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
                 keep[i + 1] = true;
             }
             // Compilers place source and caret lines after the location.
-            if (file_location(line) || lower.starts_with("file ")) && i + 2 < lines.len() {
+            if (file_location(line) || line.trim_start().starts_with("File "))
+                && i + 2 < lines.len()
+            {
                 keep[i + 2] = true;
             }
             // Git's fatal diagnostics can carry a short usage example.
@@ -97,8 +102,33 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             }
         }
     }
-    // Preserve final numeric totals, not numbered progress rows.
-    for i in (0..lines.len()).rev().take(10) {
+    // RTK's error stream keeps every indented continuation in an open
+    // diagnostic block, including the first blank line. Its independently
+    // recognizable frames can also reopen a block far from the first error.
+    let mut in_block = false;
+    let mut blanks = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if rtk_error_pattern(line) {
+            keep[i] = true;
+            in_block = true;
+            blanks = 0;
+        } else if in_block && line.trim().is_empty() {
+            blanks += 1;
+            if blanks == 1 {
+                keep[i] = true;
+            } else {
+                in_block = false;
+            }
+        } else if in_block && (line.starts_with(' ') || line.starts_with('\t')) {
+            keep[i] = true;
+            blanks = 0;
+        } else {
+            in_block = false;
+        }
+    }
+    // A true numeric total can precede a long trailing log. Its syntax,
+    // rather than its distance from the end, distinguishes it from progress.
+    for i in 0..lines.len() {
         if numeric_summary(lines[i]) {
             keep[i] = true;
         }
@@ -144,10 +174,42 @@ fn numeric_summary(line: &str) -> bool {
     static TOTAL: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?ix)
             \b(?:\d+\s+(?:tests?|files?|packages?|records?|jobs?|suites?|passed|failed|errors?|warnings?|skipped|ignored|compiled|processed|added)|
-                 (?:total|found|finished|results?|summary|tests?\s+run)\s*[:=]?\s*\d+)\b
+                 (?:total|found|finished|results?|summary|tests?\s+run)\s*[:=]?\s*\d+|
+                 \d+(?:\.\d+)?%\s+tests?\s+passed|
+                 total\s+test\s+time\s*(?:\([^)]*\))?\s*=\s*\d+)\b
         ").unwrap()
     });
     TOTAL.is_match(line)
+}
+
+fn rtk_error_pattern(line: &str) -> bool {
+    static GENERIC: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?i)(?:error[\s:\[]|\berr\b|warning[\s:\[]|\bwarn\b|failed|failure|exception|panic)",
+        )
+        .unwrap()
+    });
+    static LOCATION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"^(?:\s*--> .*:\d+:\d+$|Traceback.*$|\s*File ".*", line \d+.*$|\s*at .*:\d+:\d+.*$|.*\.go:\d+:.*$)"#).unwrap()
+    });
+    GENERIC.is_match(line) || LOCATION.is_match(line)
+}
+
+fn structured_fact(line: &str) -> bool {
+    static FACT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?ix)^(?:
+            \s*[^|\r\n]+\|\s*\d+(?:\s|$)  # git diff --stat file row
+            |\s*[a-z][a-z0-9-]*:\s*\d+(?:\s|$) # numeric HTTP header
+            |HTTP/\d(?:\.\d)?\s+\d{3}(?:\s|$) # HTTP status
+            |\s*Start\s+\d+\s*:           # CTest test start
+            |\s*\d+/\d+\s+Test\s+\x23\d+: # CTest test result
+            |\s*(?:not\s+ok|ok)\s+\d+(?:\s|$) # TAP result
+        )",
+        )
+        .unwrap()
+    });
+    FACT.is_match(line)
 }
 
 fn python_exception_line(line: &str) -> bool {
@@ -436,6 +498,34 @@ mod tests {
         assert!(out.contains("RuntimeError: wrap"));
         assert!(out.contains("    b()"));
         assert_eq!(out.matches("progress after crash").count(), 1);
+    }
+    #[test]
+    fn generic_views_keep_locations_test_totals_file_stats_and_numeric_headers() {
+        let noise = "progress phase\n".repeat(25);
+        for (line, mode) in [
+            ("  File \"bad.py\", line 17, in <module>", Mode::Errors),
+            ("100% tests passed, 0 tests failed out of 1", Mode::Tests),
+            ("Total Test time (real) =   0.12 sec", Mode::Summary),
+            (" tracked.txt | 2 +-", Mode::Summary),
+            ("Content-Length: 31", Mode::Summary),
+            ("1/2 Test #1: alpha ... Passed", Mode::Summary),
+            ("not ok 2 - total", Mode::Tests),
+            ("23 records processed", Mode::Summary),
+        ] {
+            let raw = format!("{noise}{line}\n{noise}");
+            assert!(summarize(mode, &raw, 0).contains(line), "lost {line}");
+        }
+    }
+    #[test]
+    fn generic_error_blocks_keep_indented_continuations_until_second_blank() {
+        let raw = format!(
+            "error: invalid value\n{}\n  help: inspect it\n\n\n  unrelated tail\n",
+            "  context without a keyword\n".repeat(8)
+        );
+        let out = summarize(Mode::Errors, &raw, 1);
+        assert!(out.contains("  help: inspect it"));
+        assert!(out.contains("  context without a keyword"));
+        assert!(!out.contains("  unrelated tail"));
     }
     #[test]
     fn schema_has_every_heterogeneous_variant() {
