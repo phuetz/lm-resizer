@@ -4,6 +4,11 @@
 
 La version 0.2.4 n'a jamais été étiquetée ni publiée : son contenu (section suivante) est livré avec 0.2.5, qui est la première version publiée depuis 0.2.3.
 
+### Vues génériques et statistiques
+- `lm-resizer err|test|summary -- <commande>` garde, pour n'importe quel producteur, les diagnostics ou les bilans de tests avec le contexte voisin, conserve le code de sortie et archive la sortie complète (`tee read`). `exec` et `tool-output` résument aussi les commandes sans filtre dédié ; l'outil MCP `lm_resizer_tool_output` marque un statut non nul `isError: true` ([`docs/CLI-REFERENCE.md`](docs/CLI-REFERENCE.md)).
+- `gain` compte toutes les commandes passées par `exec`/`tool-output` (jetons mesurés `o200k_base`, `--json`, `--history`, `--project`).
+- Mesure rejouée sur le corpus de 61 captures : médiane **16,33 %** (RTK 0.50.0 : 15,81 %), moyenne **29,64 %** (RTK : 32,61 %), brut et code du producteur conservés 61/61, vues strictement égales à RTK 37/61. Ces vues ajoutent une ligne d'en-tête d'échec aux commandes de test en échec ; dans un cas pytest du corpus la ligne d'assertion est coupée dans la vue (le brut reste récupérable). Détail : [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md).
+
 ### Hooks et agents
 - `install-hooks` et `init` sont idempotents : un contenu identique réussit sans réécriture, un contenu divergent est refusé sans `--force`. `uninstall-hooks` retire aussi les helpers générés et ne retire une configuration native que si elle est encore exactement le JSON généré. Réserve : les helpers sont supprimés sans comparer leur contenu ([`tests/hooks_idempotence.rs`](tests/hooks_idempotence.rs)).
 - `rewrite-shell` partage le refus du hook PreToolUse : redirection, tube, substitution, here-doc et commande interactive restent la ligne d'origine ; `&&`, `||` et `;` sont toujours réécrits segment par segment.

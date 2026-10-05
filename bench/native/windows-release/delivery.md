@@ -1,5 +1,9 @@
 # Livraison native : préparation Windows et compression
 
+> **Rejeu du 5 octobre 2026 sur la candidate 0.2.5** (binaire SHA-256 `3ba9d57d4e5c…` avant l'intégration de `err`/`test`/`summary`, puis le binaire final), mêmes 61 captures, `o200k_base`, oracle RTK 0.50.0 épinglé, trois répétitions : [parity-0.2.5.json.gz](parity-0.2.5.json.gz).
+> Le tableau ci-dessous est celui de la livraison du 3 octobre (22,79 % / 31,78 %, 49/61 vues strictement égales) ; **il n'est plus celui de la candidate.** Avec les vues génériques `err`/`test`/`summary` : **médiane 16,33 %, moyenne 29,64 %** (RTK 15,81 % / 32,61 %, Headroom 0,00 % / 1,91 %), **61/61 bruts et codes du producteur**, 52/61 codes identiques à RTK, **37/61 vues strictement égales**. Les douze cas qui ont quitté l'égalité stricte sont des commandes de test en échec : la vue commence désormais par une ligne `[FAIL] Command failed (exit code: N)` (+12 jetons environ), et dans `fresh-pytest` la ligne `assert 42 == 43` est coupée (`test_invoice.py::te`) ; le brut reste récupérable par `tee read`. `fastapi-test` : 263 jetons contre 40 chez RTK.
+
+
 Mesures du 3 octobre 2026, binaire SHA-256 `a7fb175fafa01d6b8acaed69184bbd77d54d706629df4a0d18357cbc1f5c35e8`. Branche native, sans moteur concurrent dans le produit. [Barrière](barriers.md), [détails Windows](README.md), [petites copies](guard.md), [ajouts réversibles](reversible.md). **Recette Windows réelle encore à exécuter.**
 
 | 61 captures, o200k_base | LM avant | LM livré | RTK 0.50.0 | Headroom 0.39.1, API générale |

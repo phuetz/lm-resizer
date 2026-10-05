@@ -2,7 +2,7 @@
 
 **Raccourcissez les sorties de commande bruyantes avant qu'elles n'atteignent votre agent de code — sans jamais perdre un seul échec.** LM Resizer est un CLI Rust local et rapide, destiné aux développeurs qui pilotent tests, compilations, Git, conteneurs et autres outils depuis un agent de code comme Claude Code, Codex, Cursor, Gemini CLI, un client MCP ou un pipeline maison. Il lance une commande, garde un résultat compact pour l'agent et conserve l'original exact pour un rappel immédiat.
 
-Sur un banc de 61 captures de commandes, il économise une médiane de **22,79 %** de jetons, rappel du brut compris, conserve le code de sortie du producteur dans **61/61** cas et démarre en environ **8 ms**. Zéro télémétrie, 100 % local, déterministe.
+Sur un banc de 61 captures de commandes, il économise une médiane de **16,33 %** de jetons, rappel du brut compris, conserve le code de sortie du producteur dans **61/61** cas et démarre en environ **8 ms**. Zéro télémétrie, 100 % local, déterministe.
 
 ![Exemple de traitement d'une sortie de commande par LM Resizer](docs/lm-resizer-hero.png)
 
@@ -59,12 +59,12 @@ Deux autres outils servent souvent à réduire les sorties de commande. Leurs ch
 
 | 61 captures de commandes, `o200k_base` | LM Resizer 0.2.5 | RTK 0.50.0 | Headroom 0.39.1, API générale |
 |---|---:|---:|---:|
-| Médiane de jetons économisés, rappel du brut compris | 22,79 % | 15,81 % | 0,00 % |
-| Moyenne de jetons économisés, rappel du brut compris | 31,78 % | 32,61 % | 1,91 % |
+| Médiane de jetons économisés, rappel du brut compris | 16,33 % | 15,81 % | 0,00 % |
+| Moyenne de jetons économisés, rappel du brut compris | 29,64 % | 32,61 % | 1,91 % |
 | Code de sortie du producteur conservé | 61/61 | 52/61 | non mesuré |
 | Brut exact récupérable | 61/61 | partiel ou absent | non |
 
-La moyenne de LM Resizer est légèrement inférieure à celle de RTK, volontairement : il refuse d'omettre de gros diffs, des noms de tests ou des lignes d'échec pour gagner des jetons. RTK retourne le code de sortie 0 dans **9** des 61 captures où le producteur échoue ; LM Resizer conserve le code du producteur. Sur une capture, LM Resizer rend 251 jetons contre 40 chez RTK parce qu'il indique les **457** erreurs de collecte et liste les dix premiers fichiers en échec, ce que RTK omet. Headroom compresse sémantiquement le contexte d'API LLM et n'a pas de filtres dédiés aux outils CLI : sa médiane d'économie sur ce corpus de commandes est de 0,00 %. L'égalité stricte des vues est de 49/61 ; les douze écarts et leurs raisons sont listés dans le fichier du banc, et le contrôle strict du banc sort en code 1 par construction. Les chiffres se rejouent avec `python3 bench/real/parity_rtk.py` ; voir [le banc](bench/native/README.md).
+La moyenne de LM Resizer est légèrement inférieure à celle de RTK, volontairement : il refuse d'omettre de gros diffs, des noms de tests ou des lignes d'échec pour gagner des jetons. RTK retourne le code de sortie 0 dans **9** des 61 captures où le producteur échoue ; LM Resizer conserve le code du producteur. Sur une capture, LM Resizer rend 263 jetons contre 40 chez RTK parce qu'il indique les **457** erreurs de collecte et liste les dix premiers fichiers en échec, ce que RTK omet. Headroom compresse sémantiquement le contexte d'API LLM et n'a pas de filtres dédiés aux outils CLI : sa médiane d'économie sur ce corpus de commandes est de 0,00 %. L'égalité stricte des vues est de 37/61 ; les vingt-quatre écarts et leurs raisons sont listés dans le fichier du banc, et le contrôle strict du banc sort en code 1 par construction. Les chiffres se rejouent avec `python3 bench/real/parity_rtk.py` ; voir [le banc](bench/native/README.md).
 
 ## Essayez sur votre projet
 
@@ -146,7 +146,7 @@ Les nouvelles entrées d'historique conservent les deux comptes. Les statistique
 
 Le produit utilise ses propres filtres Rust et TOML. Les commandes d'inspection explicites incluent `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` et `dedup`. Les lectures de fichiers restent littérales. Les plis réversibles de chemins et correspondances, tables JSON et répétitions exactes complètent les filtres de commandes ; le contour syntaxique et la déduplication de blocs sont explicites.
 
-**Médiane tee compris : 22,79 %.** La moyenne est de 31,78 % ; les 61 récupérations du brut et les codes de sortie du producteur passent tous, et les mesures de démarrage entrelacées donnent environ 8 ms. Ces médianes de corpus ne sont pas une affirmation sur des dépôts vivants arbitraires. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
+**Médiane tee compris : 16,33 %.** La moyenne est de 29,64 % ; les 61 récupérations du brut et les codes de sortie du producteur passent tous, et les mesures de démarrage entrelacées donnent environ 8 ms. Ces médianes de corpus ne sont pas une affirmation sur des dépôts vivants arbitraires. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
 
 `env` masque les noms contenant `PASSPHRASE` (y compris `PASSPHRASE_FILE`) et un composant de nom `PASS`. Cela masque volontairement aussi des noms inoffensifs comme `PASS_COUNT` ; le filtrage est prudent, fondé sur les noms et les formes d'URL à identifiants.
 
