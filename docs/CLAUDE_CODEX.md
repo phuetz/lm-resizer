@@ -114,8 +114,11 @@ a running Claude/Codex agent have not been verified. Confirm support for the
 configuration and events in your agent version before relying on them.
 An existing file is refused unless you pass `--force`, which overwrites the
 whole file: back up and merge any existing settings yourself.
-`uninstall-hooks` removes guidance blocks only; to undo native configuration,
-remove the generated hook entries or restore your saved configuration.
+`uninstall-hooks` removes guidance blocks, generated helpers under
+`.lm-resizer/hooks`, and a native hook config file only when its contents still
+match what `init` / `init-native-hooks` would write. A divergent hand-edited
+file is left alone; restore or delete it yourself if needed. Repeating
+`install-hooks` or `init` with identical content is a no-op success.
 The generated config wires `lm-resizer hook` on two `Bash` events:
 
 - `PreToolUse` — if the command is supported (git, cargo, vitest/jest, rg, …),
