@@ -241,19 +241,48 @@ pub fn pytest(raw: &str) -> String {
     }
     // `FAILED path::test - reason` summary rows repeat a test already shown
     // with its detailed section; keep only rows without a detailed section.
-    let detailed: std::collections::BTreeSet<String> = details
+    // A summary row is dropped only when a detailed section of the same short
+    // name belongs to the same file (its text cites that file), or when no other
+    // summary row shares that short name. Two tests named `test_foo` in a.py and
+    // b.py must both stay visible.
+    let sections: Vec<(String, String)> = details
         .iter()
         .filter(|block| block[0].starts_with("___"))
-        .map(|block| block[0].trim_matches('_').trim().to_owned())
+        .map(|block| (block[0].trim_matches('_').trim().to_owned(), block.join("\n")))
         .collect();
+    let short_id = |first: &str| -> String {
+        let name = first.split_once(" - ").map_or(first, |(n, _)| n);
+        name.rsplit("::").next().unwrap_or(name).to_owned()
+    };
+    let mut rows_per_id: std::collections::BTreeMap<String, usize> = Default::default();
+    for block in &details {
+        if block[0].starts_with("FAILED ") {
+            *rows_per_id.entry(short_id(block[0])).or_default() += 1;
+        }
+    }
     details.retain(|block| {
         let first = block[0];
         if !first.starts_with("FAILED ") {
             return true;
         }
+        let id = short_id(first);
         let name = first.split_once(" - ").map_or(first, |(n, _)| n);
-        let id = name.rsplit("::").next().unwrap_or(name);
-        !detailed.contains(id)
+        let file = name
+            .trim_start_matches("FAILED ")
+            .split("::")
+            .next()
+            .unwrap_or("")
+            .trim();
+        let has_section = sections.iter().any(|(n, _)| *n == id);
+        if !has_section {
+            return true;
+        }
+        let same_file = !file.is_empty()
+            && sections
+                .iter()
+                .any(|(n, text)| *n == id && text.contains(&format!("{file}:")));
+        let unambiguous = rows_per_id.get(&id).copied().unwrap_or(0) <= 1;
+        !(same_file || unambiguous)
     });
     if !details.is_empty() {
         out.push_str("\n\nFailures:\n");
@@ -465,6 +494,14 @@ mod tests {
         assert_eq!(view.matches("test_int_bytes[0-]").count(), 1, "{view}");
         assert!(view.contains("test_only_in_summary"), "{view}");
         assert!(view.starts_with("Pytest: 1 passed, 2 failed"));
+    }
+    #[test]
+    fn same_short_name_in_another_file_is_not_dropped_from_the_summary() {
+        let raw = "============================= test session starts ==============================\ncollected 2 items\n\n=================================== FAILURES ===================================\n_________________________________ test_foo _________________________________\n\n>       assert False\nE       AssertionError\n\na.py:2: AssertionError\n=========================== short test summary info ============================\nFAILED a.py::test_foo - AssertionError\nFAILED b.py::test_foo - ValueError: only in the summary\n========================= 2 failed in 0.10s ==========================\n";
+        let view = pytest(raw);
+        assert!(view.contains("b.py::test_foo"), "{view}");
+        assert!(view.contains("a.py:2: AssertionError"), "{view}");
+        assert_eq!(view.matches("a.py::test_foo").count(), 0, "{view}");
     }
     #[test]
     fn successful_test_views_state_zero_failures_and_retain_unknown_diagnostics() {
