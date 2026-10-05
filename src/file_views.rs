@@ -12,6 +12,14 @@ struct Record<'a> {
 
 // Stable sorting of a flat record stream preserves occurrence order inside
 // each group. Both filesystem presentations share this layout, not a parser.
+//
+// Search hits and paths are facts an agent acts on (file:line, file names):
+// they are regrouped, not sampled. Only pathological volumes are bounded, and
+// every bound prints the exact number of hidden rows.
+const SEARCH_HITS_PER_FILE: usize = 200;
+const PATHS_PER_DIR: usize = 200;
+const PATH_DIRS: usize = 200;
+
 fn grouped_page(mut records: Vec<Record<'_>>, search: bool) -> String {
     records.sort_by_key(|record| record.group);
     let groups: Vec<_> = records.chunk_by(|a, b| a.group == b.group).collect();
@@ -20,19 +28,42 @@ fn grouped_page(mut records: Vec<Record<'_>>, search: bool) -> String {
     } else {
         format!("{} files in {} dirs:\n\n", records.len(), groups.len())
     }];
-    let limit = if search { groups.len() } else { 20 };
+    let limit = if search { groups.len() } else { PATH_DIRS };
     for group in &groups[..groups.len().min(limit)] {
         let name = group[0].group;
-        fragments.push(if search {
-            format!("[file] {name} ({}):\n", group.len())
+        let per_group = if search {
+            SEARCH_HITS_PER_FILE
         } else {
-            format!("{name}/  ({})\n", group.len())
-        });
-        let (page, remaining) = group.split_at(group.len().min(10));
-        fragments.extend(page.iter().map(|record| match record.entry {
-            Entry::Path(name) => format!("  {name}\n"),
-            Entry::Hit { number, text } => format!("  {number:>4}: {}\n", text.trim()),
-        }));
+            PATHS_PER_DIR
+        };
+        let (page, remaining) = group.split_at(group.len().min(per_group));
+        let names: Vec<&str> = page
+            .iter()
+            .filter_map(|record| match record.entry {
+                Entry::Path(name) => Some(name),
+                Entry::Hit { .. } => None,
+            })
+            .collect();
+        // Names without whitespace stay unambiguous on one line per directory.
+        if !search
+            && names.len() == page.len()
+            && !names
+                .iter()
+                .any(|n| n.is_empty() || n.contains(char::is_whitespace))
+        {
+            fragments.push(format!("{name}/  ({}): {}\n", group.len(), names.join(" ")));
+        } else {
+            fragments.push(if search {
+                format!("[file] {name} ({}):\n", group.len())
+            } else {
+                format!("{name}/  ({})\n", group.len())
+            });
+            fragments.extend(page.iter().map(|record| match record.entry {
+                Entry::Path(name) => format!("  {name}\n"),
+                // `line: text`, as grep -n prints it under its file header.
+                Entry::Hit { number, text } => format!("{number}: {}\n", text.trim()),
+            }));
+        }
         match (remaining.len(), search) {
             (0, false) => {}
             (0, true) => fragments.push("\n".into()),
@@ -100,23 +131,44 @@ pub fn paths(raw: &str) -> String {
 }
 
 pub fn tree(raw: &str) -> String {
+    // Each depth level of `tree` costs a four-column connector ("│   ",
+    // "├── ", "└── "); two spaces per level carry the same nesting. Every name
+    // and the final "N directories, M files" count stay verbatim. Any row that
+    // is not a recognised connector row keeps the producer's text unchanged.
+    static ROW: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"^((?:[│ \u{a0}][ \u{a0}]{3})*)[├└]── (.*)$").unwrap());
     static SUMMARY: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"^\d+ director(?:y|ies), \d+ files?$").unwrap());
+        LazyLock::new(|| regex::Regex::new(r"^\d+ director(?:y|ies)(?:, \d+ files?)?$").unwrap());
     let mut rows: Vec<_> = raw.lines().collect();
     while rows.last().is_some_and(|s| s.is_empty()) {
         rows.pop();
     }
-    if rows.last().is_some_and(|s| SUMMARY.is_match(s)) {
+    let summary = rows
+        .last()
+        .filter(|s| SUMMARY.is_match(s))
+        .map(|s| s.to_string());
+    if summary.is_some() {
         rows.pop();
     }
     while rows.last().is_some_and(|s| s.is_empty()) {
         rows.pop();
     }
-    if rows.is_empty() {
-        raw.to_owned()
-    } else {
-        rows.join("\n") + "\n"
+    if rows.len() < 2 {
+        return raw.to_owned();
     }
+    let mut out = vec![rows[0].to_owned()];
+    for row in &rows[1..] {
+        let Some(caps) = ROW.captures(row) else {
+            return raw.to_owned();
+        };
+        let depth = caps[1].chars().count() / 4 + 1;
+        out.push(format!("{}{}", "  ".repeat(depth), &caps[2]));
+    }
+    if let Some(summary) = summary {
+        out.push(String::new());
+        out.push(summary);
+    }
+    out.join("\n") + "\n"
 }
 
 pub fn listing(command: &[String], raw: &str) -> String {
@@ -218,7 +270,9 @@ mod tests {
         let view = search(&raw);
         assert!(view.starts_with("20 matches in 1F:\n"));
         assert!(view.contains("179: error_179()"));
-        assert!(view.contains("+10"));
+        // Every hit stays visible: no sampling of file:line facts.
+        assert!(view.contains("198: error_198()"));
+        assert!(!view.contains("+10"));
     }
     #[test]
     fn search_retains_diagnostics_context_and_ambiguous_colons() {
@@ -235,7 +289,7 @@ mod tests {
         let raw = "a.rs:179:match\n\n[stderr]\ngrep: a.bin: binary file matches\n";
         assert_eq!(
             search(raw),
-            "1 matches in 1F:\n\n[file] a.rs (1):\n   179: match\n\n"
+            "1 matches in 1F:\n\n[file] a.rs (1):\n179: match\n\n"
         );
         let error = "a.rs:179:match\n\n[stderr]\ngrep: secret: Permission denied\n";
         assert_eq!(search(error), error);
@@ -249,9 +303,43 @@ mod tests {
         );
     }
     #[test]
-    fn tree_removes_only_the_final_count() {
+    fn tree_keeps_names_and_final_count_with_compact_indentation() {
         let raw = "src\n└── directories and files.txt\n\n1 directory, 1 file\n";
-        assert_eq!(tree(raw), "src\n└── directories and files.txt\n");
+        assert_eq!(
+            tree(raw),
+            "src\n  directories and files.txt\n\n1 directory, 1 file\n"
+        );
+        let nbsp = ".\n├── docs\n│\u{a0}\u{a0} ├── _static\n│\u{a0}\u{a0} │\u{a0}\u{a0} └── logo.svg\n│\u{a0}\u{a0} └── conf.py\n└── uv.lock\n\n2 directories, 3 files\n";
+        assert_eq!(
+            tree(nbsp),
+            ".\n  docs\n    _static\n      logo.svg\n    conf.py\n  uv.lock\n\n2 directories, 3 files\n"
+        );
+        let unknown = ".\n├── a\nerror opening dir\n";
+        assert_eq!(tree(unknown), unknown);
+    }
+    #[test]
+    fn search_and_paths_keep_every_record_up_to_the_bounds() {
+        let hits = (1..=40)
+            .map(|n| format!("src/a.rs:{n}:fn f{n}()\n"))
+            .collect::<String>();
+        let view = search(&hits);
+        for n in 1..=40 {
+            assert!(view.contains(&format!("\n{n}: fn f{n}()\n")), "{n}");
+        }
+        let listing_raw = (0..30)
+            .map(|n| format!("lib/reporters/r{n}.js\n"))
+            .collect::<String>()
+            + &(0..25).map(|n| format!("d{n}/x.js\n")).collect::<String>();
+        let view = paths(&listing_raw);
+        for n in 0..30 {
+            assert!(view.contains(&format!("r{n}.js")), "{n}");
+        }
+        for n in 0..25 {
+            assert!(view.contains(&format!("d{n}/  (1): x.js")), "{view}");
+        }
+        assert!(!view.contains("more dirs"));
+        let spaced = paths("a/b c.txt\na/d.txt\n");
+        assert!(spaced.contains("a/  (2)\n  b c.txt\n  d.txt\n"), "{spaced}");
     }
     #[test]
     fn listing_bounds_rows_and_respects_all() {

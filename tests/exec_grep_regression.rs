@@ -80,7 +80,10 @@ fn grep_via_bash_resume_et_preserve_toutes_les_lignes_dans_tee() {
         raw.stdout.len() as u64
     );
     assert!(output.contains("1601 matches"));
-    assert!(output.contains("+1591"));
+    // Search hits are regrouped, not sampled: the first 200 hits of the file
+    // stay visible and the exact remainder is counted.
+    assert!(output.contains("fonction_0199"));
+    assert!(output.contains("+1401"));
     let key = report["tee_hint"]
         .as_str()
         .unwrap()

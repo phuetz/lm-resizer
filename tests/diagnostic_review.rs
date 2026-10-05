@@ -69,7 +69,8 @@ fn direct_grep_and_rg_keep_source_matches_even_when_named_error_or_panic() {
         .map(|n| format!("src/module.rs:{n}:fn error_does_not_panic_{n}() {{}}\n"))
         .collect::<String>();
     std::fs::write(&input, &raw).unwrap();
-    let location = regex::Regex::new(r"^\s+(\d+): (.*)$").unwrap();
+    // Hits are printed as `line: text` under their `[file]` header.
+    let location = regex::Regex::new(r"^\s*(\d+): (.*)$").unwrap();
     for command in ["grep -rn fn src", "rg --line-number fn src"] {
         let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
             .env("LM_RESIZER_STATE_DIR", dir.path().join("state"))

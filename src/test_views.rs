@@ -139,7 +139,9 @@ pub fn cargo(raw: &str) -> String {
     let numbered: String = visible
         .iter()
         .zip(1..)
-        .map(|(block, number)| format!("{number}. {}\n", clip(block, 200)))
+        // Assertion operands (`left:`/`right:`) are the diagnosis; a 200-char
+        // clip cut them mid-value. Only pathological paragraphs are bounded.
+        .map(|(block, number)| format!("{number}. {}\n", clip(block, CARGO_FAILURE_CHARS)))
         .collect();
     let trailer = match overflow.len() {
         0 => String::new(),
@@ -162,7 +164,20 @@ pub fn cargo(raw: &str) -> String {
             }
         }
     }
+    // Cargo's rerun hint names the failing test target.
+    for line in raw.lines().filter(|l| l.starts_with("error: test failed")) {
+        out.push_str(line);
+        out.push('\n');
+    }
     out.trim_end().into()
+}
+
+const CARGO_FAILURE_CHARS: usize = 2000;
+
+fn is_python_location(line: &str) -> bool {
+    static LOCATION: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"^\S+\.py:\d+: ").unwrap());
+    LOCATION.is_match(line)
 }
 
 pub fn pytest(raw: &str) -> String {
@@ -224,6 +239,22 @@ pub fn pytest(raw: &str) -> String {
         }
         out = out.trim_end().into();
     }
+    // `FAILED path::test - reason` summary rows repeat a test already shown
+    // with its detailed section; keep only rows without a detailed section.
+    let detailed: std::collections::BTreeSet<String> = details
+        .iter()
+        .filter(|block| block[0].starts_with("___"))
+        .map(|block| block[0].trim_matches('_').trim().to_owned())
+        .collect();
+    details.retain(|block| {
+        let first = block[0];
+        if !first.starts_with("FAILED ") {
+            return true;
+        }
+        let name = first.split_once(" - ").map_or(first, |(n, _)| n);
+        let id = name.rsplit("::").next().unwrap_or(name);
+        !detailed.contains(id)
+    });
     if !details.is_empty() {
         out.push_str("\n\nFailures:\n");
         for (i, block) in details.iter().take(10).enumerate() {
@@ -234,18 +265,26 @@ pub fn pytest(raw: &str) -> String {
                     i + 1,
                     first.trim_matches('_').trim()
                 ));
-                for line in block
-                    .iter()
-                    .skip(1)
-                    .filter(|l| {
-                        l.starts_with(['>', 'E'])
-                            || l.to_lowercase().contains("assert")
-                            || l.to_lowercase().contains("error")
-                            || l.contains(".py:")
-                    })
-                    .take(3)
-                {
-                    out.push_str(&format!("     {}\n", clip(line, 100)));
+                // Up to three diagnostic lines, plus the `file.py:line:` location
+                // rows, which pytest prints after the assertion and which the
+                // three-line budget used to drop.
+                let mut shown = 0;
+                let mut locations = 0;
+                for line in block.iter().skip(1).filter(|l| {
+                    l.starts_with(['>', 'E'])
+                        || l.to_lowercase().contains("assert")
+                        || l.to_lowercase().contains("error")
+                        || l.contains(".py:")
+                }) {
+                    if is_python_location(line) {
+                        if locations < 3 {
+                            locations += 1;
+                            out.push_str(&format!("     {}\n", clip(line, 160)));
+                        }
+                    } else if shown < 3 {
+                        shown += 1;
+                        out.push_str(&format!("     {}\n", clip(line, 100)));
+                    }
                 }
                 if i + 1 < details.len() {
                     out.push('\n');
@@ -404,6 +443,29 @@ pub fn go(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cargo_failure_keeps_full_assertion_operands_and_rerun_hint() {
+        let raw = "running 2 tests\ntest test_ne ... ok\ntest test_parse ... FAILED\n\nfailures:\n\n---- test_parse stdout ----\n\nthread 'test_parse' (519475) panicked at tests/test_version.rs:16:5:\nassertion `left == right` failed\n  left: \"empty string, expected a semver version\"\n right: \"empty string, expected a semver VERSION_CASSEE\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    test_parse\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s\n\nerror: test failed, to rerun pass `--test test_version`\n";
+        let view = cargo(raw);
+        assert!(
+            view.contains(" right: \"empty string, expected a semver VERSION_CASSEE\""),
+            "{view}"
+        );
+        assert!(view.contains("tests/test_version.rs:16:5"));
+        assert!(view.contains("error: test failed, to rerun pass `--test test_version`"));
+    }
+    #[test]
+    fn pytest_failure_keeps_location_and_does_not_repeat_summary_rows() {
+        let raw = "============================= test session starts ==============================\ncollected 3 items\n\ntests/test_encoding.py .F                                         [100%]\n\n=================================== FAILURES ===================================\n_____________________________ test_int_bytes[0-] ______________________________\n\nvalue = 0, expect = b''\n\n    def test_int_bytes(value, expect):\n        enc = int_to_bytes(value)\n>       assert enc == expect + b\"\\x00\"  # CASSE\nE       AssertionError: assert b'' == b'\\x00'\nE         \nE         Use -v to get more diff\n\ntests/test_encoding.py:35: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_encoding.py::test_int_bytes[0-] - AssertionError: assert b'' == b'\\x00'\nFAILED tests/test_other.py::test_only_in_summary - ValueError: boom\n========================= 2 failed, 1 passed in 0.10s ==========================\n";
+        let view = pytest(raw);
+        assert!(
+            view.contains("tests/test_encoding.py:35: AssertionError"),
+            "{view}"
+        );
+        assert_eq!(view.matches("test_int_bytes[0-]").count(), 1, "{view}");
+        assert!(view.contains("test_only_in_summary"), "{view}");
+        assert!(view.starts_with("Pytest: 1 passed, 2 failed"));
+    }
     #[test]
     fn successful_test_views_state_zero_failures_and_retain_unknown_diagnostics() {
         let cargo = include_str!("../bench/corpus/cargo_ok.txt");

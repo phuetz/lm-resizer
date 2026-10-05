@@ -110,19 +110,43 @@ fn git_log(raw: &str) -> String {
     if raw.lines().any(|s| s.starts_with("diff --")) {
         return git_diff(raw);
     }
-    struct Excerpt {
-        rows: Vec<String>,
-        hidden: usize,
-    }
+    // Records are delimited by the `---END---` sentinel of hook-generated
+    // formats or, for Git's default/medium/--stat output, by `commit <hash>`
+    // header lines. Any other format (for example `--oneline`) has no record
+    // boundary we can trust and stays literal.
+    let records: Vec<String> = if raw.contains("---END---") {
+        raw.split("---END---").map(str::to_owned).collect()
+    } else {
+        let mut records: Vec<String> = Vec::new();
+        for row in raw.lines() {
+            if is_commit_header(row) || records.is_empty() {
+                records.push(String::new());
+            }
+            let last = records.last_mut().expect("a record was just pushed");
+            last.push_str(row);
+            last.push('\n');
+        }
+        if !records
+            .first()
+            .is_some_and(|r| is_commit_header(r.lines().next().unwrap_or("")))
+        {
+            return raw.to_owned();
+        }
+        records
+    };
+    let total = records.iter().filter(|r| !r.trim().is_empty()).count();
     let mut excerpts = Vec::new();
-    for record in raw.split("---END---").take(50) {
-        let mut excerpt = Excerpt {
-            rows: Vec::new(),
-            hidden: 0,
-        };
+    for record in records
+        .iter()
+        .filter(|r| !r.trim().is_empty())
+        .take(GIT_LOG_RECORDS)
+    {
+        let mut rows: Vec<String> = Vec::new();
+        let mut hidden = 0usize;
+        let mut subject = false;
         for row in record.trim().lines() {
-            if excerpt.rows.is_empty() {
-                excerpt.rows.push(clipped(row, 80));
+            if rows.is_empty() {
+                rows.push(clipped(row, 80));
                 continue;
             }
             let text = row.trim();
@@ -133,19 +157,60 @@ fn git_log(raw: &str) -> String {
             {
                 continue;
             }
-            match excerpt.rows.len() {
-                0..=3 => excerpt.rows.push(format!("  {}", clipped(text, 80))),
-                _ => excerpt.hidden += 1,
+            // Header fields, the subject line and `--stat` rows identify the
+            // commit; they are never folded into the omitted-line count.
+            let header = [
+                "Merge:",
+                "Author:",
+                "Date:",
+                "AuthorDate:",
+                "Commit:",
+                "CommitDate:",
+            ]
+            .iter()
+            .any(|prefix| row.starts_with(prefix));
+            if header {
+                // `Date:   Tue` alignment padding carries no information.
+                let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                rows.push(format!("  {}", clipped(&compact, 80)));
+            } else if is_stat_row(row) {
+                rows.push(format!("  {}", clipped(text, 80)));
+            } else if !subject {
+                subject = true;
+                rows.push(format!("  {}", clipped(text, 80)));
+            } else {
+                hidden += 1;
             }
         }
-        if excerpt.hidden != 0 {
-            excerpt
-                .rows
-                .push(format!("  [+{} lines omitted]", excerpt.hidden));
+        if hidden != 0 {
+            rows.push(format!("  [+{hidden} lines omitted]"));
         }
-        excerpts.extend(excerpt.rows);
+        excerpts.extend(rows);
+    }
+    if total > GIT_LOG_RECORDS {
+        excerpts.push(format!("[+{} commits omitted]", total - GIT_LOG_RECORDS));
     }
     excerpts.join("\n")
+}
+
+const GIT_LOG_RECORDS: usize = 50;
+
+fn is_commit_header(row: &str) -> bool {
+    row.strip_prefix("commit ").is_some_and(|rest| {
+        let hash = rest.split_whitespace().next().unwrap_or("");
+        // Git never abbreviates below four hex digits.
+        hash.len() >= 4 && hash.chars().all(|c| c.is_ascii_hexdigit())
+    })
+}
+
+fn is_stat_row(row: &str) -> bool {
+    static STAT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"^ \S.*\s\|\s+(\d+( [+-]+)?|Bin .*)$|^ \d+ files? changed(, \d+ insertions?\(\+\))?(, \d+ deletions?\(-\))?$",
+        )
+        .unwrap()
+    });
+    STAT.is_match(row)
 }
 
 fn git_status(raw: &str) -> String {
@@ -199,6 +264,35 @@ mod tests {
     fn git_author_stays_with_its_commit() {
         let raw = "commit aaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n  title\n---END---\ncommit bbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n  autre\n";
         assert_eq!(git_log(raw), "commit aaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\ncommit bbbb\n  Author: Bob <b@example.test>\n  Date: yesterday\n  autre");
+    }
+    #[test]
+    fn default_git_log_keeps_every_commit_hash_and_subject() {
+        let raw = "commit 280ebcb6edac3aa4cdc545dbff8a26c5ac4861fe\nAuthor: David <d@example.test>\nDate:   Tue Jun 23 20:02:34 2026 -0700\n\n    Update upload-artifact\n\n    Long body line one\n    Long body line two\n\ncommit 82f83d8667e4f6c3aaa62140ab33ec9436a3196f\nMerge: 8953020 b041087\nAuthor: Eve <e@example.test>\nDate:   Sat Jun 20 15:19:45 2026 -0700\n\n    Merge branch 'stable'\n";
+        let view = git_log(raw);
+        assert!(view.contains("commit 280ebcb6edac3aa4cdc545dbff8a26c5ac4861fe"));
+        assert!(view.contains("commit 82f83d8667e4f6c3aaa62140ab33ec9436a3196f"));
+        assert!(view.contains("  Update upload-artifact"));
+        assert!(view.contains("  Merge: 8953020 b041087"));
+        assert!(view.contains("  Date: Tue Jun 23 20:02:34 2026 -0700"));
+        assert!(view.contains("  Merge branch 'stable'"), "{view}");
+        assert!(view.contains("  [+2 lines omitted]"));
+        assert!(!view.contains("Long body line one"));
+    }
+    #[test]
+    fn git_log_stat_rows_are_kept() {
+        let raw = "commit 2c18cc482244f4bb9cc65003b07426c18a79a190\nAuthor: A <a@example.test>\nDate:   Mon May 18 16:11:12 2026 +0200\n\n    Resolve lint\n\n    body\n---\n tests/test_version_req.rs | 4 ++--\n 1 file changed, 2 insertions(+), 2 deletions(-)\n";
+        let view = git_log(raw);
+        assert!(
+            view.contains("tests/test_version_req.rs | 4 ++--"),
+            "{view}"
+        );
+        assert!(view.contains("1 file changed, 2 insertions(+), 2 deletions(-)"));
+        assert!(view.contains("  Resolve lint"));
+    }
+    #[test]
+    fn git_log_without_record_headers_stays_literal() {
+        let raw = "280ebcb Update actions\n82f83d8 Update checkout\n2c18cc4 Resolve lint\n7625c7a Release\nfd404d0 Merge\n";
+        assert_eq!(git_log(raw), raw);
     }
     #[test]
     fn all_git_patch_rows_remain_recoverable() {
