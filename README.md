@@ -2,7 +2,7 @@
 
 **Shorten noisy command output before it reaches your coding agent — and never lose a failure.** LM Resizer is a fast, local Rust CLI for developers who drive tests, builds, Git, containers and other tools through an AI coding agent such as Claude Code, Codex, Cursor, Gemini CLI, an MCP client or a custom pipeline. It runs a command, keeps a compact result for the agent, and stores the byte-exact original for instant recall.
 
-On a benchmark of 61 command captures it saves a median **22.79%** of tokens with the raw recovery included, keeps the producer's exit code in **61/61** cases and starts in about **7.70 ms**. Zero telemetry, 100% local, deterministic.
+On a benchmark of 61 command captures it saves a median **22.79%** of tokens with the raw recovery included, keeps the producer's exit code in **61/61** cases and starts in about **8 ms**. Zero telemetry, 100% local, deterministic.
 
 ![Example of LM Resizer processing command output](docs/lm-resizer-hero.png)
 
@@ -38,6 +38,7 @@ FAILURES (1):
 1.     parse::reject_empty
 
 test result: FAILED. 70 passed; 1 failed; finished in 0.09s
+test result: FAILED. 70 passed; 1 failed; finished in 0.09s
 [tee:78bf04f25902]
 ~~~
 
@@ -63,7 +64,7 @@ Two other tools are commonly used to shrink command output. Their own published 
 | Producer exit code preserved | 61/61 | 52/61 | not measured |
 | Byte-exact raw recoverable | 61/61 | partial or none | no |
 
-LM Resizer's mean is slightly below RTK's on purpose: it refuses to drop large diffs, test names or failure lines to win tokens. RTK returns exit code 0 in **9** of the 61 captures where the producer failed; LM Resizer keeps the producer's code. On one capture LM Resizer returns 251 tokens against RTK's 40 because it keeps **457** collection-error lines and the failing test names, which RTK omits. Headroom compresses LLM API context semantically and has no dedicated CLI tool filters, so its median saving on this command corpus is 0.00%. Strict view equality is 49/61; the twelve differences and their reasons are listed in the benchmark file, and the benchmark's strict checker exits 1 by design. The numbers are replayed with `python3 bench/real/parity_rtk.py`; see [the benchmark](bench/native/README.md).
+LM Resizer's mean is slightly below RTK's on purpose: it refuses to drop large diffs, test names or failure lines to win tokens. RTK returns exit code 0 in **9** of the 61 captures where the producer failed; LM Resizer keeps the producer's code. On one capture LM Resizer returns 251 tokens against RTK's 40 because it states the **457** collection errors and lists the first ten failing files, which RTK omits. Headroom compresses LLM API context semantically and has no dedicated CLI tool filters, so its median saving on this command corpus is 0.00%. Strict view equality is 49/61; the twelve differences and their reasons are listed in the benchmark file, and the benchmark's strict checker exits 1 by design. The numbers are replayed with `python3 bench/real/parity_rtk.py`; see [the benchmark](bench/native/README.md).
 
 ## Try it on your project
 
@@ -121,13 +122,13 @@ git log -20 '--format=Date: %ad%n%h %s' --date=short | lm-resizer tool-output --
 
 `compress` reads text from stdin; `tool-output` filters already captured output. Its `--command` argument describes the command and does not execute it. Small output may stay unchanged.
 
-To configure all four clients from your project root, after backing up any existing Codex configuration:
+To configure the four MCP clients (Claude Code, Codex, Cursor and VS Code) from your project root, after backing up any existing Codex configuration:
 
 ~~~bash
 lm-resizer install --client all --scope project
 ~~~
 
-This writes project files and your account's Codex configuration, including with `--scope project`.
+This writes project files and your account's Codex configuration, including with `--scope project`. Gemini CLI is not covered by `install`: use `lm-resizer init --client gemini --project-dir .` ([agent hooks guide](docs/AGENT_HOOKS.md)).
 
 ## Reproducible token statistics
 
@@ -141,7 +142,7 @@ New execution history records persist both counts. Stats keep existing byte coun
 
 The product uses its own Rust and TOML filters. Explicit inspection commands include `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` and `dedup`. File reads remain literal. Reversible path/match folds, JSON tables and identical-line runs supplement command filters; syntax outlines and exact repeated-message folding are opt-in.
 
-**Median saving including tee: 22.79%.** Mean saving is 31.78%; all 61 raw recoveries and producer exit codes pass, and interleaved startup measurements give 7.70 ms. These corpus medians are not a claim about arbitrary live repositories. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
+**Median saving including tee: 22.79%.** Mean saving is 31.78%; all 61 raw recoveries and producer exit codes pass, and interleaved startup measurements give about 8 ms. These corpus medians are not a claim about arbitrary live repositories. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
 
 `env` masks names containing `PASSPHRASE` (including `PASSPHRASE_FILE`) and a `PASS` name component. This deliberately also masks benign names such as `PASS_COUNT`; filtering is conservative, based on names and credential URL shapes.
 
@@ -163,7 +164,7 @@ sudo apt-get install -y --no-install-recommends ca-certificates curl git gcc g++
 
 The build was checked on Linux x86_64 with Rust 1.95.0. Other platforms have not been reverified.
 
-Download the public tagged sources (Bash or PowerShell):
+Download the public tagged sources (Bash or PowerShell). `lm-resizer` keeps its state in `~/lm-resizer`, so clone from another directory (for example `mkdir -p ~/src && cd ~/src` in Bash, or `New-Item -ItemType Directory -Force "$HOME\src" | Set-Location` in PowerShell) rather than from your home folder:
 
 ~~~sh
 git clone --branch v0.2.5 https://github.com/phuetz/lm-resizer.git

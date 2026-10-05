@@ -24,7 +24,7 @@ Le banc strict retourne **1** à cause des cinq différences suivantes. Ni norma
 
 | Capture | RTK | LM hors tee | LM tee compris | Explication |
 |---|---:|---:|---:|---|
-| fastapi-test | 40 | 239 | 251 | 457 erreurs de collecte et noms conservés ; la référence les omet. |
+| fastapi-test | 40 | 239 | 251 | Compte des 457 erreurs de collecte et dix premiers fichiers en échec ; la référence les omet. |
 | compare-diff | 2539 | 2525 | 2535 | Même corps ; instruction de rappel externe retirée et remplacée par le tee LM. |
 | visible-docker-logs | 44 | 22 | 22 | Échec réel conservé, répétitions exactes ; aucune affirmation artificielle de zéro erreur. |
 | fresh-tsc | 437 | 437 | 437 | Même coût ; ordre déterministe des groupes ex æquo, contre ordre variable de la référence. |

@@ -1,6 +1,6 @@
 # LM Resizer 0.2.5
 
-La 0.2.4 n'a jamais été publiée : cette version en reprend le contenu, ci-dessous, et y ajoute des filtres sans perte pour `git log`/`grep`/`find`/`tree`/pytest/`cargo test`, des hooks idempotents et un `rewrite-shell` qui n'enveloppe plus une sortie redirigée ou captée. Détail dans le CHANGELOG.
+La 0.2.4 n'a jamais été publiée : cette version en reprend le contenu, ci-dessous, et y ajoute des hooks idempotents et un `rewrite-shell` qui n'enveloppe plus une sortie redirigée ou captée. Détail dans le CHANGELOG.
 
 - Installation source documentée avec rustup et les prérequis C/C++ ; Rust minimal 1.91 pour le CLI (core/wasm : 1.86 ; toolchain épinglée : 1.95.0), y compris quand le Rust système est trop ancien. Les installateurs binaires vérifient SHA-256 et version ; le lecteur POSIX accepte aussi CRLF et les sommes sans saut de ligne final.
 - Récupération de l'entrée originale du CLI avant transformation ; récupération CCR ajoutée à l'ABI C et au wrapper WASM. L'éviction protège les clés réinsérées. Le store de transmissions partagées utilise WAL et fournit des erreurs explicites.
