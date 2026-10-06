@@ -1797,8 +1797,8 @@ async fn run(cli: Cli) -> Result<()> {
             if !NATIVE_TOOLS.contains(&program.as_str()) {
                 anyhow::bail!("unknown command '{program}'; use --help or exec -- <program>");
             }
-            let store = open_store(None)?;
-            let report = run_exec_command(&command, "", false, false, store.as_ref())?;
+            let store = open_store_or_warn(None);
+            let report = run_exec_command(&command, "", false, false, store.as_deref())?;
             print!("{}", report.output);
             if report.exit_code != 0 {
                 std::process::exit(report.exit_code);
@@ -1812,9 +1812,9 @@ async fn run(cli: Cli) -> Result<()> {
             stream,
             command,
         } => {
-            let store = open_store(store)?;
+            let store = open_store_or_warn(store);
             let report =
-                run_exec_command(&command, &query, raw_on_failure, stream, store.as_ref())?;
+                run_exec_command(&command, &query, raw_on_failure, stream, store.as_deref())?;
             let exit_code = report.exit_code;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
@@ -2485,6 +2485,44 @@ fn open_store(path: Option<PathBuf>) -> Result<Box<dyn CcrStore>> {
     Ok(from_config(&cfg)?)
 }
 
+/// Un outil de réduction ne doit jamais empêcher la commande qu'il enveloppe :
+/// quand l'état n'est pas inscriptible (HOME en lecture seule, bac à sable,
+/// disque plein), `exec` continue sans archive. Une seule ligne sur stderr
+/// par processus, jamais de changement du code de sortie de la commande.
+fn warn_state_unwritable(path: &Path) {
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !WARNED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        eprintln!(
+            "lm-resizer: état non inscriptible ({}), réduction sans archive",
+            path.display()
+        );
+    }
+}
+
+/// Le dossier d'état dont dépend une archive, pour le message d'avertissement.
+fn state_path_for_warning(preferred: Option<&Path>) -> PathBuf {
+    preferred
+        .map(Path::to_path_buf)
+        .or_else(|| default_state_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("lm-resizer"))
+}
+
+/// `open_store` sans échec : `None` (et un avertissement) si la base CCR ne
+/// peut pas être ouverte ; l'appelant réduit alors sans archive.
+fn open_store_or_warn(path: Option<PathBuf>) -> Option<Box<dyn CcrStore>> {
+    let shown = path
+        .clone()
+        .or_else(|| default_store_path().ok())
+        .unwrap_or_else(|| PathBuf::from("lm-resizer"));
+    match open_store(path) {
+        Ok(store) => Some(store),
+        Err(_) => {
+            warn_state_unwritable(&shown);
+            None
+        }
+    }
+}
+
 /// Cle CCR : hexadecimal, rien d'autre.
 fn is_ccr_hash(text: &str) -> bool {
     !text.is_empty() && text.chars().all(|c| c.is_ascii_hexdigit())
@@ -2921,10 +2959,10 @@ fn run_exec_command(
     query: &str,
     raw_on_failure: bool,
     stream: bool,
-    store: &dyn CcrStore,
+    store: Option<&dyn CcrStore>,
 ) -> Result<ExecReport> {
     if !raw_on_failure && !stream {
-        return run_inspected_command(command, None, Some(store), query);
+        return run_inspected_command(command, None, store, query);
     }
     let started = Instant::now();
     let (program, args) = command.split_first().context("missing command for exec")?;
@@ -2957,15 +2995,27 @@ fn run_exec_command(
 
     perf_stage("filter", phase.elapsed());
     let phase = Instant::now();
-    let mut compressed = if filter == "raw_on_failure"
+    // Sans base CCR, pas de compression générique : ses marqueurs `hash=`
+    // promettraient une récupération impossible. La vue filtrée est rendue.
+    let passthrough = filter == "raw_on_failure"
         || filter.starts_with("native:")
         || filter.starts_with("code-outline:")
         || filter.starts_with("lossless:")
         || matches!(
             filter.as_str(),
             "json-passthrough" | "aws-json" | "aws" | "file-read" | "cargo_test_diagnostics"
-        ) {
-        CompressReport {
+        );
+    let mut compressed = match store {
+        Some(store) if !passthrough => compress_text_with_metrics(
+            &filtered,
+            query,
+            store,
+            &build_pipeline(),
+            None,
+            false,
+            false,
+        )?,
+        _ => CompressReport {
             tokens: TokenCounts::default(),
             content_type: if matches!(filter.as_str(), "json-passthrough" | "aws-json") {
                 "json"
@@ -2979,17 +3029,7 @@ fn run_exec_command(
             steps_applied: Vec::new(),
             cache_keys: Vec::new(),
             output: filtered.clone(),
-        }
-    } else {
-        compress_text_with_metrics(
-            &filtered,
-            query,
-            store,
-            &build_pipeline(),
-            None,
-            false,
-            false,
-        )?
+        },
     };
     // Porte de conservation des diagnostics. Le filtre de commande a choisi
     // les lignes qui comptent ; l'étape générique qui suit ne connaît pas la
@@ -3014,7 +3054,7 @@ fn run_exec_command(
     }
     perf_stage("diagnostic_gate", phase.elapsed());
     let phase = Instant::now();
-    if !compressed.cache_keys.is_empty() {
+    if let (Some(store), false) = (store, compressed.cache_keys.is_empty()) {
         let key = lm_resizer_core::ccr::compute_key(raw.as_bytes());
         store.put(&key, &raw);
         for intermediate in &compressed.cache_keys {
@@ -5215,11 +5255,18 @@ fn archive_raw_bytes(raw: &[u8]) -> Result<Option<String>> {
     if std::env::var("LM_RESIZER_TEE").ok().as_deref() == Some("0") {
         return Ok(None);
     }
-    let tee_dir = default_state_dir()?.join("tee");
-    std::fs::create_dir_all(&tee_dir)?;
+    let Ok(state_dir) = default_state_dir() else {
+        warn_state_unwritable(&state_path_for_warning(None));
+        return Ok(None);
+    };
+    let tee_dir = state_dir.join("tee");
     let digest = format!("{:x}", Sha256::digest(raw));
     let path = tee_dir.join(format!("{digest}.log"));
-    std::fs::write(&path, raw)?;
+    let written = std::fs::create_dir_all(&tee_dir).and_then(|()| std::fs::write(&path, raw));
+    if written.is_err() {
+        warn_state_unwritable(&state_dir);
+        return Ok(None);
+    }
     Ok(Some(format!("[raw: {}]", &digest[..12])))
 }
 
@@ -5336,10 +5383,19 @@ fn purge_tee_files(all: bool, file: Option<&str>) -> Result<TeePurgeReport> {
     })
 }
 
+/// Les compteurs sont un confort : un échec d'écriture n'a jamais d'effet sur
+/// la commande ni sur son code de sortie.
 fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     if std::env::var("LM_RESIZER_TRACKING").ok().as_deref() == Some("0") {
         return Ok(());
     }
+    if write_exec_history(report, elapsed).is_err() {
+        warn_state_unwritable(&state_path_for_warning(None));
+    }
+    Ok(())
+}
+
+fn write_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     let dir = default_state_dir()?;
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("exec-history.jsonl");
