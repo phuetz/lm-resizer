@@ -13,21 +13,38 @@ env:
 
 jobs:
   minimum-rust:
-    name: Rust minimum (1.86.0)
+    # Documented minimums: 1.86 for the core and wasm libraries, 1.91 for the CLI
+    # (workspace `rust-version`). Each compiler checks only what it must support.
+    name: Rust minimum (${{ matrix.toolchain }}, ${{ matrix.scope }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolchain: 1.86.0
+            scope: core and wasm
+            packages: -p lm-resizer-core -p lm-resizer-wasm
+            python: false
+          - toolchain: 1.91.0
+            scope: CLI and workspace
+            packages: --workspace
+            python: true
     env:
-      RUSTUP_TOOLCHAIN: 1.86.0
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.86.0
+          toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
       - name: Check the minimum compiler
         run: |
           cargo --version
           cargo fmt --all --check
-          cargo test --workspace --release --locked
+          cargo test ${{ matrix.packages }} --release --locked
+      - name: Benchmark script tests
+        if: matrix.python
+        run: |
           python3 -m unittest discover -s bench/real -p test_build.py
           python3 -m unittest discover -s bench/real -p test_regression_script.py
 
