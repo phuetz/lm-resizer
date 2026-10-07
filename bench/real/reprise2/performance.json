@@ -1,0 +1,782 @@
+{
+  "revision": "09b1db0617311f3b39f165bb3480c0ce2f718b27",
+  "source_provenance": {
+    "source_commit": "49e2b7bd2b23908decc10103f5abfdbbf67b7af0",
+    "source_files": {
+      "Cargo.lock": "09b6e798cafd052bdfc98f61264ea187b1b4282a31c0b5687e05be7aaac725d7",
+      "Cargo.toml": "a0cbc1842f65c8a8e8285c149bea2c25fd583475b08f9dc163a1edc03e482da2",
+      "crates/lm-resizer-core/Cargo.toml": "13b62f62db4ce083e1df978b264f37527b99c68aaf2ba0ede9c19533eb3ead3c",
+      "crates/lm-resizer-core/benches/auth_mode.rs": "71f773dcff694c79881d0e4168da6dee8ab29c6e542698c105aefa71b1a81004",
+      "crates/lm-resizer-core/benches/ccr_store.rs": "9a74d38d99d2ecd0785654f637c4fad4d1c3483d0b19a16579390c101faf0117",
+      "crates/lm-resizer-core/benches/tokenizer.rs": "e82f25f1d40ffb7ffbd5fca4b06972ba9e035b2646cfe60964d7d0959d578b19",
+      "crates/lm-resizer-core/build.rs": "9512f146f2c3d28125317304d6c8f8990519db3719844d33dba15351315d73f9",
+      "crates/lm-resizer-core/config/pipeline.toml": "3f3e39cd469fa4a69ee451d7c43c497bae399cb46d6417edcef7cc7a27453621",
+      "crates/lm-resizer-core/proptest-regressions/transforms/tag_protector.txt": "09da9466baaa595847ffe007a9fb59eafb1477006d3c9daa350edecc2c826a41",
+      "crates/lm-resizer-core/src/auth_mode.rs": "b601040946ee671fcf44e925a85fa39ee4a0f3d81a2ca402ded0a6072cb2ddb8",
+      "crates/lm-resizer-core/src/cache_control.rs": "6504e5c7f0ff29b84110060a156f07ee046d687c1eead9c250f4b5579bfc0f22",
+      "crates/lm-resizer-core/src/ccr/backends/in_memory.rs": "57bb995a080a3da783c4389b38a08d63ab3012b91389fe7e44bd07e76ccc61bd",
+      "crates/lm-resizer-core/src/ccr/backends/mod.rs": "20c1cf5ebf41cb0a29ce25314bf064a36b8cd40a3126f3fe721f1d423b227e90",
+      "crates/lm-resizer-core/src/ccr/backends/redis.rs": "aea3af3d48cebf3a841fdd7250265cd4aa25446372a441dc41d0ff8bbdeaf54e",
+      "crates/lm-resizer-core/src/ccr/backends/sqlite.rs": "37b3208a3c2f628d48467c01967d4320406102021f5583543c89732ed953e593",
+      "crates/lm-resizer-core/src/ccr/mod.rs": "af2c1e5ae8b650dcb8d07107ae259f65be6810d205805ed07abc2862090a053f",
+      "crates/lm-resizer-core/src/compression_policy.rs": "e86f701e6f18c80099a54b8c97eafd3f8e4a28448b38a6e593b3317c64d40313",
+      "crates/lm-resizer-core/src/lib.rs": "19c26b75aef51859c70e5df737fbc0dc969b7c3e48d2372f3cc2309facfb2f12",
+      "crates/lm-resizer-core/src/monotonic.rs": "6292a6ce039eb1397f78d7b7a5767fcd14dab364195db92a7f6001d4502a29df",
+      "crates/lm-resizer-core/src/output.rs": "2b94b4d433a78d8c6aa2ddd46d96abac8ec9504fae1bab5f4e07a459a5c738d8",
+      "crates/lm-resizer-core/src/relevance/base.rs": "7f47485fd9985a0bef985b5c7fb95b97c22cefba6f578f3df22ee7f93d053d92",
+      "crates/lm-resizer-core/src/relevance/bm25.rs": "f92b69d5210d818877398f209085871c6873ac648038fd6b9c87d118a61071be",
+      "crates/lm-resizer-core/src/relevance/embedding.rs": "2d137aa8c54178e56f951763fb8a5e366f7d3c26e5830764b6d5cd3be7541b6a",
+      "crates/lm-resizer-core/src/relevance/hybrid.rs": "baa3d43df5c474b6ca8e6d729d3d67dd4ba8b49c52bb52f3ac602ae1f3f0dc65",
+      "crates/lm-resizer-core/src/relevance/mod.rs": "55b2fb19ad84330761797c91e5101485fe914ccddddf19d148195f246308a11d",
+      "crates/lm-resizer-core/src/signals/README.md": "0a5eb579fb43c74dd226b1e8b410cde0424386c391c9b336cae046ea546d7d97",
+      "crates/lm-resizer-core/src/signals/keyword_detector.rs": "1690fe3e1765de2e403e5b7ed40941f28e21e023da799eb3b2887a3c70b65cb1",
+      "crates/lm-resizer-core/src/signals/line_importance.rs": "a5df5c346ade3cee165f8c9a8bf48accc682b02fa08a54acce714ac6a1eb8e7e",
+      "crates/lm-resizer-core/src/signals/mod.rs": "a731701bbedc7a605947918cf5720f21849365bfe33235c5105432ca5ef65ad9",
+      "crates/lm-resizer-core/src/signals/tiered.rs": "0919c93d8cf72600335ef4aaa7cf352b3e0972f0772527ea2bf39cb611d002b3",
+      "crates/lm-resizer-core/src/tokenizer/count_only.rs": "5ca0eb86f0fd7e1db00f8c32f935ec69f0c04d885d70d36d39265eeedf22f028",
+      "crates/lm-resizer-core/src/tokenizer/estimator.rs": "bc34205a51ce3f1c7c552ef8a134ea986a253afda61d2f100f73677f3bbe80d5",
+      "crates/lm-resizer-core/src/tokenizer/hf_impl.rs": "df4ff003b2409e8bed22713e62d813cf61674adbd28ab633770bc6b8c571a24d",
+      "crates/lm-resizer-core/src/tokenizer/mod.rs": "092ff3e3fde1ee0305cd5e1d7a40f6eb8a044087c16fdba2a21121bef4774cd4",
+      "crates/lm-resizer-core/src/tokenizer/registry.rs": "17da59adf986a5216855124033a9e317401b6a56188d16c52010bfa7892b9158",
+      "crates/lm-resizer-core/src/tokenizer/tiktoken_impl.rs": "8ac1b5afc50e25202f35ecfec04a9ffeebc277117ef1a7c787846841d23531ae",
+      "crates/lm-resizer-core/src/transforms/adaptive_sizer.rs": "b66641cdc5e82dce7736a0f2b4416666933be39a7f6641b64985d57c401b2552",
+      "crates/lm-resizer-core/src/transforms/advice_structural.rs": "f9db80d738114b3438102ff144b445078c8f2ecadc133d92e8a5a9a1a9f3c08d",
+      "crates/lm-resizer-core/src/transforms/anchor_selector.rs": "31114e744b29f29ee92dcf227b0a4bc05f52f8cc5f08a7d102954a70e61f690f",
+      "crates/lm-resizer-core/src/transforms/content_detector.rs": "7714e5f052732f831663e664a102b5dfd9784fb9e8d8e4111038235201aa2768",
+      "crates/lm-resizer-core/src/transforms/detection.rs": "5cc41781124d38dfe3995ab7cd7dea3fcde9b235d8e82260faf620929901d277",
+      "crates/lm-resizer-core/src/transforms/diagnostic_gate.rs": "0718862f7d52bcf1be54b79d6d3c2b7fdc4fd95b93bd082b839c3cef01eaad2c",
+      "crates/lm-resizer-core/src/transforms/diff_compressor.rs": "0df41ba149b5dffbd911147437280a934441bd2901cf2a0354b34977b2ed0533",
+      "crates/lm-resizer-core/src/transforms/live_zone.rs": "df5250d915fc9715b0640171b83a0c27fd0949e41155c5c8da41c9c10e8e2703",
+      "crates/lm-resizer-core/src/transforms/log_compressor.rs": "437ca4177ed740d7bef848fee7b27226d5477eb06072df6cab61771562121976",
+      "crates/lm-resizer-core/src/transforms/magika_detector.rs": "2ca56f9b26d8c8a21346fb89b43d923160a3abd68cca68963465e13fd1604a7b",
+      "crates/lm-resizer-core/src/transforms/magika_onnx.rs": "329b774dd80560ca0a6b78157a332fce02282a51e4eb6bf83795d218634889d0",
+      "crates/lm-resizer-core/src/transforms/mod.rs": "65d5b352e1f009100020abc2d71ac4b06132cd2546a3a9fadf330b4dde219851",
+      "crates/lm-resizer-core/src/transforms/pipeline/config.rs": "0c420e78b13dafae9e5044ec3fb7692c3565125d5115a5a1e63241111ba320a4",
+      "crates/lm-resizer-core/src/transforms/pipeline/mod.rs": "abd34212e293f6348500d0177112453c18a8c380176f369be971de12bf373248",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/diff_noise.rs": "58dcefd025e4c4672572d0f865a60008d23506e9dbb6a53e77c406b64f406e65",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/diff_offload.rs": "8bee4b3f2200fdd04cc25121580818d4826f1ce3b0016d5c40d535f2aa981c05",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/json_offload.rs": "d4ee32519af19907fd1a9b9f0fc61df9e59b2d29874d48bedf569c11f0e0f89f",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/log_offload.rs": "d40295ce8337cf7247cb54ec841298da9f27ecdf629e72296ca18ac014124d1a",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/mod.rs": "dd42bb4e9e121e8df0d6da73668405d4a7e2320dd496025c435f189acba6b8a1",
+      "crates/lm-resizer-core/src/transforms/pipeline/offloads/search_offload.rs": "40faaaec20b43198679682e9c2f1207bbdb3885095649bea782ffc50e1cb3bba",
+      "crates/lm-resizer-core/src/transforms/pipeline/orchestrator.rs": "b3f5d420adb74d8bf64340425747b69c83c2ba1b10d2de4c74380bec0508c6c8",
+      "crates/lm-resizer-core/src/transforms/pipeline/reformats/json_minifier.rs": "44fa315d37890d212c5b6584855204bd79547bca1d0d3ce619b6fcff86dbba19",
+      "crates/lm-resizer-core/src/transforms/pipeline/reformats/log_template.rs": "8b5610a2c792a7b082d1123e9724562f3dfa72187900cf35dfdbf5ae4e0c9c4d",
+      "crates/lm-resizer-core/src/transforms/pipeline/reformats/mod.rs": "10253e4e7e51342222d4746a32b7f8bf86c6906ed58d9ac5d279132393dc5835",
+      "crates/lm-resizer-core/src/transforms/pipeline/traits.rs": "e30abf03e26022c2ed28864e1bcf1fc52eb17c85a6b583b85bcd41273a6add8f",
+      "crates/lm-resizer-core/src/transforms/prose_compressor.rs": "f20dd00c0bad6854fd914d46b188ed90182f2b49d03abba49e5eaa66f5a32928",
+      "crates/lm-resizer-core/src/transforms/recommendations.rs": "513c66cdc4fdcf6fab8571e851f137ad5fc47aeffebcb60c1589e60e29460536",
+      "crates/lm-resizer-core/src/transforms/retention_advice.rs": "77855fbca809c2e292f4c5857f7f810062349dda749f67efaf82c8ba77f681a5",
+      "crates/lm-resizer-core/src/transforms/safety.rs": "c9ae4860b99c3c10e042fc22e978b27e3cfdd2e81e96c76f1234f6d2f06334dc",
+      "crates/lm-resizer-core/src/transforms/search_compressor.rs": "3c035d12e1ee4e5edd8c971558656ea88eb39f15da04e28300d0213d530c9392",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/analyzer.rs": "a3aab28f2a0e1a0b34def7398f63165a1fe8678ecdca378c2c45749b91af76d2",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/anchors.rs": "e3fdaa738e6df2ea7b78d0b9f6be72af89aacd244f891ab72deca0f1f3c553d1",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/builder.rs": "6c0b47b36ccebf3aba00017409234a116a6da98abbaf1ececf7df1404d55a54a",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/classifier.rs": "d23f458f744ffc40c5f7d31e4561e93525a742f9ee9b2c3d61c29ec5eafddedf",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/classifier.rs": "bfed34faf626889ba013cc54e81f902fdc2cc6f72b39e5942be150488a6031b1",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/compactor.rs": "1a90c7a3158a3f3c6226af3f8c8f2fe7d3dfb50c728774b16cc5549f3946cc09",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/formatter.rs": "ef97c12242f12d1ce859f0705abc480ff51ef6f93d663b80455f3b879f996d62",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/ir.rs": "50f5be7413e6a1da1c615b266fcc0e92fbde0fdf0091fddb7590e05ee7fad620",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/mod.rs": "fa7e517c3b0661eb5ff8f707d9be032492baa315980e31aaac63ae96878e3dd0",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/compaction/walker.rs": "9520b177832a067d272632e347ac1f8ab4834b51bfbe589ddf07bf2a7eed9219",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/config.rs": "8bd6e1772001d6d51a2022c9fa38e3fd1aa0b83213f4eb57db2d5b05ecd50d8f",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/constraints.rs": "e2ec29dfa8b49c6afcac890658c3ec43c250c962e71c0f2799f89286cc6eaaf8",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/crusher.rs": "fd766c60066c45e9d9174de40138e961d2391ac15c2586e50752362aa5d97d39",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/crushers.rs": "e783516cc3f8f7342e8385098299d1e09d80c7e466a49f9450bed6727c88e5e8",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/error_keywords.rs": "eb3b5028974f015852cdf6ddb6fdde0fdffb51aea857e306f7b713651b5a8e92",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/field_detect.rs": "549994b2443bc968808d03545fe2abc2e6dc171309693456a7bdd4af136235f2",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/hashing.rs": "99b732aff7964b9d5e8854efe26379a217fbfbfdec7ae389c960abb1a18949ae",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/mod.rs": "6a197cde60c904576ba72c74486ddd88cf5534c3aa2c9f3cc24e593da2f5674e",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/observer.rs": "5c93effc7cfe3341a1c728743c9616d64d3e7204b8e3d970837bdcb1fa71d80e",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/orchestration.rs": "db55f1f80cdec3d1be25021a8d368a02a4d9ee4bc33013f73be67815952eb813",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/outliers.rs": "a3a540966219139b15e46e79d0a47bd07c6b0fcb1e5bcc4fe97d1f56e36a94c8",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/planning.rs": "a60c70c2e6b393e5fb901b6dbdad30721e5f375545e7fc5e6b356391e53569e5",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/statistics.rs": "68454fb4502cf7050577a6f5e15798c07b5a8729d6b166ad38d6630c27eac634",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/stats_math.rs": "72dc7c99ae1d73f510073cc1084b0a7b9eb41acf8833983718b774f0c3a19971",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/traits.rs": "9adc8a09f926a1d004cc51dfeccad1bf74cb8e445b9250d6498f9127b8dde177",
+      "crates/lm-resizer-core/src/transforms/smart_crusher/types.rs": "a91f17858d6dad8ce3d45151806659101c7423801024419c7f088f1671c06230",
+      "crates/lm-resizer-core/src/transforms/source_compressor.rs": "4a9b376f18679c119270b5463c7be2b222ae311fe13ea784dee8426900a25561",
+      "crates/lm-resizer-core/src/transforms/tag_protector.rs": "b7e6b0df44aae9feec064574afc086033497cd5ddb651e07696ced9ecbdb69f7",
+      "crates/lm-resizer-core/src/transforms/unidiff_detector.rs": "c72bda093a1f5834edf8f5fb931b5b7d85f7aa32b9fb7533664b0713ed7b75e2",
+      "crates/lm-resizer-core/tests/adversaire_accolades.rs": "3ea759a10c9104a46b683af522e88a5087b2a5cc55206a3ec77419fca87bb6c3",
+      "crates/lm-resizer-core/tests/auth_mode.rs": "3ecd9e8c6561bbdad9e65e8d3e7b1a06508953eb85ed9b7b2349da5a5f6b6f2d",
+      "crates/lm-resizer-core/tests/cache_control.rs": "c439efb4c0244227ad7f64a1e222ed87edd1b08a4be385ea7dd88c16d6b7a659",
+      "crates/lm-resizer-core/tests/ccr_backends.rs": "91db029782197e43f1ff56b67ea20fa3aac3677594c9d029395e59b78fd1c097",
+      "crates/lm-resizer-core/tests/ccr_roundtrip.rs": "726e7ff3d7812bbc41e3acd0a99378e94fd1db1246d2365efa08f72322a01ba1",
+      "crates/lm-resizer-core/tests/corpus_fige.rs": "ac7e75107c32be6f309dee991090fbed18d659e6760612e113cebbc46b0ed02e",
+      "crates/lm-resizer-core/tests/fixtures/critical_comments.rs.txt": "34c22380924393e0f7dd08e04db0e950f5f2b8ee2401fcb66dba9333eb7adaf3",
+      "crates/lm-resizer-core/tests/live_zone_ccr.rs": "c764f6323ddb97e4cb83faade4d67b4309728bfafa5b72364a0aac6352b83605",
+      "crates/lm-resizer-core/tests/live_zone_dispatch.rs": "68e255c61a2cd70687ef1fb471daa1433753d1b90d12197f35072c03657dba8f",
+      "crates/lm-resizer-core/tests/live_zone_thresholds.rs": "54044ab35f1abda54e7f7d7b3e7caae9107eddb432163c0a145199315d2eb8f8",
+      "crates/lm-resizer-core/tests/live_zone_token_validation.rs": "d4f3b642919d888e7b8af212bdb2d04c7551206935e7f42557cded99efa968ef",
+      "crates/lm-resizer-core/tests/proptest_invariants.rs": "1462f6ce5882f41a2470441555d06b98d1f22c896aad7d11d13599e75fa051a0",
+      "crates/lm-resizer-core/tests/recommendations_loader.rs": "23598401be338ec8df65aa79682d1fc000150499d8b70b84861778e49152e00c",
+      "crates/lm-resizer-core/tests/retention.rs": "a123c74d06dae4691fcadce7922430aa1af3d4a26bb003a5cc86cd4f4d35d063",
+      "crates/lm-resizer-core/tests/source_syntax_compression.rs": "41b237261dbfc34e1621a803fabde8bd5f926d4c8aeb6e452ad44b94addd4588",
+      "crates/lm-resizer-core/tests/tokenizer_proptest.rs": "741ddccb068f9f136b6d959d303357d305b42ae25e126fdc00146e2030aaa02b",
+      "crates/lm-resizer-wasm/Cargo.toml": "29a08498d752714cb08c1877ec9c751ec9100d4d056c5786a8ff61b0c04bb6ef",
+      "crates/lm-resizer-wasm/src/lib.rs": "45f7f23572083f84e86d85ea05ec7c9ae1a0c461737f1619bd15740f727797c2",
+      "rust-toolchain.toml": "110444165732cf0c2eb24f96f6ab9229d2f4d3ff99da0778385799d6c60dd7b1",
+      "src/advice_cli.rs": "301f6930c74d70dba7db0f8f6d4f7a0e9133774fc5ba5ad11ee3347c8e5f6843",
+      "src/lossless_filters.rs": "45519dc38bde8cac01e32accb798e0372b45e39d058d7405230ce4cc1d5f9de0",
+      "src/main.rs": "0e22046cf377ee8eb4dad8ddb5ced01cb5edd060a52aa7f2d7633278521ec9cf",
+      "src/mcp_proxy.rs": "70815c2f32f7062e80e283faf5e51c66f492e5fbb873058df7d906aa649ef977",
+      "src/parity_filters.rs": "7119d76cdec3b204523decf01a4d97ecc4d2eb5bd9360657cdb95e25d4e1e569",
+      "src/provider_usage.rs": "68e89682928f0bfba4585dbca61cf1884483ce41967ca08dcc345dc8a7d49448",
+      "src/rtk_filters.rs": "7bf14d184e45ec6b0c9fe81bd4994b0c91ca02281be74e5d080570c9aa2e52aa",
+      "src/shared_context.rs": "e4683fb77b53a48a2f67a21e33307d169c5a8af3b06c7fb61716fb226a6682c3",
+      "src/token_metrics.rs": "270aa1fbe58384b64eef430b2398c427bc40cd928309efa06e240681961c6fe9"
+    },
+    "source_tree_clean": true,
+    "build_command": [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--bin",
+      "lm-resizer",
+      "--message-format=json-render-diagnostics"
+    ],
+    "cargo_artifact": {
+      "executable": "target/release/lm-resizer",
+      "target": "lm-resizer",
+      "profile": {
+        "opt_level": "3",
+        "debuginfo": 0,
+        "debug_assertions": false,
+        "overflow_checks": false,
+        "test": false
+      },
+      "fresh": false
+    },
+    "rustc": "rustc 1.86.0 (05f9846f8 2025-03-31)\nbinary: rustc\ncommit-hash: 05f9846f893b09a1be1fc8560e33fc3c815cfecb\ncommit-date: 2025-03-31\nhost: x86_64-unknown-linux-gnu\nrelease: 1.86.0\nLLVM version: 19.1.7\n",
+    "binary_sha256": "833b40068fdecb8036a902cf0b60b5879dfe660978e46286b482344f4e17eeff"
+  },
+  "binary_sha256": "833b40068fdecb8036a902cf0b60b5879dfe660978e46286b482344f4e17eeff",
+  "cases": [
+    {
+      "name": "ls-real",
+      "command": [
+        "ls",
+        "-R"
+      ],
+      "bytes": 2650550,
+      "sha256": "86326f7f74450781adff0d71614a0eb06892be8b4b3a14adfe809c43aafac8eb",
+      "threshold": 2.0,
+      "child_exit": 0,
+      "seconds": [
+        0.110606782,
+        0.108311629
+      ],
+      "median": 0.1094592055,
+      "maximum": 0.110606782,
+      "threshold_enforced": true,
+      "stdout_sha256": "86326f7f74450781adff0d71614a0eb06892be8b4b3a14adfe809c43aafac8eb",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "ls-5mb",
+      "command": [
+        "ls",
+        "-R"
+      ],
+      "bytes": 5301100,
+      "sha256": "86ac74772c3adabad08e3237a9c5fd5cf23c3df14ab6845b5e76d4fa3855094e",
+      "threshold": 2.0,
+      "child_exit": 0,
+      "seconds": [
+        0.141934401,
+        0.159708402
+      ],
+      "median": 0.1508214015,
+      "maximum": 0.159708402,
+      "threshold_enforced": true,
+      "stdout_sha256": "86ac74772c3adabad08e3237a9c5fd5cf23c3df14ab6845b5e76d4fa3855094e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "find-real",
+      "command": [
+        "find",
+        "."
+      ],
+      "bytes": 5678963,
+      "sha256": "c5bb9e594490269c0ede5624f2490f9e54e636b7061c061575f62a826a18ef1e",
+      "threshold": 2.0,
+      "child_exit": 0,
+      "seconds": [
+        0.154016512,
+        0.142846261
+      ],
+      "median": 0.14843138649999998,
+      "maximum": 0.154016512,
+      "threshold_enforced": true,
+      "stdout_sha256": "c5bb9e594490269c0ede5624f2490f9e54e636b7061c061575f62a826a18ef1e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "find-5mb",
+      "command": [
+        "find",
+        "."
+      ],
+      "bytes": 5678963,
+      "sha256": "c5bb9e594490269c0ede5624f2490f9e54e636b7061c061575f62a826a18ef1e",
+      "threshold": 2.0,
+      "child_exit": 0,
+      "seconds": [
+        0.186561833,
+        0.144836151
+      ],
+      "median": 0.165698992,
+      "maximum": 0.186561833,
+      "threshold_enforced": true,
+      "stdout_sha256": "c5bb9e594490269c0ede5624f2490f9e54e636b7061c061575f62a826a18ef1e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "cat-paths-3mb",
+      "command": [
+        "cat",
+        "input.txt"
+      ],
+      "bytes": 3000000,
+      "sha256": "86135ef1b7e958f89a9a7ebe6e6234dbd8f3a5a1ff70395cfc73f7a45ad5ec16",
+      "threshold": 0.3,
+      "child_exit": 0,
+      "seconds": [
+        0.113321451,
+        0.092542708
+      ],
+      "median": 0.1029320795,
+      "maximum": 0.113321451,
+      "threshold_enforced": false,
+      "stdout_sha256": "86135ef1b7e958f89a9a7ebe6e6234dbd8f3a5a1ff70395cfc73f7a45ad5ec16",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "cat-3mb",
+      "command": [
+        "cat",
+        "input.txt"
+      ],
+      "bytes": 3000000,
+      "sha256": "ef93f5f6f41ad7ea96a5d171c93ea20276dc92968b533d9c888ae0807a221459",
+      "threshold": 0.3,
+      "child_exit": 0,
+      "seconds": [
+        0.108725205,
+        0.120120097
+      ],
+      "median": 0.114422651,
+      "maximum": 0.120120097,
+      "threshold_enforced": false,
+      "stdout_sha256": "ef93f5f6f41ad7ea96a5d171c93ea20276dc92968b533d9c888ae0807a221459",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-cargo_fail",
+      "command": [
+        "cargo",
+        "test"
+      ],
+      "bytes": 4869,
+      "sha256": "78bf04f2590227705a39b5ae8390ada54cd39b07755fabca744c0a9f8ac97c94",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.068954578
+      ],
+      "median": 0.068954578,
+      "maximum": 0.068954578,
+      "threshold_enforced": false,
+      "stdout_sha256": "78bf04f2590227705a39b5ae8390ada54cd39b07755fabca744c0a9f8ac97c94",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-cargo_ok",
+      "command": [
+        "cargo",
+        "test"
+      ],
+      "bytes": 5298,
+      "sha256": "4d0eafba06534e3979ab25e9b9b3c513397f6dc3ea04bee9c76953b557087f06",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.064550612
+      ],
+      "median": 0.064550612,
+      "maximum": 0.064550612,
+      "threshold_enforced": false,
+      "stdout_sha256": "4d0eafba06534e3979ab25e9b9b3c513397f6dc3ea04bee9c76953b557087f06",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-code_csharp",
+      "command": [
+        "cat",
+        "source"
+      ],
+      "bytes": 2537,
+      "sha256": "727c12a39d8a67fd3b3f345f2e32d206e4b30899f139e236140aad9e0fefd22a",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.067503027
+      ],
+      "median": 0.067503027,
+      "maximum": 0.067503027,
+      "threshold_enforced": false,
+      "stdout_sha256": "727c12a39d8a67fd3b3f345f2e32d206e4b30899f139e236140aad9e0fefd22a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-code_go",
+      "command": [
+        "cat",
+        "source"
+      ],
+      "bytes": 2133,
+      "sha256": "2d735643b3e1b2e82f4b63071cc98c18da74461a2f0cc3e9145461081e99b816",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.055530682
+      ],
+      "median": 0.055530682,
+      "maximum": 0.055530682,
+      "threshold_enforced": false,
+      "stdout_sha256": "2d735643b3e1b2e82f4b63071cc98c18da74461a2f0cc3e9145461081e99b816",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-code_java",
+      "command": [
+        "cat",
+        "source"
+      ],
+      "bytes": 2138,
+      "sha256": "5671cdc04021d10d030632d2fa0cc4adcfb1828420a8522e93461bbe5a0b55d6",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.055012772
+      ],
+      "median": 0.055012772,
+      "maximum": 0.055012772,
+      "threshold_enforced": false,
+      "stdout_sha256": "5671cdc04021d10d030632d2fa0cc4adcfb1828420a8522e93461bbe5a0b55d6",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-code_python.py",
+      "command": [
+        "cat",
+        "source"
+      ],
+      "bytes": 2024,
+      "sha256": "f72216e17884b46aed0e77f5f748b44854206187d1eacff8b07f5439e709e9f6",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.057698666
+      ],
+      "median": 0.057698666,
+      "maximum": 0.057698666,
+      "threshold_enforced": false,
+      "stdout_sha256": "f72216e17884b46aed0e77f5f748b44854206187d1eacff8b07f5439e709e9f6",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-code_rust",
+      "command": [
+        "cat",
+        "source"
+      ],
+      "bytes": 2119,
+      "sha256": "26d463e5fc0e324676d93705b66188696ec674ae4be39075c27f0149919c49f5",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.064856585
+      ],
+      "median": 0.064856585,
+      "maximum": 0.064856585,
+      "threshold_enforced": false,
+      "stdout_sha256": "26d463e5fc0e324676d93705b66188696ec674ae4be39075c27f0149919c49f5",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-code_typescript",
+      "command": [
+        "cat",
+        "source"
+      ],
+      "bytes": 2137,
+      "sha256": "3a0b0e77bf7ccfeae4d9e51d5869cc80db04367e583fa20ea107427bf36a208f",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.060592742
+      ],
+      "median": 0.060592742,
+      "maximum": 0.060592742,
+      "threshold_enforced": false,
+      "stdout_sha256": "3a0b0e77bf7ccfeae4d9e51d5869cc80db04367e583fa20ea107427bf36a208f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-compile_error",
+      "command": [
+        "unknown-command"
+      ],
+      "bytes": 390,
+      "sha256": "df14c5acc006d6a12df3a25da2ceeac2b605f54002e1ba5647024afa7eda1644",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.071390484
+      ],
+      "median": 0.071390484,
+      "maximum": 0.071390484,
+      "threshold_enforced": false,
+      "stdout_sha256": "df14c5acc006d6a12df3a25da2ceeac2b605f54002e1ba5647024afa7eda1644",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-docker",
+      "command": [
+        "docker",
+        "ps"
+      ],
+      "bytes": 5017,
+      "sha256": "73b1a316e4251be12eb8a591ccb1f7bbff6345d7fa60e5540e4ee7c9aa5937a1",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.063254161
+      ],
+      "median": 0.063254161,
+      "maximum": 0.063254161,
+      "threshold_enforced": false,
+      "stdout_sha256": "73b1a316e4251be12eb8a591ccb1f7bbff6345d7fa60e5540e4ee7c9aa5937a1",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-dotnet_fail",
+      "command": [
+        "dotnet",
+        "test"
+      ],
+      "bytes": 4903,
+      "sha256": "41b7a0e4867c7e9e3c5734b3188b33588e0e5601c2a7b606d8e481a7a7b21f03",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.063773515
+      ],
+      "median": 0.063773515,
+      "maximum": 0.063773515,
+      "threshold_enforced": false,
+      "stdout_sha256": "230eab89eb7bc87f942b68b8f1584b2765682608d81ced65be89f3a95f86102d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-dotnet_ok",
+      "command": [
+        "dotnet",
+        "test"
+      ],
+      "bytes": 335,
+      "sha256": "883e9bd15055bdd72c46e7d2b63b898e72aa98b6aef00898396dcff316eeb052",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.075347433
+      ],
+      "median": 0.075347433,
+      "maximum": 0.075347433,
+      "threshold_enforced": false,
+      "stdout_sha256": "055d6a3e660481b05ba90a70c047d50da72f0088d534e2b2c9a63083b00b7037",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-git_diff",
+      "command": [
+        "git",
+        "diff"
+      ],
+      "bytes": 565,
+      "sha256": "4c381aa1327117f4fc05717928a1a669d87f389a970a85b12a8efad78fe2beb8",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.06143957
+      ],
+      "median": 0.06143957,
+      "maximum": 0.06143957,
+      "threshold_enforced": false,
+      "stdout_sha256": "4c381aa1327117f4fc05717928a1a669d87f389a970a85b12a8efad78fe2beb8",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-git_log",
+      "command": [
+        "git",
+        "log"
+      ],
+      "bytes": 7597,
+      "sha256": "218da94c6652ad3538fb3b1d38bcdc321e1cdab583bb0e4f8b078272cf4aee29",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.065885113
+      ],
+      "median": 0.065885113,
+      "maximum": 0.065885113,
+      "threshold_enforced": false,
+      "stdout_sha256": "218da94c6652ad3538fb3b1d38bcdc321e1cdab583bb0e4f8b078272cf4aee29",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-json_large",
+      "command": [
+        "unknown-command"
+      ],
+      "bytes": 25394,
+      "sha256": "469a348990b0bcb254a7bded68c9680fb6bdecba175784b13172135ef02d8905",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.070402743
+      ],
+      "median": 0.070402743,
+      "maximum": 0.070402743,
+      "threshold_enforced": false,
+      "stdout_sha256": "469a348990b0bcb254a7bded68c9680fb6bdecba175784b13172135ef02d8905",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-logs",
+      "command": [
+        "unknown-command"
+      ],
+      "bytes": 8399,
+      "sha256": "f4890ee412c970b0040703110bd4e5a7e9a0397674d2d7f9f1f45bb7b2807d7f",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.069205678
+      ],
+      "median": 0.069205678,
+      "maximum": 0.069205678,
+      "threshold_enforced": false,
+      "stdout_sha256": "f4890ee412c970b0040703110bd4e5a7e9a0397674d2d7f9f1f45bb7b2807d7f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-npm_fail",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "bytes": 4697,
+      "sha256": "1c2a39618d00b3bb869504f9d7597958363ac6715b887f352b37c76901d75514",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.069237849
+      ],
+      "median": 0.069237849,
+      "maximum": 0.069237849,
+      "threshold_enforced": false,
+      "stdout_sha256": "1c2a39618d00b3bb869504f9d7597958363ac6715b887f352b37c76901d75514",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-npm_ok",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "bytes": 4650,
+      "sha256": "556b4a56d48abf03566cb346ab64b3f5bbb5f913b4f9e3495976b5bbcda54a8a",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.057350454
+      ],
+      "median": 0.057350454,
+      "maximum": 0.057350454,
+      "threshold_enforced": false,
+      "stdout_sha256": "556b4a56d48abf03566cb346ab64b3f5bbb5f913b4f9e3495976b5bbcda54a8a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-prose",
+      "command": [
+        "unknown-command"
+      ],
+      "bytes": 3487,
+      "sha256": "2e40988568d6d5b02eaf13daec554c6cf9c549b1b87fca2c10a17518a2806216",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.065681802
+      ],
+      "median": 0.065681802,
+      "maximum": 0.065681802,
+      "threshold_enforced": false,
+      "stdout_sha256": "2e40988568d6d5b02eaf13daec554c6cf9c549b1b87fca2c10a17518a2806216",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-psql",
+      "command": [
+        "psql"
+      ],
+      "bytes": 4588,
+      "sha256": "bbcbf545bf0e6a968128a191e553f4497d1f19f363f4e7e7606871431070a5a5",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.072811097
+      ],
+      "median": 0.072811097,
+      "maximum": 0.072811097,
+      "threshold_enforced": false,
+      "stdout_sha256": "d9ecff3180c9effd0f8a99cdb3c887cb9119cbc5ba90cac3db234255cd401fcc",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-pytest_fail",
+      "command": [
+        "pytest"
+      ],
+      "bytes": 5976,
+      "sha256": "6c325100a0f06bbba97e34a73c2b21ed2875ee678540741a01be902d54bfa67b",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.060312096
+      ],
+      "median": 0.060312096,
+      "maximum": 0.060312096,
+      "threshold_enforced": false,
+      "stdout_sha256": "6c325100a0f06bbba97e34a73c2b21ed2875ee678540741a01be902d54bfa67b",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "corpus-pytest_ok",
+      "command": [
+        "pytest"
+      ],
+      "bytes": 5780,
+      "sha256": "ec959ecf67607a8eb74180aab49be5e6686502805c3f4086de3df77448d9387f",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.052112625
+      ],
+      "median": 0.052112625,
+      "maximum": 0.052112625,
+      "threshold_enforced": false,
+      "stdout_sha256": "ec959ecf67607a8eb74180aab49be5e6686502805c3f4086de3df77448d9387f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "unicode-listing",
+      "command": [
+        "ls"
+      ],
+      "bytes": 18,
+      "sha256": "a0902b764d50ef1cdba48a353dfcc43c9d5666f2010fcd8e8ea6a27040daf75d",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.078633061
+      ],
+      "median": 0.078633061,
+      "maximum": 0.078633061,
+      "threshold_enforced": false,
+      "stdout_sha256": "a0902b764d50ef1cdba48a353dfcc43c9d5666f2010fcd8e8ea6a27040daf75d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "lost-diagnostic",
+      "command": [
+        "ls"
+      ],
+      "bytes": 36,
+      "sha256": "cc6ad7221d376e7e932e81b0b9a8ba9efcf96ba78e2658f0a00ddffacadc9bd9",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.061931061
+      ],
+      "median": 0.061931061,
+      "maximum": 0.061931061,
+      "threshold_enforced": false,
+      "stdout_sha256": "cc6ad7221d376e7e932e81b0b9a8ba9efcf96ba78e2658f0a00ddffacadc9bd9",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "raw-failure",
+      "command": [
+        "cargo",
+        "test"
+      ],
+      "bytes": 30,
+      "sha256": "8509c10fa37187f5ff8abea6ab1eb47ed263046147344f189a1ddc35b11e3208",
+      "threshold": null,
+      "child_exit": 1,
+      "seconds": [
+        0.057142424
+      ],
+      "median": 0.057142424,
+      "maximum": 0.057142424,
+      "threshold_enforced": false,
+      "stdout_sha256": "8509c10fa37187f5ff8abea6ab1eb47ed263046147344f189a1ddc35b11e3208",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "empty",
+      "command": [
+        "cat"
+      ],
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.026438063
+      ],
+      "median": 0.026438063,
+      "maximum": 0.026438063,
+      "threshold_enforced": false,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "no-newline",
+      "command": [
+        "cat"
+      ],
+      "bytes": 11,
+      "sha256": "2f4e089883eeda9da350218387fdd220f75e5faccf2722e831cba5fdee9292ca",
+      "threshold": null,
+      "child_exit": 0,
+      "seconds": [
+        0.066280795
+      ],
+      "median": 0.066280795,
+      "maximum": 0.066280795,
+      "threshold_enforced": false,
+      "stdout_sha256": "2f4e089883eeda9da350218387fdd220f75e5faccf2722e831cba5fdee9292ca",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "passed": true,
+  "failures": []
+}

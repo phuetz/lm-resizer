@@ -1,0 +1,30 @@
+{
+  "command": [
+    "bash",
+    "-c",
+    "grep -rn fn crates/lm-resizer-core/src/transforms"
+  ],
+  "cases": [
+    {
+      "label": "before",
+      "raw_bytes": 165762,
+      "view_bytes": 165762,
+      "raw_lines": 1434,
+      "seconds": 1.4811063050001394,
+      "exit_code": 0,
+      "view_restores_original": true,
+      "raw_sha256": "98d9a110aa4b1eef16a7e1ea3364ff4e11557f7fab5e0d72ce31d6fbffce2663"
+    },
+    {
+      "label": "after",
+      "raw_bytes": 165762,
+      "view_bytes": 80923,
+      "raw_lines": 1434,
+      "seconds": 0.5106856430065818,
+      "exit_code": 0,
+      "view_restores_original": true,
+      "raw_sha256": "98d9a110aa4b1eef16a7e1ea3364ff4e11557f7fab5e0d72ce31d6fbffce2663",
+      "tee_exact": true
+    }
+  ]
+}

@@ -12,6 +12,7 @@ export async function initLmResizerWasm(input) {
     "lm_resizer_alloc",
     "lm_resizer_free",
     "lm_resizer_compress_json",
+    "lm_resizer_retrieve_json",
     "lm_resizer_string_free"
   ]) {
     if (!exports[name]) {
@@ -79,7 +80,30 @@ export async function initLmResizerWasm(input) {
     }
   }
 
-  return { compressJson };
+  function retrieve(hash) {
+    const hashBytes = encoder.encode(hash);
+    const hashPtr = writeBytes(hashBytes);
+    let outPtr = 0;
+    try {
+      outPtr = exports.lm_resizer_retrieve_json(hashPtr, hashBytes.length);
+      if (!outPtr) {
+        throw new Error("lm_resizer_retrieve_json returned null");
+      }
+      const json = readCString(outPtr);
+      const report = JSON.parse(json);
+      if (report && report.error) {
+        throw new Error(report.error);
+      }
+      return report;
+    } finally {
+      if (outPtr) {
+        exports.lm_resizer_string_free(outPtr);
+      }
+      exports.lm_resizer_free(hashPtr, hashBytes.length);
+    }
+  }
+
+  return { compressJson, retrieve };
 }
 
 /**

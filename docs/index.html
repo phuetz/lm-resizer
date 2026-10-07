@@ -99,7 +99,7 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="brand"><span class="mark">&gt;_</span> lm-resizer <span class="version">0.1.0</span></div>
+    <div class="brand"><span class="mark">&gt;_</span> lm-resizer <span class="version">0.2.5 (pending release)</span></div>
     <nav>
       <a href="#why">Why</a>
       <a href="#together">Together</a>
@@ -161,7 +161,7 @@
             87 // expected `}`<br>
             <hr>
             <span class="green">RECOVERY</span><br>
-            [full output: ccr://sha256/...]
+            [raw: &lt;tee-id&gt;] → lm-resizer tee read &lt;tee-id&gt;
           </div>
         </div>
         <div class="metrics">
@@ -213,10 +213,10 @@
 
     <section id="agents">
       <h2>Connect Claude Code, Codex and MCP agents</h2>
-      <p class="lead">Install project instructions or native hook configs, then route noisy tool output through a consistent local compression layer.</p>
+      <p class="lead">Install MCP configuration or project instructions. Experimental native hook files require validation with your agent version.</p>
       <div class="grid2">
-        <pre><span class="c"># Native hook configs for Claude Code and Codex</span>
-<span class="k">lm-resizer</span> init-native-hooks --client all --project-dir . --force
+        <pre><span class="c"># Experimental native configs; agent activation unverified</span>
+<span class="k">lm-resizer</span> init-native-hooks --client all --project-dir .
 
 <span class="c"># Reversible agent guidance blocks</span>
 <span class="k">lm-resizer</span> install-hooks --client codex --project-dir . --force
@@ -245,13 +245,18 @@
 
     <section id="start">
       <h2>Quick start</h2>
+      <p>After the v0.2.5 binary release is published, install on Linux or macOS:</p>
+      <pre>bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.5/install.sh | sh'</pre>
+      <p>For Windows, use the <a href="https://github.com/phuetz/lm-resizer/blob/master/README.md">PowerShell command in the README</a>. Until publication, build from source:</p>
       <div class="grid2">
         <pre><span class="c"># Build the local binary</span>
 git clone https://github.com/phuetz/lm-resizer
 cd lm-resizer
-cargo build --release
+cargo install --quiet --path . --locked --root "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
 
-<span class="c"># Compress a file or command output</span>
+<span class="c"># Create a sample, then compress it</span>
+printf '{"status":"ok"}\n' &gt; tool-output.txt
 <span class="k">lm-resizer</span> compress --input tool-output.txt --json
 <span class="k">lm-resizer</span> exec --stream -- cargo test</pre>
         <pre><span class="c"># Run the local proxy</span>
@@ -259,7 +264,8 @@ cargo build --release
 
 <span class="c"># Evaluate real Claude/Codex session logs</span>
 <span class="k">lm-resizer</span> discover-sessions --agent all --markdown
-<span class="k">lm-resizer</span> eval fixtures/sessions --recursive --markdown</pre>
+<span class="k">lm-resizer</span> eval ~/.codex/sessions --recursive --markdown
+<span class="c"># eval requires existing session logs; skip on a new install</span></pre>
       </div>
     </section>
 
@@ -267,7 +273,7 @@ cargo build --release
       <h2>Part of a visible agent-tooling story</h2>
       <div class="about">
         <p><b>lm-resizer is the context-budget layer.</b> Code Explorer maps the codebase, Code Buddy orchestrates coding work, and lm-resizer keeps command output, diffs, logs and provider payloads small enough for agents to use effectively.</p>
-        <p>Created by <b>Patrice Huetz</b> as part of a practical toolchain for developers who want AI agents to work on real repositories, not just demos.</p>
+        <p>Created by <b>LM Resizer contributors</b> as part of a practical toolchain for developers who want AI agents to work on real repositories, not just demos.</p>
         <p>Built in Rust, local-first, Apache-2.0 licensed, and designed for real Claude Code, Codex and MCP workflows.</p>
       </div>
     </section>
@@ -276,7 +282,7 @@ cargo build --release
 <footer>
   <div class="wrap">
     Rust-native · MCP-ready · local-first · <a href="https://github.com/phuetz/lm-resizer">github.com/phuetz/lm-resizer</a><br>
-    © Patrice Huetz · companion to <a href="https://github.com/phuetz/code-explorer">Code Explorer</a> and <a href="https://github.com/phuetz/code-buddy">Code Buddy</a>
+    © LM Resizer contributors · companion to <a href="https://github.com/phuetz/code-explorer">Code Explorer</a> and <a href="https://github.com/phuetz/code-buddy">Code Buddy</a>
   </div>
 </footer>
 </body>

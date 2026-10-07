@@ -1,0 +1,8 @@
+{
+  "source_files_verified": 582,
+  "source_tree_matches_archive": true,
+  "version": "rtk 0.50.0",
+  "source_archive_sha256": "de415245d0eac1a6ac50a62e70047ec7025dbf75d41d1377e04e2d1c3f711965",
+  "binary_sha256": "ee22ea6f7dc70cc32e97027e63a00c06133b1eb173c38282563dfc4bbfcafad8",
+  "build": "cargo build --locked --release; unmodified upstream source"
+}

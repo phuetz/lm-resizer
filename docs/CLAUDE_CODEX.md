@@ -1,39 +1,58 @@
 # Using lm-resizer With Claude Code Or Codex
 
 lm-resizer is intentionally opt-in. Nothing rewrites commands until you
-explicitly install hook config. Claude Code and Codex can use it in four
+explicitly install hook config. Claude Code and Codex can use it in these
 practical ways:
 
 1. MCP compression tools
 2. explicit `lm-resizer exec -- ...` command wrapping
 3. project hook instructions in `CLAUDE.md` or `AGENTS.md`
-4. native hook config: a PreToolUse rewrite that actively routes supported
-   commands through `exec` (the model sees filtered, compressed output) plus
-   non-blocking PostToolUse savings records
+4. experimental native hook config and an offline-testable hook handler;
+   activation depends on the agent version and event protocol
 5. a drop-in **skill** (`.claude/skills/lm-resizer`, `.codex/skills/lm-resizer`)
    that teaches the agent when to wrap, how to recover raw output, and how to
    report savings — copy the folder into your repo or your home skills dir
 
 ## Install
 
-Build the binary first:
+Follow the [README](../README.md) for the exact clone command, official Rustup setup and native build prerequisites. Its prebuilt installer is usable only after v0.2.5 is published. Once the repository is cloned and Rustup is on PATH, build and
+install from its root. Source builds require Rust 1.91 or newer for the CLI (core/wasm: 1.86; pinned toolchain: 1.95.0), Git and native C/C++ build tools (MSVC C++ tools and Windows SDK in Visual Studio Build Tools on Windows):
+
+Linux/macOS (Bash):
 
 ```bash
-cargo build --release
+# Rust is required (1.91+). If `cargo --version` fails, install it first:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.95.0
+. "$HOME/.cargo/env"
+cargo install --quiet --path . --locked --root "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+lm-resizer --version
 ```
 
-Then add MCP configuration:
+Windows (PowerShell):
+
+```powershell
+$installRoot = Join-Path $env:USERPROFILE '.local'
+cargo install --quiet --path . --locked --root "$installRoot"
+$env:Path = "$installRoot\bin;$env:Path"
+lm-resizer --version
+```
+
+Then add MCP configuration (Claude Code writes project `.mcp.json`; Codex always writes user `~/.codex/config.toml`):
 
 ```bash
 lm-resizer install --client claude --scope project
 lm-resizer install --client codex --scope global
 ```
 
-For a repository-local setup:
+For several clients at once (Claude, Cursor and VS Code use project config;
+Codex always uses user config, including with `--scope project`):
 
 ```bash
-lm-resizer install --client all --scope project --project-dir /path/to/repo
+lm-resizer install --client all --scope project --project-dir .
 ```
+
+Run the project commands from your repository directory (`.`), or replace `.` with its actual path. The Codex installer replaces an existing `[mcp_servers.lm_resizer]` table without a backup. Save your user configuration first. `--scope project` with `--client all` does not isolate Codex configuration to the repository.
 
 Check the environment:
 
@@ -43,13 +62,13 @@ lm-resizer doctor --json
 
 ## Use Explicit Command Compression
 
-For noisy commands, ask the agent to run through `exec`:
+For noisy commands, ask the agent to run through `exec`. The search example requires ripgrep (`rg`); the Kubernetes example requires `kubectl` and a configured cluster. Neither is installed by LM Resizer:
 
 ```bash
 lm-resizer exec -- cargo test
 lm-resizer exec --stream -- cargo test
 lm-resizer exec -- rg -n "TODO|FIXME" .
-lm-resizer exec --json -- kubectl get pods -A
+lm-resizer exec --json -- kubectl get pods -A  # requires kubectl and a configured cluster
 ```
 
 `exec` runs the command, keeps useful errors and summaries, stores recoverable
@@ -81,16 +100,34 @@ The installer edits only the marked lm-resizer block. The helpers use
 `rewrite` and `rewrite-shell` to recommend an `lm-resizer exec -- ...` command;
 they do not execute target commands.
 
+`rewrite-shell` may rewrite independent segments joined by `&&`, `||`, or `;`.
+It shares the PreToolUse refusal: a command whose stdout or stderr is redirected
+(`>`, `>>`, `2>`, `&>`, `>&`), consumed by a pipe (including `| tee` and `|&`),
+fed by a here-document, captured by `$(...)` or backticks, or interactive is
+returned unchanged. Wrapping those forms used to glue the redirect onto
+`lm-resizer exec`, so the file or the next program received the reduced view.
+The hook is stricter: any shell operator, including `&&`, leaves the whole line raw.
+
 ## Add Native Hook Config
 
-Generate project-local Codex and Claude hook config:
+Generate experimental project-local hook config:
 
 ```bash
-lm-resizer init-native-hooks --client all --project-dir . --force
+lm-resizer init-native-hooks --client all --project-dir .
 ```
 
-This writes `.codex/hooks.json` and `.claude/settings.json`. The generated
-config wires `lm-resizer hook` on two `Bash` events:
+This writes `.codex/hooks.json` and `.claude/settings.json`. File generation
+and the handler can be tested locally; automatic execution and rewriting in
+a running Claude/Codex agent have not been verified. Confirm support for the
+configuration and events in your agent version before relying on them.
+An existing file is refused unless you pass `--force`, which overwrites the
+whole file: back up and merge any existing settings yourself.
+`uninstall-hooks` removes guidance blocks, generated helpers under
+`.lm-resizer/hooks`, and a native hook config file only when its contents still
+match what `init` / `init-native-hooks` would write. A divergent hand-edited
+file is left alone; restore or delete it yourself if needed. Repeating
+`install-hooks` or `init` with identical content is a no-op success.
+The generated config wires `lm-resizer hook` on two `Bash` events:
 
 - `PreToolUse` — if the command is supported (git, cargo, vitest/jest, rg, …),
   the hook emits `updatedInput` rewriting it to `lm-resizer exec -- <cmd>`, so
@@ -103,14 +140,22 @@ config wires `lm-resizer hook` on two `Bash` events:
 
 ## Audit Existing Sessions
 
-To estimate savings from previous Claude/Codex sessions:
+If no sessions exist yet, `discover-sessions --agent all --markdown` reports
+missing known directories. Once sessions exist, inspect their output:
 
 ```bash
 lm-resizer discover ~/.claude/projects --recursive --markdown
 lm-resizer discover ~/.codex --recursive --json
 ```
 
-The discover command scans logs and session JSON for command/output pairs
+Windows PowerShell (native command arguments do not expand `~`; use the explicit profile path):
+
+```powershell
+lm-resizer discover "$env:USERPROFILE\.claude\projects" --recursive --markdown
+lm-resizer discover "$env:USERPROFILE\.codex" --recursive --json
+```
+
+Explicit paths must exist. The discover command scans logs and session JSON for command/output pairs
 without executing anything.
 
 ## Review Savings
@@ -118,8 +163,17 @@ without executing anything.
 ```bash
 lm-resizer stats --markdown
 lm-resizer tee list --json
-lm-resizer tee read <tee-file-name>
+tee_listing=$(lm-resizer tee list)
+tee_file=${tee_listing%% *}
+lm-resizer tee read "$tee_file"
 ```
 
 Use `tee` only when you need the original raw output that was compressed out of
 the agent-facing response.
+
+`stats` reports exact text token counts using **tiktoken-rs / o200k_base** for
+new `exec` and MCP proxy records. JSON separates `tokens_saved` and
+`measured_commands` from unmeasured historical records; only those historical
+records retain `estimated_tokens_saved` with the explicit legacy bytes / 4
+method. These reference counts do not measure provider billing. See
+[the counting method](TOKEN-STATISTICS.md).

@@ -2,19 +2,19 @@
   "$schema": "https://code.claude.com/schemas/marketplace.json",
   "name": "phuetz-tools",
   "owner": {
-    "name": "Patrice Huetz",
+    "name": "LM Resizer contributors",
     "url": "https://github.com/phuetz"
   },
-  "description": "Tools for AI coding agents by Patrice Huetz: lm-resizer (context budget), Code Explorer (codebase knowledge graph), Code Buddy (agent).",
+  "description": "Tools for AI coding agents by LM Resizer contributors: lm-resizer (context budget), Code Explorer (codebase knowledge graph), Code Buddy (agent).",
   "plugins": [
     {
       "name": "lm-resizer",
       "displayName": "lm-resizer",
       "description": "Filter noisy command output before it reaches the model; raw output stays recoverable. Skill + MCP server.",
       "source": "./",
-      "version": "0.2.3",
+      "version": "0.2.5",
       "author": {
-        "name": "Patrice Huetz"
+        "name": "LM Resizer contributors"
       },
       "license": "Apache-2.0",
       "keywords": [
@@ -36,7 +36,7 @@
       },
       "version": "0.2.0",
       "author": {
-        "name": "Patrice Huetz"
+        "name": "LM Resizer contributors"
       },
       "license": "BUSL-1.1",
       "keywords": [

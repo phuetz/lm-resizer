@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to package, for example v0.2.3"
+        description: "Existing tag to package, for example v0.2.5"
         required: true
         type: string
       confirm:
@@ -14,6 +14,11 @@ on:
 
 permissions:
   contents: read
+
+# Keep release jobs on the stable toolchain installed by the action, despite
+# the local MSRV pin. CI tests the minimum separately in ci.yml.
+env:
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
   package:
@@ -51,12 +56,46 @@ jobs:
           CONFIRM: ${{ inputs.confirm }}
         run: node scripts/check-release-version.cjs
 
-      - name: Check and package POSIX release
+      - name: Check release (native toolchain)
         if: runner.os != 'Windows'
         shell: bash
+        run: bash scripts/check-release.sh
+
+      # The Linux archive must not use the ubuntu-latest binary: it needs
+      # GLIBC_2.39 and libstdc++.so.6. Build the static musl binary in Alpine
+      # (musl-native C and C++ compilers) and package that one instead.
+      - name: Build the static Linux binary (musl, Alpine container)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/build-linux-static.sh
+
+      - name: Package Linux release from the static binary
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          LM_RESIZER_BINARY: target/static/x86_64-unknown-linux-musl/release/lm-resizer
+          LM_RESIZER_REQUIRE_STATIC: "1"
         run: |
-          bash scripts/check-release.sh
+          set -euo pipefail
+          export LM_RESIZER_BINARY="$PWD/$LM_RESIZER_BINARY"
           bash scripts/package-release.sh
+
+      - name: Prove the Linux archive starts on old glibc and on Alpine
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf dist/lm-resizer-*-linux-x86_64.tar.gz -C "$RUNNER_TEMP"
+          bin="$(ls "$RUNNER_TEMP"/lm-resizer-*-linux-x86_64/lm-resizer)"
+          for image in debian:12 ubuntu:20.04 ubuntu:22.04 alpine:latest; do
+            echo "== $image"
+            docker run --rm -v "$bin:/lmr:ro" "$image" sh -c '/lmr --version && /lmr exec -- echo bonjour'
+          done
+
+      - name: Package non-Linux POSIX release
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash scripts/package-release.sh
 
       - name: Check and package Windows release
         if: runner.os == 'Windows'

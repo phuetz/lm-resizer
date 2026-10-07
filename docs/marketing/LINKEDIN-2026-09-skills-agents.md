@@ -1,4 +1,4 @@
-# LinkedIn — skills lm-resizer + Code Explorer pour Claude Code et Codex (brouillon, à publier par Patrice)
+# LinkedIn — skills lm-resizer + Code Explorer pour Claude Code et Codex (brouillon, à publier)
 
 Faits vérifiés le 10/09/2026 : dossiers `.claude/skills/<outil>` et `.codex/skills/<outil>` dans les deux dépôts ; la compétence lm-resizer
 n'exécute que `lm-resizer exec --raw-on-failure -- <commande>` ; Code Explorer : `status` → `analyze` → `context` / `impact` / `query`.

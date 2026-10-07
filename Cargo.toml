@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+default-members = ["."]
 members = [
   ".",
   "bench",
@@ -9,7 +10,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.86"
 license = "Apache-2.0"
 repository = "https://github.com/phuetz/lm-resizer"
 authors = ["lm-resizer contributors"]
@@ -29,9 +30,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 
 [package]
 name = "lm-resizer"
-version = "0.2.3"
+version = "0.2.5"
 edition.workspace = true
-rust-version.workspace = true
+rust-version = "1.91"
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
@@ -45,6 +46,9 @@ default = []
 magika = ["lm-resizer-core/magika"]
 
 [dependencies]
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+tempfile = "3"
 anyhow = { workspace = true }
 axum = { workspace = true }
 base64 = "0.22"
@@ -66,5 +70,20 @@ tokio-tungstenite = "0.24"
 toml = "0.8"
 walkdir = "2"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
 [dev-dependencies]
 tempfile = "3"
+
+[[example]]
+name = "perf"
+path = "bench/perf/run.rs"
+
+[[test]]
+name = "native_contract"
+path = "bench/contracts/native_contract.rs"
+
+[[test]]
+name = "native_surface"
+path = "bench/contracts/native_surface.rs"

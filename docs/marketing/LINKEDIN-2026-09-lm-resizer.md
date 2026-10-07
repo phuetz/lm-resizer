@@ -10,7 +10,7 @@ Visuel conseillé : `docs/lm-resizer-hero.png`. Liens : https://www.npmjs.com/pa
 
 Un agent de code passe une part énorme de sa fenêtre de contexte à lire du bruit : sorties de tests, logs de npm, diffs, listings. Ça coûte des tokens, ça ralentit, et ça cache l'erreur qui compte.
 
-lm-resizer se met entre la commande et le modèle pour réduire le bruit. Le banc reproductible compare 22 sorties synthétiques à RTK et Headroom, avec des oracles de conservation ; consulter ses résultats avant de citer un gain. La sortie brute reste récupérable localement.
+lm-resizer se met entre la commande et le modèle pour réduire le bruit. Le banc reproductible compare 22 sorties synthétiques à deux autres outils, avec des oracles de conservation ; consulter ses résultats avant de citer un gain. La sortie brute reste récupérable localement.
 
 C'est en Rust, ça marche en enveloppe de commande, en proxy HTTP, en serveur MCP, et en hook pour Claude Code et Codex. Compression « consciente de la question » : quand il faut couper, il garde ce qui répond à ce que vous demandez.
 
@@ -28,7 +28,7 @@ Les grandes fenêtres de contexte ne rendent pas le bruit gratuit. Elles le rend
 
 Plus la fenêtre de contexte est grande, plus le bruit coûte cher.
 
-lm-resizer, notre outil open source en Rust, filtre la sortie des commandes avant qu'elle n'atteigne l'agent de code. Un banc reproductible compare 22 sorties synthétiques à RTK et Headroom et contrôle la présence des faits attendus.
+lm-resizer, notre outil open source en Rust, filtre la sortie des commandes avant qu'elle n'atteigne l'agent de code. Un banc reproductible compare 22 sorties synthétiques à deux autres outils et contrôle la présence des faits attendus.
 
 Il s'installe en hook dans Claude Code et Codex, en proxy devant n'importe quelle API compatible OpenAI ou Anthropic, ou en serveur MCP. Le module WebAssembly vient d'arriver sur npm.
 
@@ -44,7 +44,7 @@ github.com/phuetz/lm-resizer
 
 Your coding agent burns most of its context on noise: test output, package manager logs, diffs. lm-resizer sits between the command and the model and keeps the signal.
 
-The reproducible benchmark compares 22 synthetic command outputs with RTK and Headroom, checking declared facts in each result. Full raw output remains locally recoverable.
+The reproducible benchmark compares 22 synthetic command outputs with two other tools, checking declared facts in each result. Full raw output remains locally recoverable.
 
 Rust. CLI wrapper, HTTP proxy, MCP server, Claude Code / Codex hooks. Query-aware compression. The WebAssembly module is now on npm with a bundled loader.
 

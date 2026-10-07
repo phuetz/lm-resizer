@@ -1,0 +1,129 @@
+{
+  "sha256": {
+    "before": "48cafc2c9c9ac4eb76e38daa736659be36c5d236c4b3265b2ab499bb738984dc",
+    "after": "e70e3ba6c4da6b1b183203c522f48f32e8f5032cf6519d80ef688eaa774f245f"
+  },
+  "repetitions": 9,
+  "cases": [
+    {
+      "input": "ascii",
+      "samples_ms": {
+        "before": [
+          25.177269999403507,
+          8.022797002922744,
+          8.679087011842057,
+          8.537130983313546,
+          9.525093977572396,
+          9.008716006064788,
+          6.972828006837517,
+          8.687503985129297,
+          9.604874008800834
+        ],
+        "after": [
+          19.021594984224066,
+          5.799998005386442,
+          5.66246997914277,
+          5.720960005419329,
+          6.115389987826347,
+          5.961100017884746,
+          5.593892012257129,
+          6.560654001077637,
+          5.597267998382449
+        ]
+      },
+      "median_ms": {
+        "before": 8.687503985129297,
+        "after": 5.799998005386442
+      },
+      "first_count_median_ms": {
+        "before": 4.153,
+        "after": 1.279
+      },
+      "profiles": {
+        "before": [
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.004284s\n",
+          "profile tokenizer_init: 0.000009s\nprofile original_token_count: 0.003022s\n",
+          "profile tokenizer_init: 0.000009s\nprofile original_token_count: 0.003502s\n",
+          "profile tokenizer_init: 0.000012s\nprofile original_token_count: 0.004153s\n",
+          "profile tokenizer_init: 0.000011s\nprofile original_token_count: 0.004696s\n",
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.004563s\n",
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.002642s\n",
+          "profile tokenizer_init: 0.000010s\nprofile original_token_count: 0.004056s\n",
+          "profile tokenizer_init: 0.000013s\nprofile original_token_count: 0.005013s\n"
+        ],
+        "after": [
+          "profile tokenizer_init: 0.000018s\nprofile original_token_count: 0.001852s\n",
+          "profile tokenizer_init: 0.000009s\nprofile original_token_count: 0.001279s\n",
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.001208s\n",
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.001295s\n",
+          "profile tokenizer_init: 0.000009s\nprofile original_token_count: 0.001203s\n",
+          "profile tokenizer_init: 0.000009s\nprofile original_token_count: 0.001389s\n",
+          "profile tokenizer_init: 0.000009s\nprofile original_token_count: 0.001193s\n",
+          "profile tokenizer_init: 0.000009s\nprofile original_token_count: 0.001297s\n",
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.001186s\n"
+        ]
+      },
+      "exact_counts_equal": true
+    },
+    {
+      "input": "unicode",
+      "samples_ms": {
+        "before": [
+          8.589149016188458,
+          8.438135992037132,
+          9.022110985824838,
+          10.117917001480237,
+          9.519123006612062,
+          9.851676994003356,
+          8.17790799192153,
+          8.412166993366554,
+          9.121638024225831
+        ],
+        "after": [
+          8.97523300955072,
+          8.454055991023779,
+          9.176641004160047,
+          10.415263997856528,
+          9.499997016973794,
+          9.533389995340258,
+          9.389499988174066,
+          8.42200597980991,
+          8.693554991623387
+        ]
+      },
+      "median_ms": {
+        "before": 9.022110985824838,
+        "after": 9.176641004160047
+      },
+      "first_count_median_ms": {
+        "before": 4.420999999999999,
+        "after": 4.261
+      },
+      "profiles": {
+        "before": [
+          "profile tokenizer_init: 0.000009s\nprofile original_token_count: 0.004311s\n",
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.004309s\n",
+          "profile tokenizer_init: 0.000010s\nprofile original_token_count: 0.004421s\n",
+          "profile tokenizer_init: 0.000010s\nprofile original_token_count: 0.004988s\n",
+          "profile tokenizer_init: 0.000012s\nprofile original_token_count: 0.004703s\n",
+          "profile tokenizer_init: 0.000007s\nprofile original_token_count: 0.005339s\n",
+          "profile tokenizer_init: 0.000011s\nprofile original_token_count: 0.003996s\n",
+          "profile tokenizer_init: 0.000007s\nprofile original_token_count: 0.004085s\n",
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.004620s\n"
+        ],
+        "after": [
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.004401s\n",
+          "profile tokenizer_init: 0.000007s\nprofile original_token_count: 0.004215s\n",
+          "profile tokenizer_init: 0.000007s\nprofile original_token_count: 0.004261s\n",
+          "profile tokenizer_init: 0.000009s\nprofile original_token_count: 0.004992s\n",
+          "profile tokenizer_init: 0.000009s\nprofile original_token_count: 0.004709s\n",
+          "profile tokenizer_init: 0.000007s\nprofile original_token_count: 0.004171s\n",
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.004289s\n",
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.004169s\n",
+          "profile tokenizer_init: 0.000008s\nprofile original_token_count: 0.004248s\n"
+        ]
+      },
+      "exact_counts_equal": true
+    }
+  ]
+}

@@ -56,7 +56,7 @@ fn check_invariants(input: &str, output: &str, filter_name: &str) {
 }
 
 fn apply_prose(input: &str) -> String {
-    let compressor = ProseCompressor::default();
+    let compressor = ProseCompressor;
     let store = InMemoryCcrStore::default();
     let ctx = CompressionContext {
         query: String::new(),

@@ -1,0 +1,44 @@
+{
+  "host": "Linux",
+  "native_windows": false,
+  "binary_sha256": "cc3b84d873f18bc57979385dc8c4cca754b8f4fc7b056e0a8259f112c4b38d63",
+  "cases": [
+    {
+      "case": "oem850",
+      "bytes": 17,
+      "exit": 0,
+      "recovered_exact": true
+    },
+    {
+      "case": "crlf",
+      "bytes": 16,
+      "exit": 0,
+      "recovered_exact": true
+    },
+    {
+      "case": "long-failure",
+      "bytes": 25415,
+      "exit": 23,
+      "recovered_exact": true
+    },
+    {
+      "case": "long-success",
+      "bytes": 25415,
+      "exit": 0,
+      "recovered_exact": true
+    },
+    {
+      "case": "displayed-ccr-original",
+      "keys": 1,
+      "recovered_exact": true
+    },
+    {
+      "case": "npm-missing",
+      "diagnostic_retained": true
+    },
+    {
+      "case": "npm-passing",
+      "diagnostic_retained": true
+    }
+  ]
+}

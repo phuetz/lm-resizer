@@ -1,6 +1,6 @@
 [package]
 name = "lm-resizer-core"
-version = "0.2.3"
+version = "0.2.5"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -98,7 +98,9 @@ hf-hub = { version = "0.4", default-features = false, features = ["ureq", "rustl
 # Native-only deps (excluded from wasm32 builds — see notes in `[dependencies]`).
 rayon = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
-tiktoken-rs = "0.11"
+tiktoken-rs = "=0.11.0"
+fancy-regex = "0.17"
+rustc-hash = "1"
 # `tokenizers` default features pull in `onig` (vendors oniguruma, builds
 # without a system dep on macOS/Linux); C, so native-only.
 tokenizers = "0.22"
@@ -138,3 +140,6 @@ harness = false
 [[bench]]
 name = "auth_mode"
 harness = false
+
+[build-dependencies]
+tiktoken-rs = "=0.11.0"

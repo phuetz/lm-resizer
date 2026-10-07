@@ -1,0 +1,34 @@
+{
+  "binary_sha256": "34fe6e4980df4debe8fadecd13214203aefcbf925d79af463073d53dc2db78ce",
+  "origin": "actual counter-review input files; synthetic tool output as described by reviewer",
+  "cases": [
+    {
+      "blocker": "B1",
+      "raw_sha256": "1884edbb786aa2559a067e76630fcf446b79801b7d4b89c33a251983db154a01",
+      "old_view_missing": 301,
+      "corrected_view_missing": 0,
+      "literal_equal": true
+    },
+    {
+      "blocker": "B2",
+      "raw_sha256": "fd03b0fafe89ad4a394751b7fb32e20bc47976bcdc8b5e1eeec24ae66365bf63",
+      "old_view_missing": 126,
+      "corrected_view_missing": 0,
+      "literal_equal": true
+    },
+    {
+      "blocker": "B3",
+      "raw_sha256": "0108723c9a29e15c1c88802277a0e5a2f7ef6c03358dd1103a9ebabc23d816c3",
+      "old_view_missing": 1,
+      "corrected_view_missing": 0,
+      "literal_equal": true
+    },
+    {
+      "blocker": "B4",
+      "raw_sha256": "02208c4a7addef0b7e2f934c2555a95350b416f8eea9003afa1b41e80be9212f",
+      "old_view_missing": 10003,
+      "corrected_view_missing": 0,
+      "literal_equal": true
+    }
+  ]
+}

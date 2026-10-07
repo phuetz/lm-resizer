@@ -6,15 +6,17 @@
 //! tests "byte-equal" rather than "approximate".
 //!
 //! Initialization (loading the BPE table) is non-trivial. Each encoding is
-//! built lazily on first use and shared via `LazyLock<Arc<CoreBPE>>`, so the
-//! first `for_model` call pays the cost and every subsequent call is cheap.
+//! built lazily on first use and shared. o200k counting loads a packed rank
+//! table and lookup index derived at build time from tiktoken-rs, avoiding runtime
+//! vocabulary allocations, hash-table reconstruction and decoder construction
+//! and vocabulary sorting. Other encodings use the reference `CoreBPE`.
 
 use std::sync::{Arc, LazyLock};
 
 use thiserror::Error;
 use tiktoken_rs::CoreBPE;
 
-use super::{Backend, Tokenizer};
+use super::{count_only::CountOnlyBpe, Backend, Tokenizer};
 
 #[derive(Debug, Error)]
 pub enum TiktokenError {
@@ -27,8 +29,10 @@ pub enum TiktokenError {
 /// Lazy-built shared BPE for the four named encodings. Init failure here would
 /// indicate `tiktoken-rs` itself is broken; we treat that as a programmer error
 /// and panic.
-static O200K: LazyLock<Arc<CoreBPE>> =
-    LazyLock::new(|| Arc::new(tiktoken_rs::o200k_base().expect("o200k_base init")));
+static O200K: LazyLock<Arc<CountOnlyBpe>> = LazyLock::new(|| Arc::new(CountOnlyBpe::new()));
+#[cfg(test)]
+static O200K_REFERENCE: LazyLock<CoreBPE> =
+    LazyLock::new(|| tiktoken_rs::o200k_base().expect("reference o200k_base"));
 static CL100K: LazyLock<Arc<CoreBPE>> =
     LazyLock::new(|| Arc::new(tiktoken_rs::cl100k_base().expect("cl100k_base init")));
 static P50K: LazyLock<Arc<CoreBPE>> =
@@ -40,7 +44,21 @@ static R50K: LazyLock<Arc<CoreBPE>> =
 pub struct TiktokenCounter {
     model: String,
     encoding_name: &'static str,
-    bpe: Arc<CoreBPE>,
+    bpe: CounterBpe,
+}
+
+enum CounterBpe {
+    Counting(Arc<CountOnlyBpe>),
+    Reference(Arc<CoreBPE>),
+}
+
+impl CounterBpe {
+    fn count(&self, text: &str) -> usize {
+        match self {
+            Self::Counting(bpe) => bpe.count(text),
+            Self::Reference(bpe) => bpe.encode_ordinary(text).len(),
+        }
+    }
 }
 
 impl std::fmt::Debug for TiktokenCounter {
@@ -58,10 +76,10 @@ impl TiktokenCounter {
     pub fn for_model(model: &str) -> Result<Self, TiktokenError> {
         let encoding_name = encoding_for(model)?;
         let bpe = match encoding_name {
-            "o200k_base" => O200K.clone(),
-            "cl100k_base" => CL100K.clone(),
-            "p50k_base" => P50K.clone(),
-            "r50k_base" => R50K.clone(),
+            "o200k_base" => CounterBpe::Counting(O200K.clone()),
+            "cl100k_base" => CounterBpe::Reference(CL100K.clone()),
+            "p50k_base" => CounterBpe::Reference(P50K.clone()),
+            "r50k_base" => CounterBpe::Reference(R50K.clone()),
             // unreachable: encoding_for only returns the four names above.
             _ => return Err(TiktokenError::UnknownEncoding(model.to_string())),
         };
@@ -96,7 +114,39 @@ impl Tokenizer for TiktokenCounter {
         // `encode` raises (because `disallowed_special="all"`) while we treat
         // it as ordinary text. We chose tolerance over panic since proxy users
         // can legitimately send those substrings; document for future readers.
-        self.bpe.encode_ordinary(text).len()
+        // o200k's letter prefixes exclude CR/LF; numbers cannot cross LF.
+        // Its whitespace/newline branch ends at the last LF in a whitespace
+        // run. Punctuation's trailing [\r\n/]* stops at indentation or a
+        // a non-slash graphic character. Split only at those boundaries, never
+        // at arbitrary byte/line offsets (blank lines and slashes can merge).
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.encoding_name == "o200k_base" && text.len() >= 128 * 1024 {
+            use rayon::prelude::*;
+            let bytes = text.as_bytes();
+            let mut chunks = Vec::new();
+            let mut start = 0;
+            for (i, &byte) in bytes.iter().enumerate() {
+                if i + 1 - start < 32 * 1024 || byte != b'\n' {
+                    continue;
+                }
+                let mut next = i + 1;
+                while next < bytes.len() && matches!(bytes[next], b' ' | b'\t') {
+                    next += 1;
+                }
+                let safe = bytes
+                    .get(next)
+                    .is_some_and(|b| b.is_ascii_graphic() && (next > i + 1 || *b != b'/'));
+                if safe {
+                    chunks.push(&text[start..i + 1]);
+                    start = i + 1;
+                }
+            }
+            chunks.push(&text[start..]);
+            if chunks.len() > 1 {
+                return chunks.par_iter().map(|chunk| self.bpe.count(chunk)).sum();
+            }
+        }
+        self.bpe.count(text)
     }
 
     fn backend(&self) -> Backend {
@@ -249,12 +299,81 @@ mod tests {
     }
 
     #[test]
+    fn ascii_numbers_and_control_whitespace_match_reference() {
+        let counter = TiktokenCounter::for_model("gpt-4o").unwrap();
+        for text in [
+            "01234567890123456789",
+            "x100000foo",
+            "\x0B012345\x0C 00\tA1",
+            "I'M we'll isn't camelCase ABC123 /\r\n",
+        ] {
+            assert_eq!(
+                counter.count_text(text),
+                O200K_REFERENCE.encode_ordinary(text).len(),
+                "{text:?}"
+            );
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn ascii_specialization_matches_reference(bytes in proptest::collection::vec(0u8..128, 0..1500)) {
+            let text = String::from_utf8(bytes).unwrap();
+            let counter = TiktokenCounter::for_model("gpt-4o").unwrap();
+            proptest::prop_assert_eq!(counter.count_text(&text), O200K_REFERENCE.encode_ordinary(&text).len());
+        }
+        #[test]
+        fn count_only_matches_reference_for_unicode(text in proptest::collection::vec(proptest::char::any(), 0..1000)) {
+            let text: String = text.into_iter().collect();
+            let counter = TiktokenCounter::for_model("gpt-4o").unwrap();
+            proptest::prop_assert_eq!(counter.count_text(&text), O200K_REFERENCE.encode_ordinary(&text).len());
+        }
+    }
+
+    #[test]
+    fn parallel_counts_match_unsplit_bpe_at_safe_boundaries() {
+        let counter = TiktokenCounter::for_model("gpt-4o").unwrap();
+        let lines = [
+            "ASCII camelCase isn't I'm we'll\r\n",
+            "1234567890\n",
+            "éà 中文 العربية 🦀\n",
+            "punctuation!!!\n///\nA\n",
+            " \t\r\n\n   trailing spaces   \nNext\n",
+            "\n\n\n9 leading numbers\n",
+            "<|endoftext|>\nQ\n",
+            "code;\n    const value = 1;\n    }\n\t//comment\n",
+            "./path/to/file.ts\n./more.ts\n!punctuation\n}\n",
+            "punctuation!\n\t /slashes\n\t\n  next\n",
+            "\n   éà\n    中文\n",
+        ];
+        let text = lines.concat().repeat(1500);
+        assert!(text.len() > 128 * 1024);
+        for suffix in ["", "   ", "\r\n", "\n///", "終"] {
+            let input = format!("{text}{suffix}");
+            assert_eq!(
+                counter.count_text(&input),
+                O200K_REFERENCE.encode_ordinary(&input).len(),
+                "suffix {suffix:?}"
+            );
+        }
+        // A long input without safe boundaries must use the unsplit path.
+        let text = "éà 中文 / ".repeat(15000);
+        assert_eq!(
+            counter.count_text(&text),
+            O200K_REFERENCE.encode_ordinary(&text).len()
+        );
+    }
+
+    #[test]
     fn shared_bpe_instances() {
         // Two counters for the same encoding should share the underlying BPE
         // (same Arc), proving the LazyLock cache works.
         let a = TiktokenCounter::for_model("gpt-4o").unwrap();
         let b = TiktokenCounter::for_model("gpt-4o-mini").unwrap();
-        assert!(Arc::ptr_eq(&a.bpe, &b.bpe));
+        match (&a.bpe, &b.bpe) {
+            (CounterBpe::Counting(a), CounterBpe::Counting(b)) => assert!(Arc::ptr_eq(a, b)),
+            _ => panic!("expected o200k counting tables"),
+        }
     }
 
     #[test]

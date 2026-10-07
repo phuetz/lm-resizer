@@ -159,17 +159,17 @@ mod redis_tests {
     use super::*;
     use lm_resizer_core::ccr::backends::RedisCcrStore;
 
-    /// Reads `HEADROOM_TEST_REDIS_URL` from the environment — when the
+    /// Reads `LM_RESIZER_TEST_REDIS_URL` from the environment — when the
     /// feature is on but no URL is configured we silently no-op. CI
     /// runs the redis test in a docker-compose'd matrix.
     fn redis_url() -> Option<String> {
-        std::env::var("HEADROOM_TEST_REDIS_URL").ok()
+        std::env::var("LM_RESIZER_TEST_REDIS_URL").ok()
     }
 
     #[test]
     fn redis_round_trip() {
         let Some(url) = redis_url() else {
-            eprintln!("skipping redis_round_trip: HEADROOM_TEST_REDIS_URL not set");
+            eprintln!("skipping redis_round_trip: LM_RESIZER_TEST_REDIS_URL not set");
             return;
         };
         let store = RedisCcrStore::open(&url, 300).expect("open redis store");
@@ -182,7 +182,9 @@ mod redis_tests {
     #[test]
     fn redis_round_trip_via_from_config() {
         let Some(url) = redis_url() else {
-            eprintln!("skipping redis_round_trip_via_from_config: HEADROOM_TEST_REDIS_URL not set");
+            eprintln!(
+                "skipping redis_round_trip_via_from_config: LM_RESIZER_TEST_REDIS_URL not set"
+            );
             return;
         };
         let cfg = CcrBackendConfig::Redis {

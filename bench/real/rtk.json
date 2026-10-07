@@ -1,0 +1,753 @@
+{
+  "version": "rtk 0.50.0",
+  "binary_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+  "summary": {
+    "cl100k_base": {
+      "median": 43.278385675714084,
+      "mean": 47.32730216256079,
+      "cases": 30
+    },
+    "o200k_base": {
+      "median": 43.2088285229202,
+      "mean": 47.41117177364431,
+      "cases": 30
+    }
+  },
+  "cases": [
+    {
+      "id": "ripgrep-log",
+      "mode": "identical-capture",
+      "seconds": 0.002688442007638514,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2982,
+          "output": 100
+        },
+        "o200k_base": {
+          "raw": 2973,
+          "output": 101
+        }
+      },
+      "output_bytes": 259,
+      "facts": 183,
+      "oracle_missing_count": 179,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "ripgrep-diff",
+      "mode": "identical-capture",
+      "seconds": 0.0052308889862615615,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 227,
+          "output": 155
+        },
+        "o200k_base": {
+          "raw": 228,
+          "output": 156
+        }
+      },
+      "output_bytes": 463,
+      "facts": 24,
+      "oracle_missing_count": 8,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "ripgrep-status",
+      "mode": "identical-capture",
+      "seconds": 0.0048360890068579465,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 23,
+          "output": 22
+        },
+        "o200k_base": {
+          "raw": 23,
+          "output": 22
+        }
+      },
+      "output_bytes": 102,
+      "facts": 3,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "ripgrep-show",
+      "mode": "live-command",
+      "seconds": 0.2993970479874406,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 103,
+          "output": 103
+        },
+        "o200k_base": {
+          "raw": 104,
+          "output": 104
+        }
+      },
+      "output_bytes": 265,
+      "facts": 7,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "ripgrep-ls",
+      "mode": "live-command",
+      "seconds": 0.08554665499832481,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 837,
+          "output": 245
+        },
+        "o200k_base": {
+          "raw": 837,
+          "output": 245
+        }
+      },
+      "output_bytes": 543,
+      "facts": 31,
+      "oracle_missing_count": 31,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "ripgrep-recursive",
+      "mode": "live-command",
+      "seconds": 0.27612179997959174,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 1599,
+          "output": 285
+        },
+        "o200k_base": {
+          "raw": 1639,
+          "output": 285
+        }
+      },
+      "output_bytes": 738,
+      "facts": 343,
+      "oracle_missing_count": 343,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "ripgrep-find",
+      "mode": "identical-capture",
+      "seconds": 0.00481488902005367,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 3600,
+          "output": 586
+        },
+        "o200k_base": {
+          "raw": 3695,
+          "output": 596
+        }
+      },
+      "output_bytes": 1431,
+      "facts": 351,
+      "oracle_missing_count": 289,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "ripgrep-grep",
+      "mode": "identical-capture",
+      "seconds": 0.005258591001620516,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 243,
+          "output": 243
+        },
+        "o200k_base": {
+          "raw": 243,
+          "output": 243
+        }
+      },
+      "output_bytes": 929,
+      "facts": 9,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "ripgrep-cat",
+      "mode": "live-command",
+      "seconds": 0.08930916100507602,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 63962,
+          "output": 63962
+        },
+        "o200k_base": {
+          "raw": 63937,
+          "output": 63937
+        }
+      },
+      "output_bytes": 246353,
+      "facts": 1,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "ripgrep-test",
+      "mode": "identical-capture",
+      "seconds": 0.0033221300109289587,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 5064,
+          "output": 231
+        },
+        "o200k_base": {
+          "raw": 5081,
+          "output": 232
+        }
+      },
+      "output_bytes": 948,
+      "facts": 20,
+      "oracle_missing_count": 13,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "fastapi-log",
+      "mode": "identical-capture",
+      "seconds": 0.0044443850056268275,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2190,
+          "output": 89
+        },
+        "o200k_base": {
+          "raw": 2172,
+          "output": 88
+        }
+      },
+      "output_bytes": 220,
+      "facts": 110,
+      "oracle_missing_count": 107,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "fastapi-diff",
+      "mode": "identical-capture",
+      "seconds": 0.004871705983532593,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 259,
+          "output": 223
+        },
+        "o200k_base": {
+          "raw": 279,
+          "output": 237
+        }
+      },
+      "output_bytes": 748,
+      "facts": 10,
+      "oracle_missing_count": 4,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "fastapi-status",
+      "mode": "identical-capture",
+      "seconds": 0.004144551989156753,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 23,
+          "output": 22
+        },
+        "o200k_base": {
+          "raw": 23,
+          "output": 22
+        }
+      },
+      "output_bytes": 102,
+      "facts": 3,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "fastapi-show",
+      "mode": "live-command",
+      "seconds": 0.11734795200754888,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 106,
+          "output": 106
+        },
+        "o200k_base": {
+          "raw": 107,
+          "output": 107
+        }
+      },
+      "output_bytes": 291,
+      "facts": 7,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "fastapi-ls",
+      "mode": "live-command",
+      "seconds": 0.09338363198912703,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 528,
+          "output": 135
+        },
+        "o200k_base": {
+          "raw": 529,
+          "output": 136
+        }
+      },
+      "output_bytes": 323,
+      "facts": 20,
+      "oracle_missing_count": 20,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "fastapi-recursive",
+      "mode": "live-command",
+      "seconds": 0.203093269985402,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 35089,
+          "output": 137
+        },
+        "o200k_base": {
+          "raw": 35310,
+          "output": 137
+        }
+      },
+      "output_bytes": 456,
+      "facts": 4885,
+      "oracle_missing_count": 4885,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "fastapi-find",
+      "mode": "identical-capture",
+      "seconds": 0.00688934899517335,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 61190,
+          "output": 615
+        },
+        "o200k_base": {
+          "raw": 61723,
+          "output": 622
+        }
+      },
+      "output_bytes": 1679,
+      "facts": 4449,
+      "oracle_missing_count": 4378,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "fastapi-grep",
+      "mode": "identical-capture",
+      "seconds": 0.004119845980312675,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 753,
+          "output": 717
+        },
+        "o200k_base": {
+          "raw": 759,
+          "output": 722
+        }
+      },
+      "output_bytes": 2627,
+      "facts": 26,
+      "oracle_missing_count": 23,
+      "search_whitespace_changed": 23,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "fastapi-cat",
+      "mode": "live-command",
+      "seconds": 0.07064375700429082,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 210240,
+          "output": 210240
+        },
+        "o200k_base": {
+          "raw": 223103,
+          "output": 223103
+        }
+      },
+      "output_bytes": 709704,
+      "facts": 1,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "fastapi-test",
+      "mode": "identical-capture",
+      "seconds": 0.05593978299293667,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 101036,
+          "output": 41
+        },
+        "o200k_base": {
+          "raw": 100772,
+          "output": 40
+        }
+      },
+      "output_bytes": 123,
+      "facts": 6324,
+      "oracle_missing_count": 6324,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "TypeScript-log",
+      "mode": "identical-capture",
+      "seconds": 0.004817995009943843,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 1632,
+          "output": 89
+        },
+        "o200k_base": {
+          "raw": 1628,
+          "output": 88
+        }
+      },
+      "output_bytes": 246,
+      "facts": 82,
+      "oracle_missing_count": 79,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "TypeScript-diff",
+      "mode": "identical-capture",
+      "seconds": 0.003873113979352638,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2152,
+          "output": 1799
+        },
+        "o200k_base": {
+          "raw": 2174,
+          "output": 1805
+        }
+      },
+      "output_bytes": 4625,
+      "facts": 200,
+      "oracle_missing_count": 24,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "TypeScript-status",
+      "mode": "identical-capture",
+      "seconds": 0.003124078008113429,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 23,
+          "output": 22
+        },
+        "o200k_base": {
+          "raw": 23,
+          "output": 22
+        }
+      },
+      "output_bytes": 98,
+      "facts": 3,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "TypeScript-show",
+      "mode": "live-command",
+      "seconds": 0.12363379998714663,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 207,
+          "output": 207
+        },
+        "o200k_base": {
+          "raw": 205,
+          "output": 205
+        }
+      },
+      "output_bytes": 706,
+      "facts": 11,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "TypeScript-ls",
+      "mode": "live-command",
+      "seconds": 0.09070122201228514,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 744,
+          "output": 236
+        },
+        "o200k_base": {
+          "raw": 745,
+          "output": 237
+        }
+      },
+      "output_bytes": 524,
+      "facts": 27,
+      "oracle_missing_count": 27,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "TypeScript-recursive",
+      "mode": "live-command",
+      "seconds": 0.7503366729943082,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 621835,
+          "output": 158
+        },
+        "o200k_base": {
+          "raw": 616572,
+          "output": 161
+        }
+      },
+      "output_bytes": 530,
+      "facts": 68412,
+      "oracle_missing_count": 68412,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "TypeScript-find",
+      "mode": "identical-capture",
+      "seconds": 0.02921482699457556,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 1368105,
+          "output": 592
+        },
+        "o200k_base": {
+          "raw": 1361069,
+          "output": 601
+        }
+      },
+      "output_bytes": 1594,
+      "facts": 67761,
+      "oracle_missing_count": 67693,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "TypeScript-grep",
+      "mode": "identical-capture",
+      "seconds": 0.005148475000169128,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 25694,
+          "output": 19339
+        },
+        "o200k_base": {
+          "raw": 25868,
+          "output": 19347
+        }
+      },
+      "output_bytes": 72855,
+      "facts": 677,
+      "oracle_missing_count": 586,
+      "search_whitespace_changed": 496,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "TypeScript-cat",
+      "mode": "live-command",
+      "seconds": 0.0946823270060122,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 593089,
+          "output": 593089
+        },
+        "o200k_base": {
+          "raw": 597267,
+          "output": 597267
+        }
+      },
+      "output_bytes": 3151774,
+      "facts": 1,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "TypeScript-test",
+      "mode": "live-command",
+      "seconds": 0.20258077900507487,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 31,
+          "output": 14
+        },
+        "o200k_base": {
+          "raw": 31,
+          "output": 14
+        }
+      },
+      "output_bytes": 39,
+      "facts": 3,
+      "oracle_missing_count": 1,
+      "search_whitespace_changed": 0,
+      "exit_code": 127,
+      "unavailable": false
+    },
+    {
+      "id": "compare-log",
+      "mode": "identical-capture",
+      "seconds": 0.003254632989410311,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 3090,
+          "output": 74
+        },
+        "o200k_base": {
+          "raw": 3083,
+          "output": 75
+        }
+      },
+      "output_bytes": 171,
+      "facts": 191,
+      "oracle_missing_count": 187,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "compare-diff",
+      "mode": "identical-capture",
+      "seconds": 0.003890085994498804,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 43282,
+          "output": 2539
+        },
+        "o200k_base": {
+          "raw": 43405,
+          "output": 2539
+        }
+      },
+      "output_bytes": 6478,
+      "facts": 4544,
+      "oracle_missing_count": 4344,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "compare-grep",
+      "mode": "identical-capture",
+      "seconds": 0.0028888279921375215,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 2867,
+          "output": 1781
+        },
+        "o200k_base": {
+          "raw": 2966,
+          "output": 1795
+        }
+      },
+      "output_bytes": 6420,
+      "facts": 128,
+      "oracle_missing_count": 87,
+      "search_whitespace_changed": 54,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "compare-find",
+      "mode": "identical-capture",
+      "seconds": 0.004562435991829261,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 14042,
+          "output": 774
+        },
+        "o200k_base": {
+          "raw": 14203,
+          "output": 775
+        }
+      },
+      "output_bytes": 2355,
+      "facts": 1166,
+      "oracle_missing_count": 1087,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    },
+    {
+      "id": "compare-cat",
+      "mode": "live-command",
+      "seconds": 0.10523096899851225,
+      "tokens": {
+        "cl100k_base": {
+          "raw": 530260,
+          "output": 530260
+        },
+        "o200k_base": {
+          "raw": 535949,
+          "output": 535949
+        }
+      },
+      "output_bytes": 2349483,
+      "facts": 1,
+      "oracle_missing_count": 0,
+      "search_whitespace_changed": 0,
+      "exit_code": 0,
+      "unavailable": false
+    }
+  ]
+}

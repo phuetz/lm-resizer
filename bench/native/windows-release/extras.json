@@ -1,0 +1,73 @@
+{
+  "headroom": "0.39.1",
+  "rtk": "0.50.0",
+  "lm_sha256": "54ae75880ac2a6a7d56cbaf0cf028b90a9e9231285c0c7baa122f8fc9d1e1721",
+  "tokenizer": "tiktoken 0.14.0 o200k_base",
+  "repetitions": 3,
+  "cases": [
+    {
+      "id": "python-distributions",
+      "raw_tokens": 2588,
+      "rtk_tokens": 2588,
+      "lm_tokens": 1088,
+      "before_tokens": 1088,
+      "headroom_tokens": 1051,
+      "headroom_default_tokens": 1051,
+      "tee_verified": true,
+      "headroom_mode": "compress()",
+      "milliseconds": {
+        "lm": 23.7709489883855,
+        "rtk": 27.037043997552246,
+        "headroom": 466.1993840127252
+      }
+    },
+    {
+      "id": "health-log",
+      "raw_tokens": 10013,
+      "rtk_tokens": 10013,
+      "lm_tokens": 56,
+      "before_tokens": 56,
+      "headroom_tokens": 119,
+      "headroom_default_tokens": 10013,
+      "tee_verified": true,
+      "headroom_mode": "LogCompressor",
+      "milliseconds": {
+        "lm": 22.01196999521926,
+        "rtk": 28.294543037191033,
+        "headroom": 93.60397100681439
+      }
+    },
+    {
+      "id": "rust-source",
+      "raw_tokens": 7380,
+      "rtk_tokens": 7380,
+      "lm_tokens": 778,
+      "before_tokens": 778,
+      "headroom_tokens": 4195,
+      "headroom_default_tokens": 7380,
+      "tee_verified": true,
+      "headroom_mode": "CodeAwareCompressor",
+      "milliseconds": {
+        "lm": 39.26102799596265,
+        "rtk": 10.800485033541918,
+        "headroom": 120.98304799292237
+      }
+    },
+    {
+      "id": "npm-lock",
+      "raw_tokens": 20771,
+      "rtk_tokens": 20771,
+      "lm_tokens": 16897,
+      "before_tokens": 16897,
+      "headroom_tokens": 16893,
+      "headroom_default_tokens": 16897,
+      "tee_verified": true,
+      "headroom_mode": "SmartCrusher.compact_document_json(lossless_only=True)",
+      "milliseconds": {
+        "lm": 31.515492999460548,
+        "rtk": 47.33725497499108,
+        "headroom": 130.26104698656127
+      }
+    }
+  ]
+}

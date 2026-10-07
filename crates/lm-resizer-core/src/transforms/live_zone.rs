@@ -2946,7 +2946,7 @@ mod openai_responses_tests {
     }
 
     #[test]
-    fn compresses_multiple_same_frame_outputs() {
+    fn preserves_multiple_same_frame_diagnostics() {
         let mut first = String::new();
         let mut second = String::new();
         for i in 0..400 {
@@ -2966,19 +2966,18 @@ mod openai_responses_tests {
             ]
         }));
         let out = compress_openai_responses_live_zone(&b, AuthMode::Payg, "gpt-4o").unwrap();
-        let manifest = match &out {
-            LiveZoneOutcome::NoChange { manifest } => manifest,
-            LiveZoneOutcome::Modified { manifest, .. } => manifest,
+        let rendered: Value = match &out {
+            LiveZoneOutcome::NoChange { .. } => serde_json::from_slice(&b).unwrap(),
+            LiveZoneOutcome::Modified { new_body, .. } => {
+                serde_json::from_str(new_body.get()).unwrap()
+            }
         };
-        let compressed_outputs = manifest
-            .block_outcomes
-            .iter()
-            .filter(|b| {
-                b.block_type == "function_call_output"
-                    && matches!(b.action, BlockAction::Compressed { .. })
-            })
-            .count();
-        assert_eq!(compressed_outputs, 2, "{manifest:?}");
+        for (index, original) in [(0, &first), (2, &second)] {
+            let visible = rendered["input"][index]["output"].as_str().unwrap();
+            for line in original.lines() {
+                assert!(visible.contains(line), "missing diagnostic: {line}");
+            }
+        }
     }
 
     #[test]

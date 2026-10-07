@@ -1,0 +1,39 @@
+{
+  "binary_sha256": "ad5972b05a1f8af621f7b39ced956ddcb96f99ef66d31d8f9413b22f7330ac38",
+  "code_explorer_version": "code-explorer 0.1.1",
+  "cases": [
+    {
+      "id": "invoice.py",
+      "raw_tokens": 275,
+      "lm_total_tokens": 51,
+      "rtk_read_tokens": 275,
+      "headroom_code_tokens": 97,
+      "tee_exact": true,
+      "cat_unchanged": true,
+      "invalid_unchanged": false,
+      "source": "controlled syntax fixture, indexed locally"
+    },
+    {
+      "id": "invoice.ts",
+      "raw_tokens": 274,
+      "lm_total_tokens": 126,
+      "rtk_read_tokens": 274,
+      "headroom_code_tokens": 98,
+      "tee_exact": true,
+      "cat_unchanged": true,
+      "invalid_unchanged": false,
+      "source": "controlled syntax fixture, indexed locally"
+    },
+    {
+      "id": "invalid.py",
+      "raw_tokens": 9,
+      "lm_total_tokens": 9,
+      "rtk_read_tokens": 9,
+      "headroom_code_tokens": 9,
+      "tee_exact": true,
+      "cat_unchanged": true,
+      "invalid_unchanged": true,
+      "source": "controlled syntax fixture, indexed locally"
+    }
+  ]
+}

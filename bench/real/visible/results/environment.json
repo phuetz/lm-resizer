@@ -1,0 +1,7 @@
+{
+  "node": "v24.14.1",
+  "npm": "11.17.0",
+  "cargo": "cargo 1.86.0 (adf9b6ad1 2025-02-28)",
+  "pytest": "pytest 9.1.1",
+  "docker": "Docker version 29.8.1, build 4a63305"
+}

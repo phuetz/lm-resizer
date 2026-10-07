@@ -1,0 +1,7 @@
+[package]
+name = "visible-facts-fixture"
+version = "0.0.0"
+edition = "2021"
+[workspace]
+[lib]
+path = "failures.rs"

@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "case": "repeated",
+      "raw_tokens": 6642,
+      "before_tokens": 6642,
+      "after_tokens": 266,
+      "expanded_exact": true,
+      "tee_exact": true,
+      "raw_sha256": "ae0249428e5b3397e6ed1ff817a8565a07c761b4c76b11d4862ca5af3f80442a"
+    },
+    {
+      "case": "distinct",
+      "raw_tokens": 7605,
+      "before_tokens": 7605,
+      "after_tokens": 7586,
+      "expanded_exact": true,
+      "tee_exact": true,
+      "raw_sha256": "6a9d42336a0e5052d4f4199d547bab55bd71d1f4f2f15466dd68155f3ba7fd17"
+    }
+  ],
+  "tokenizer": "o200k_base",
+  "binaries": {
+    "before": "ad5972b05a1f8af621f7b39ced956ddcb96f99ef66d31d8f9413b22f7330ac38",
+    "binary": "284526e2c7385174e96d287c0e191ccec60ab47571914a962e88b764cb5f7c62"
+  }
+}

@@ -8,7 +8,8 @@ if (-not $package) { throw "lm-resizer package metadata not found" }
 
 $version = $package.version
 $target = Join-Path $root "target\release\lm-resizer.exe"
-cargo build --release
+node (Join-Path $PSScriptRoot "build-release-artifact.cjs") native
+if ($LASTEXITCODE -ne 0) { throw "native release build failed" }
 if (-not (Test-Path $target)) { throw "release binary not found: $target" }
 
 powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "check-wasm-package.ps1")
@@ -29,7 +30,7 @@ foreach ($f in @("LICENSE", "README.md", "README.fr.md", "CHANGELOG.md", "CONTRI
   Copy-Item (Join-Path $root $f) $stage
 }
 New-Item -ItemType Directory -Force -Path (Join-Path $stage "docs") | Out-Null
-foreach ($f in @("FAQ.md", "FAQ.fr.md", "KNOWN-MISSES.md", "KNOWN-MISSES.fr.md", "CLAUDE_CODEX.md", "PROXY-MCP.md", "lm-resizer-hero.png")) {
+foreach ($f in @("FAQ.md", "FAQ.fr.md", "KNOWN-MISSES.md", "KNOWN-MISSES.fr.md", "CLAUDE_CODEX.md", "CLI-REFERENCE.md", "AGENT_HOOKS.md", "WINDOWS.md", "TOKEN-STATISTICS.md", "PROXY-MCP.md", "lm-resizer-hero.png")) {
   Copy-Item (Join-Path $root "docs\$f") (Join-Path $stage "docs")
 }
 Copy-Item (Join-Path $root "skills") (Join-Path $stage "skills") -Recurse

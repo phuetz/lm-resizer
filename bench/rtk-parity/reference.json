@@ -1,0 +1,9 @@
+{
+  "version": "0.50.0",
+  "commit": "1d87b8e719ce0a50c223cd93ca64dd16921f9aec",
+  "platform": "x86_64-unknown-linux-musl",
+  "archive_sha256": "bc2b8902b0d9c796c82ef45f16ae2307e17757afeca5ee156235a3dc7bda5f89",
+  "binary_sha256": "23433a2a50bdeb12199cadd4b94b639238d6c38529fcba1c30c9295db5fa9517",
+  "installer_sha256": "d6eb73a772903e13ff34ee1be8a8b24e896ba9a978f20d2279a08b4083ea6f77",
+  "source_archive_sha256": "de415245d0eac1a6ac50a62e70047ec7025dbf75d41d1377e04e2d1c3f711965"
+}

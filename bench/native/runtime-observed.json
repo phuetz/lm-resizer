@@ -1,0 +1,17 @@
+{
+  "platform": "Linux /proc",
+  "probe": "import os; print(len(os.listdir(\"/proc/%s/task\" % os.getppid())))",
+  "interpretation": "main plus CLI thread, no per-CPU worker pool on this exec path",
+  "cases": [
+    {
+      "binary": "before",
+      "sha256": "48cafc2c9c9ac4eb76e38daa736659be36c5d236c4b3265b2ab499bb738984dc",
+      "parent_threads_during_capture": 2
+    },
+    {
+      "binary": "after",
+      "sha256": "e70e3ba6c4da6b1b183203c522f48f32e8f5032cf6519d80ef688eaa774f245f",
+      "parent_threads_during_capture": 2
+    }
+  ]
+}

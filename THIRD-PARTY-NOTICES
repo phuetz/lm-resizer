@@ -1,0 +1,5 @@
+Inspiré de RTK (Apache-2.0). Aucun code de ce projet n’est inclus dans le produit.
+Inspiré de Headroom (Apache-2.0). Les stratégies de vues structurées sont réécrites indépendamment en Rust.
+
+Les plans de code Rust utilisent syn 2 et proc-macro2 (MIT OR Apache-2.0) et conservent les tranches de source originales.
+Les dépendances de comparaison et leurs licences sont documentées dans bench/.

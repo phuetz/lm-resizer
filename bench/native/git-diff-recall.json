@@ -1,0 +1,7 @@
+{
+  "body_equal_without_external_recovery_line": true,
+  "view_token_delta": -14,
+  "strict_parity": false,
+  "reason": "External recovery command removed; full raw available through LM tee",
+  "lm_sha256": "7edb18e5ab3f82eaa6d83fa402710fa148e3f87cc413bdb2d472e69af3f5d524"
+}

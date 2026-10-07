@@ -4,7 +4,7 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 target="wasm32-unknown-unknown"
 rustup target add "$target"
-RUSTFLAGS='--cfg getrandom_backend="wasm_js"' cargo build -p lm-resizer-wasm --release --target "$target"
+node "$root/scripts/build-release-artifact.cjs" wasm
 artifact="$root/target/$target/release/lm_resizer_wasm.wasm"
 if [ ! -f "$artifact" ]; then
   printf >&2 '%s\n' "WASM artifact not found: $artifact"

@@ -35,9 +35,10 @@ To wrap an existing MCP server, prepend `lm-resizer mcp-proxy --` to the upstrea
 }
 ```
 
-Optional CLI flags:
-- `--store-path <PATH>`: Custom path to CCR SQLite database (defaults to `~/.cache/lm-resizer/history.sqlite3`).
-- `--no-ccr`: Disable CCR persistence and marker injection.
+Optional CLI flag (verified with `lm-resizer mcp-proxy --help`):
+- `--store <PATH>`: custom path to the CCR SQLite database, shared with `retrieve`. Without it the proxy uses `$LM_RESIZER_STORE` when set, else `<state directory>/ccr.sqlite3`, where the state directory is `$LM_RESIZER_STATE_DIR`, else `lm-resizer/` under the first of `$LOCALAPPDATA`, `$XDG_STATE_HOME`, `$HOME`, `$USERPROFILE` (for example `$HOME/lm-resizer/ccr.sqlite3`). It is not `~/.cache/lm-resizer/history.sqlite3`.
+
+There is no `--store-path` and no `--no-ccr` option: the proxy has no switch that disables CCR persistence. Anything written after `mcp-proxy` that is not `--store <PATH>` or `--help` is taken as the upstream command, so `mcp-proxy --no-ccr -- server` tries to launch a program called `--no-ccr`.
 
 ---
 
@@ -67,34 +68,27 @@ When a `text` block in a `tools/call` result is compressed:
    ```text
    [full output: <<ccr:f6888d28b8268ae79399df86>>]
    ```
-3. If the agent needs the unabridged original output, it can retrieve it using the standard `lm-resizer retrieve` CLI or the `retrieve` tool:
+3. If the agent needs the unabridged original output, it can retrieve it using the `lm-resizer retrieve` CLI, the `lm_resizer_retrieve` tool, or `GET /retrieve/<hash>`. The bare hash is the reference form. Exactly these displayed forms are also accepted: `ccr:<hash>`, `<<ccr:<hash>>>`, `[full output: <<ccr:<hash>>>]`, `hash=<hash>` and `hash=<hash>]`. A whole pasted view (several words or lines) is accepted only when it holds a single distinct key, for example a `compress` view that shows `hash=`. A view with no key (a log reduced to a template, with neither `hash=` nor `ccr:`) is refused. The `<<ccr:<12 hex>,<kind>,<size>>>` and `<<ccr:<12 hex> N_rows_offloaded>>` markers inside a compressed JSON view are reading aids, not keys, and are ignored (the key is the `hash=` shown with the view). Anything else is refused rather than guessed: an input holding several distinct keys fails with `ambiguous CCR reference`. The CLI prints the exact original text. The MCP tool and `GET /retrieve/<hash>` return a JSON object `{"hash","content"}` whose `content` is that text; the HTTP body is not the raw text.
    ```bash
+   lm-resizer retrieve f6888d28b8268ae79399df86
    lm-resizer retrieve ccr:f6888d28b8268ae79399df86
    ```
+   `lm-resizer retrieve` prints the exact original text that was stored, not a template or a compressed view. `GET /retrieve/<hash>` returns that text in the JSON field `content`.
 
 ---
 
-## Real Measurements with `code-explorer mcp`
+## Checking retrieval locally
 
-The following measurements were captured on a real local run wrapping `code-explorer mcp` against a Rust codebase:
+The hash above illustrates the marker syntax; replace it with the 24-character
+hash actually returned by your run (the `ccr:` prefix and marker delimiters
+are tolerated by `retrieve`).
+Use the same store for compression and retrieval (`--store` for `retrieve` if
+`mcp-proxy --store` selected a custom database). CCR expires after 30
+minutes by default; export the retrieved text before expiry.
 
-| Request / Tool | Direct Size | Proxied Size | Savings | Compression Ratio / Note |
-| :--- | :---: | :---: | :---: | :--- |
-| **`initialize`** | 254 B | 254 B | 0 B (0.0%) | 100% byte-for-byte identical (untouched handshake) |
-| **`tools/list`** | 17,206 B | 17,206 B | 0 B (0.0%) | 100% byte-for-byte identical (30 tool schemas preserved) |
-| **`tools/call` (`context` for `run_mcp`)** | 1,134 B | 786 B | **348 B (30.7%)** | Text compressed; CCR token appended; raw payload recoverable |
-| **`tools/call` (`list_repos`)** | 815 B | 656 B | **159 B (19.5%)** | Compacted repetition and whitespace |
-| **`tools/call` (`query` for `compress`)** | 4,177 B | 4,177 B | 0 B (0.0%) | No-growth gate triggered: candidate size was not smaller than original, verbatim output preserved |
-
-### Verification of CCR Retrieval
-```bash
-$ lm-resizer retrieve ccr:f6888d28b8268ae79399df86 | head -n 3
-{
-  "symbol": "run_mcp",
-  "file": "src/main.rs"
-...
-```
-The exact byte-accurate upstream payload was retrieved from CCR storage.
+No versioned capture supports the former Code Explorer size comparison.
+Those figures have been removed. To measure a run, save the direct and proxied
+text and compare the retrieved bytes against the original before reporting savings.
 
 ---
 

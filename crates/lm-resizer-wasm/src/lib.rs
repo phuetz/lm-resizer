@@ -21,7 +21,8 @@
 /// those configs to stay dead-code-clean on a plain native build.
 #[cfg(any(target_arch = "wasm32", test))]
 fn compress_to_json(content: &str, query: &str) -> String {
-    let report = lm_resizer_core::LmResizer::new().compress(content, query);
+    let store = STORE.with(|s| s.clone());
+    let report = lm_resizer_core::LmResizer::with_store(store).compress(content, query);
     serde_json::to_string(&report).unwrap_or_else(|err| {
         serde_json::json!({
             "error": format!("failed to encode report: {err}"),
@@ -35,7 +36,7 @@ fn compress_to_json(content: &str, query: &str) -> String {
 
 #[cfg(target_arch = "wasm32")]
 mod abi {
-    use super::compress_to_json;
+    use super::{compress_to_json, retrieve_to_json};
     use std::alloc::{alloc, dealloc, Layout};
     use std::ffi::{c_char, CString};
 
@@ -63,10 +64,28 @@ mod abi {
         string_to_ptr(compress_to_json(content, query))
     }
 
-    /// Free strings returned by [`lm_resizer_compress_json`].
+    /// Retrieve original content by `hash` (UTF-8).
+    /// Returns a null-terminated JSON `{"hash":..., "content":...}` or `{"error":"…"}`.
     ///
     /// # Safety
-    /// `ptr` must have been returned by [`lm_resizer_compress_json`] and not
+    /// `hash_ptr` must point to `hash_len` initialized bytes (or be null with length 0).
+    /// Release the result with [`lm_resizer_string_free`].
+    #[no_mangle]
+    pub unsafe extern "C" fn lm_resizer_retrieve_json(
+        hash_ptr: *const u8,
+        hash_len: usize,
+    ) -> *mut c_char {
+        let hash = match slice_to_str(hash_ptr, hash_len) {
+            Ok(value) => value,
+            Err(message) => return string_to_ptr(error_report(&message)),
+        };
+        string_to_ptr(retrieve_to_json(hash))
+    }
+
+    /// Free strings returned by [`lm_resizer_compress_json`] or [`lm_resizer_retrieve_json`].
+    ///
+    /// # Safety
+    /// `ptr` must have been returned by one of the C API string-returning functions and not
     /// yet freed.
     #[no_mangle]
     pub unsafe extern "C" fn lm_resizer_string_free(ptr: *mut c_char) {
@@ -137,9 +156,31 @@ mod abi {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+thread_local! {
+    static STORE: std::sync::Arc<lm_resizer_core::ccr::InMemoryCcrStore> =
+        std::sync::Arc::new(lm_resizer_core::ccr::InMemoryCcrStore::new());
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn retrieve_to_json(hash: &str) -> String {
+    let store = STORE.with(|s| s.clone());
+    match lm_resizer_core::ccr::CcrStore::get(&*store, hash) {
+        Some(content) => serde_json::json!({
+            "hash": hash,
+            "content": content
+        })
+        .to_string(),
+        None => serde_json::json!({
+            "error": format!("CCR entry not found: {hash}")
+        })
+        .to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::compress_to_json;
+    use super::{compress_to_json, retrieve_to_json};
 
     #[test]
     fn runs_the_real_pipeline_not_minify() {
@@ -174,5 +215,64 @@ mod tests {
         let report: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(report.get("error").is_none());
         assert_eq!(report["output"].as_str().unwrap(), "hello world");
+    }
+
+    #[test]
+    fn retrieve_cached_json_objects() {
+        let mut rows: Vec<serde_json::Value> = (0..80)
+            .map(|i| serde_json::json!({"id": i, "name": "row", "status": "ok"}))
+            .collect();
+        rows[42]["status"] = serde_json::json!("ERROR timeout");
+
+        let payload = serde_json::to_string(&serde_json::Value::Array(rows)).unwrap();
+        let json = compress_to_json(&payload, "");
+        let report: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        let keys = report["cache_keys"].as_array().unwrap();
+        assert!(!keys.is_empty(), "expected cache keys from json offload");
+
+        let mut found_original = false;
+        for key in keys {
+            let hash = key.as_str().unwrap();
+            let retrieved = retrieve_to_json(hash);
+            let ret_val: serde_json::Value = serde_json::from_str(&retrieved).unwrap();
+
+            assert!(
+                ret_val.get("error").is_none(),
+                "failed to retrieve key {}: {:?}",
+                hash,
+                ret_val
+            );
+            let content_str = ret_val["content"].as_str().unwrap();
+            assert!(!content_str.is_empty());
+
+            // Note: The retrieved content might be multiple rows or single rows.
+            // The JSON offloader might pack objects.
+            let content_val: serde_json::Value = serde_json::from_str(content_str).unwrap();
+
+            // Helper to check if any object has the targeted status
+            fn check_status(val: &serde_json::Value) -> bool {
+                if let Some(arr) = val.as_array() {
+                    arr.iter().any(check_status)
+                } else {
+                    val.get("status") == Some(&serde_json::json!("ERROR timeout"))
+                }
+            }
+
+            if check_status(&content_val) {
+                found_original = true;
+            }
+        }
+
+        assert!(
+            found_original,
+            "Did not find the targeted original row in retrieved contents: {:?}",
+            keys
+        );
+
+        // Verify missing key behavior
+        let missing = retrieve_to_json("unknown_key");
+        let missing_val: serde_json::Value = serde_json::from_str(&missing).unwrap();
+        assert!(missing_val.get("error").is_some());
     }
 }

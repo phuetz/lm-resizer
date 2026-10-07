@@ -1,6 +1,6 @@
 # Banc comparatif LM Resizer / RTK / Headroom
 
-Sur ces 22 fixtures, LM Resizer est derrière sur 2 cas : dotnet_ok, compile_error. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée. Une économie ne compte que si l'oracle est intégralement conservé.
+Sur ces 22 fixtures (3 captures réelles, 19 synthétiques), LM Resizer est derrière sur 2 cas : dotnet_ok, compile_error. Ces pertes sont conservées dans le classement ; la généralisation hors de ce corpus n'est pas démontrée. Une économie ne compte que si l'oracle est intégralement conservé.
 
 ## Versions et méthode
 
@@ -91,4 +91,4 @@ Chaque cellule indique économie qualifiée / économie brute / conservation de 
 
 - Réparation d'un test par agent : le sandbox du Codex imbriqué bloque l'essai avant modification.
 - Coûts facturés, cache fournisseur et intégrations proxy/CCR en production.
-- Informations utiles au-delà des oracles déclarés et généralisation à des sorties réelles non présentes dans ces 22 fixtures synthétiques.
+- Informations utiles au-delà des oracles déclarés et généralisation à des sorties réelles non présentes dans ces 22 fixtures (3 captures réelles, 19 synthétiques).

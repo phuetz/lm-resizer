@@ -7,3 +7,5 @@
 *.wasm binary
 *.exe binary
 *.dll binary
+
+# Upstream byte-accuracy fixtures intentionally contain CRLF and trailing spaces.

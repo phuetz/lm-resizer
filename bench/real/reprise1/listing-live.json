@@ -1,0 +1,47 @@
+{
+  "binary_sha256": "b2caff10d8fc8781e0ecfb9f31535f185f853037f25d231867d0c04720115256",
+  "repo_commit": "09b1db0617311f3b39f165bb3480c0ce2f718b27",
+  "scope": "actual directory walk; sequential native/wrapped pairs; OS cache not flushed",
+  "samples": [
+    {
+      "native_seconds": 0.06810697398032062,
+      "wrapped_seconds": 0.39262591098668054,
+      "difference_seconds": 0.3245189370063599,
+      "raw_bytes": 2650550,
+      "raw_sha256": "86326f7f74450781adff0d71614a0eb06892be8b4b3a14adfe809c43aafac8eb",
+      "exact": true
+    },
+    {
+      "native_seconds": 0.08282856000005268,
+      "wrapped_seconds": 0.44535683302092366,
+      "difference_seconds": 0.362528273020871,
+      "raw_bytes": 2650550,
+      "raw_sha256": "86326f7f74450781adff0d71614a0eb06892be8b4b3a14adfe809c43aafac8eb",
+      "exact": true
+    },
+    {
+      "native_seconds": 0.11985600399202667,
+      "wrapped_seconds": 0.4317091300035827,
+      "difference_seconds": 0.311853126011556,
+      "raw_bytes": 2650550,
+      "raw_sha256": "86326f7f74450781adff0d71614a0eb06892be8b4b3a14adfe809c43aafac8eb",
+      "exact": true
+    },
+    {
+      "native_seconds": 0.09907885300344788,
+      "wrapped_seconds": 0.4980230610235594,
+      "difference_seconds": 0.39894420802011155,
+      "raw_bytes": 2650550,
+      "raw_sha256": "86326f7f74450781adff0d71614a0eb06892be8b4b3a14adfe809c43aafac8eb",
+      "exact": true
+    },
+    {
+      "native_seconds": 0.0960657209798228,
+      "wrapped_seconds": 0.4978547670179978,
+      "difference_seconds": 0.401789046038175,
+      "raw_bytes": 2650550,
+      "raw_sha256": "86326f7f74450781adff0d71614a0eb06892be8b4b3a14adfe809c43aafac8eb",
+      "exact": true
+    }
+  ]
+}

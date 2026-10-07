@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn entropy_is_bitwise_stable_across_repeated_maps() {
         let input: String = (33u8..=126)
-            .flat_map(|byte| std::iter::repeat(byte as char).take((byte % 13 + 1) as usize))
+            .flat_map(|byte| std::iter::repeat_n(byte as char, (byte % 13 + 1) as usize))
             .collect();
         let expected = calculate_string_entropy(&input).to_bits();
         for _ in 0..256 {
