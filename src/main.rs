@@ -721,7 +721,8 @@ enum Commands {
     },
     /// Install reversible project agent instructions for hook helpers.
     InstallHooks {
-        /// Agent: codex, claude, gemini, copilot, cursor, or all (codex + claude).
+        /// Agent: codex, claude, or all (codex + claude). Gemini, Copilot and Cursor
+        /// use init-native-hooks.
         #[arg(long, default_value = "codex")]
         client: String,
         /// Project directory containing AGENTS.md / CLAUDE.md.
@@ -7170,6 +7171,14 @@ fn install_agent_hooks(
     project_dir: Option<PathBuf>,
     force: bool,
 ) -> Result<AgentHooksReport> {
+    // Instruction clients only: gemini/copilot/cursor read a native config, never
+    // AGENTS.md/CLAUDE.md, so writing helpers alone would report a useless success.
+    if matches!(client, "gemini" | "copilot" | "cursor") {
+        anyhow::bail!(
+            "install-hooks writes AGENTS.md/CLAUDE.md instructions, which {client} does not read. \
+             Use `lm-resizer init-native-hooks --client {client}` instead"
+        );
+    }
     let project_dir = project_dir.unwrap_or(std::env::current_dir()?);
     let helpers = init_hook_helpers(Some(project_dir.clone()), force)?;
     let targets = hook_instruction_targets(client, &project_dir)?;

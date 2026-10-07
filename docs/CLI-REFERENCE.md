@@ -170,7 +170,7 @@ Ces options existent sur plusieurs commandes ; le script de contrôle exige que 
 | `--provider` | `sanitize-provider-fixture`, `serve`, `wrap` | Fournisseur : `openai`, `anthropic`, `bedrock` ou `vertex` (pour `serve` et `wrap`, défaut `openai`). La variable `LM_RESIZER_PROVIDER` n'est lue que par `serve` et `wrap`. |
 | `--input` | `sanitize-provider-fixture` | Fichier JSON d'entrée (obligatoire). |
 | `--output` | `sanitize-provider-fixture` | Chemin du fichier fixture écrit (obligatoire). |
-| `--client` | `init-native-hooks`, `hook`, `install-hooks`, `uninstall-hooks` | Agent visé : `codex`, `claude`, `gemini`, `copilot`, `cursor` ou `all` (défaut `all`). |
+| `--client` | `init-native-hooks`, `hook`, `install-hooks`, `uninstall-hooks` | Agent visé : `codex`, `claude`, `gemini`, `copilot`, `cursor` ou `all` (défaut `all`). `install-hooks` n'accepte que `codex`, `claude` et `all` ; pour `gemini`, `copilot` et `cursor`, utiliser `init-native-hooks`. |
 | `--project-dir` | `install-hooks`, `uninstall-hooks` | Dossier du projet (où lire ou écrire `AGENTS.md` / `CLAUDE.md` ou la configuration). |
 | `--force` | `install-hooks` | Écrase les fichiers générés existants. |
 

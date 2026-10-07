@@ -166,3 +166,30 @@ fn native_init_is_idempotent_when_content_matches_and_uninstall_removes_config()
         );
     }
 }
+
+#[test]
+fn install_hooks_refuses_native_only_clients_without_writing() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+
+    for client in ["gemini", "copilot", "cursor"] {
+        let out = cli(dir.path())
+            .args(["install-hooks", "--client", client, "--project-dir"])
+            .arg(&project)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{client} install-hooks must fail");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(&format!("init-native-hooks --client {client}")),
+            "{client} stderr: {stderr}"
+        );
+        assert!(
+            !project.join(".lm-resizer").exists(),
+            "{client} must not write helpers"
+        );
+        assert!(!project.join("AGENTS.md").exists());
+        assert!(!project.join("CLAUDE.md").exists());
+    }
+}
