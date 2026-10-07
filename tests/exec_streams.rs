@@ -164,7 +164,15 @@ fn find_non_utf8_filename_is_recoverable_without_replacement() {
     use std::os::unix::ffi::OsStringExt;
     let dir = tempfile::tempdir().unwrap();
     let filename = std::ffi::OsString::from_vec(b"caf\xe9_budget.txt".to_vec());
-    std::fs::write(dir.path().join(filename), b"invoice").unwrap();
+    if let Err(err) = std::fs::write(dir.path().join(filename), b"invoice") {
+        // APFS stores names as UTF-8 and answers EILSEQ (92): such a file cannot
+        // exist there, so `find` can never print one. Every other error still fails.
+        if cfg!(target_os = "macos") && err.raw_os_error() == Some(92) {
+            eprintln!("skipped: this filesystem rejects non-UTF-8 file names ({err})");
+            return;
+        }
+        panic!("cannot create the non-UTF-8 file name: {err}");
+    }
     let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
         .current_dir(dir.path())
         .env("LM_RESIZER_STATE_DIR", dir.path().join("state"))
