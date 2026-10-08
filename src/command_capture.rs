@@ -172,15 +172,25 @@ pub fn run(command: &[String]) -> anyhow::Result<Capture> {
                 launch_error: None,
             })
         }
-        Err(error) => Ok(Capture {
-            raw: Vec::new(),
-            code: if error.kind() == std::io::ErrorKind::PermissionDenied {
-                126
-            } else {
-                127
-            },
-            launch_error: Some(launch_error_message(program, &error)),
-        }),
+        Err(error) => Ok(launch_failure(program, &error)),
+    }
+}
+
+pub fn launch_failure(program: &str, error: &std::io::Error) -> Capture {
+    #[cfg(windows)]
+    let invalid_image = matches!(error.raw_os_error(), Some(193 | 216));
+    #[cfg(unix)]
+    let invalid_image = error.raw_os_error() == Some(8); // ENOEXEC
+    #[cfg(not(any(windows, unix)))]
+    let invalid_image = false;
+    Capture {
+        raw: Vec::new(),
+        code: if error.kind() == std::io::ErrorKind::PermissionDenied || invalid_image {
+            126
+        } else {
+            127
+        },
+        launch_error: Some(launch_error_message(program, error)),
     }
 }
 

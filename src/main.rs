@@ -3101,24 +3101,38 @@ fn run_exec_command(
     let started = Instant::now();
     let (program, args) = command.split_first().context("missing command for exec")?;
     let resolved_program = resolve_command_path(program).unwrap_or_else(|| PathBuf::from(program));
-    let (exit_code, raw_bytes, streams) = if stream {
+    let (exit_code, raw_bytes, streams, launch_error) = if stream {
         run_command_streaming(&resolved_program, args, &command.join(" "))?
     } else {
-        let output = command_capture::build_command(&resolved_program, args)
+        let result = command_capture::build_command(&resolved_program, args)
             .stdin(Stdio::inherit())
-            .output()
-            .with_context(|| format!("failed to execute '{}'", command.join(" ")))?;
-        (
-            child_exit_code(output.status),
-            combine_command_bytes(&output.stdout, &output.stderr),
-            CapturedStreams::new(&output.stdout, &output.stderr),
-        )
+            .output();
+        match result {
+            Ok(output) => (
+                child_exit_code(output.status),
+                combine_command_bytes(&output.stdout, &output.stderr),
+                CapturedStreams::new(&output.stdout, &output.stderr),
+                None,
+            ),
+            Err(error) => {
+                let failure = command_capture::launch_failure(program, &error);
+                (
+                    failure.code,
+                    failure.raw,
+                    CapturedStreams::new(&[], &[]),
+                    failure.launch_error,
+                )
+            }
+        }
     };
 
-    let raw = display_captured_bytes(&raw_bytes);
+    let failed_to_launch = launch_error.is_some();
+    let raw = launch_error.unwrap_or_else(|| display_captured_bytes(&raw_bytes));
     perf_stage("capture", started.elapsed());
     let phase = Instant::now();
-    let (filter, mut filtered) = if raw_on_failure && exit_code != 0 {
+    let (filter, mut filtered) = if failed_to_launch {
+        ("native:launch-error".to_string(), raw.clone())
+    } else if raw_on_failure && exit_code != 0 {
         ("raw_on_failure".to_string(), raw.clone())
     } else {
         filter_command_output(command, &raw)
@@ -3339,14 +3353,25 @@ fn prepend_failure_status(output: &mut String, exit_code: i32) {
 fn run_command_streaming(
     program: &Path,
     args: &[String],
-    display: &str,
-) -> Result<(i32, Vec<u8>, CapturedStreams)> {
-    let mut child = command_capture::build_command(program, args)
+    _display: &str,
+) -> Result<(i32, Vec<u8>, CapturedStreams, Option<String>)> {
+    let result = command_capture::build_command(program, args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("failed to execute '{display}'"))?;
+        .spawn();
+    let mut child = match result {
+        Ok(child) => child,
+        Err(error) => {
+            let failure = command_capture::launch_failure(&program.display().to_string(), &error);
+            return Ok((
+                failure.code,
+                failure.raw,
+                CapturedStreams::new(&[], &[]),
+                failure.launch_error,
+            ));
+        }
+    };
 
     let stdout = child.stdout.take().context("failed to capture stdout")?;
     let stderr = child.stderr.take().context("failed to capture stderr")?;
@@ -3369,6 +3394,7 @@ fn run_command_streaming(
         child_exit_code(status),
         combine_command_bytes(&streams[0], &streams[1]),
         CapturedStreams::new(&streams[0], &streams[1]),
+        None,
     ))
 }
 
