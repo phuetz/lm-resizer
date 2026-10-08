@@ -1,80 +1,64 @@
-# Mission Windows — LM Resizer 0.2.6
-
-Branche : `fix/lmr-026-windows-2026-10-08`. Départ : `f4d6a8e1793fed5130545677b4154b3ed18037f6`.
-
-Tête finale des correctifs vérifiés : `4f7ae1c2c739e180a1264b8083adaa164815a3b0`. Le commit de ce rapport vient ensuite et ne change aucun code ; son hash figure dans la réponse finale. Les huit commits de correctifs respectent Lore et correspondent chacun à un défaut. Leur arbre final est identique à l’arbre testé avant consolidation.
-
-Binaire Windows x64 construit : `lm-resizer 0.2.6`, SHA-256 `47ba146919b28c7b8547228e3caba9ade41837feff96609b39c29978df9d75ba`. Rust/Cargo 1.95.0, PowerShell 7.6.6 ; les contrats des scripts exécutent Windows PowerShell 5.1.
-
 ## Verdict
-NON LIVRÉ
 
-Les défauts demandés sont corrigés et leurs **11 tests de régression Windows passent**. La barrière workspace reste rouge sur un test préexistant de `lm-resizer-core`, réservé à la lane Linux : `tokenizer::hf_impl::tests::from_pretrained_invalid_repo_returns_hub_error`. Aucun correctif de ce périmètre n’a été ajouté ici.
+LIVRÉ
 
-## Défaut → commit → test
+Les trois bloquants A, B et C sont corrigés sur `fix/lmr-026-windows-2026-10-08`, à partir de `ac01374`. Aucun push. La vérification Windows du périmètre passe ; les tests Unix sont fournis sous `cfg(unix)` et restent à rejouer par le pilote. Aucun résultat Linux ou macOS après correction n’est revendiqué.
 
-| Défaut | Commit | Test et preuve |
+| Bloquant | Commit | Test et preuve |
 | --- | --- | --- |
-| UTF-16LE avec BOM masque ERROR | `274ba7890da4` | [windows_utf16_contract.rs](tests/windows_utf16_contract.rs) : ligne `ERROR erreur utile été résumé` lisible, tee identique au producteur, BOM et CRLF compris. [Rouge initial](.omx/windows-fix/logs/all-red.log), [vert](.omx/windows-fix/logs/utf16-green.log). |
-| Options exec changent les statuts de lancement | `0b9db166293f` | [windows_launch_contract.rs](tests/windows_launch_contract.rs) : commande absente → 127, répertoire non exécutable → 126, diagnostic identique dans les trois modes. Tests Unix de permissions et ENOEXEC ajoutés. [Rouge](.omx/windows-fix/logs/contracts-red.log), [vert](.omx/windows-fix/logs/launch-green.log). |
-| Original absent/réassemblé dans raw et stream | `90197db1cfb7` | [windows_tee_contract.rs](tests/windows_tee_contract.rs) : octets mixtes exacts dans standard/raw/stream/raw+stream, aucune balise `[stderr]`, `tee_hint` non nul. JSON valide et flux live texte sur stdout. [Rouge initial](.omx/windows-fix/logs/all-red.log), [régression stdout rouge](.omx/windows-fix/logs/live-stdout-red.log), [vert](.omx/windows-fix/logs/stream-green.log). |
-| Interruption perd les octets et peut laisser un enfant | `4f7ae1c2c739` | [interruption_contract.rs](tests/interruption_contract.rs) : vraie console cachée, Ctrl-C normal/raw/stream → **0xC000013A**, vue et tee partiels ; arrêt forcé du parent → tee persistant dans les trois modes. Le nettoyage après timeout ne peut pas fabriquer un succès. Contrat SIGTERM Unix au seul PID parent ajouté. [Rouge](.omx/windows-fix/logs/all-red.log), [vert strict](.omx/windows-fix/logs/interruption-review-green.stdout.log). |
-| PATH permanent ignoré si PATH session contient déjà la destination | `e821e761b9c0` | [windows_scripts_contract.rs](tests/windows_scripts_contract.rs) : getter/setter simulés ; le contrôle historique laisse le setter inutilisé. [Rouge comportemental sur f4d6a8e](.omx/windows-fix/logs/path-historical-red.log), [vert](.omx/windows-fix/logs/scripts-final-green.log). |
-| Bloc AGENTS.md déplacé par --force | `5aafc0c124ca` | [windows_hooks_contract.rs](tests/windows_hooks_contract.rs) : remplacement à la place originale, préfixe/suffixe identiques, fins de lignes Windows conservées. [Rouge](.omx/windows-fix/logs/all-red.log), [vert](.omx/windows-fix/logs/hooks-green.log). |
-| ZIP et sidecar périmés après signature | `cc00b394f813` | [windows_scripts_contract.rs](tests/windows_scripts_contract.rs) exécute le vrai script avec un signataire simulé sans clé. Le script historique modifie le staging mais laisse l’EXE non signé dans le ZIP ; le correctif reconstruit ZIP, sidecar puis SHA256SUMS. [Rouge comportemental sur f4d6a8e](.omx/windows-fix/logs/signature-historical-red.log), [vert](.omx/windows-fix/logs/scripts-final-green.log). |
-| Premier exemple echo inexécutable sous Windows | `3fc0f438528f` | Une seule ligne d’exemple Windows ajoutée au README. [windows_quickstart_contract.rs](tests/windows_quickstart_contract.rs) exécute `cmd.exe /d /c echo hello`. [Rouge](.omx/windows-fix/logs/quickstart-red.log), [vert](.omx/windows-fix/logs/quickstart-green.log). |
+| A — une image Unix sans shebang était exécutée par `/bin/sh` | `e77b50c` — Préserver le refus Unix des images sans interpréteur | `windows_launch_contract::invalid_executable_is_126_in_every_exec_mode`, sous `cfg(unix)`, renforcé pour détecter toute exécution du texte. Rouge avant établi par la revue jointe ; renforcement et vert après à rejouer sous Unix. Les deux tests de lancement actifs sous Windows passent. |
+| B — perte de provenance de la vue, du champ JSON `streams` et des destinations live | `50448d7` — Rétablir la provenance des flux sans polluer leur archive brute | `windows_stream_view_contract` : 2 nouveaux tests rouges sur `ac01374`, verts après ; `windows_tee_contract::stream_without_json_keeps_live_streams_on_their_native_channels` : rouge avant, vert après. Le test du tee dans les quatre combinaisons d’options passe. Les trois régressions `exec_streams` de la revue restent sous `cfg(unix)`, à rejouer. |
+| C — lecture du terminal arrêtée par SIGTTIN | `48b1c5a` — Garder les lectures du terminal Unix dans le groupe de premier plan | Nouveau `exec_terminal::inherited_terminal_input_finishes_in_every_exec_mode`, sous `cfg(unix)` : pty avec terminal de contrôle, saisie `hello`, trois modes, délai borné et nettoyage en cas de blocage. Sonde rouge avant établie par la revue ; nouveau test avant/après à rejouer sous Unix. Les 2 tests Windows d’`interruption_contract` passent. |
 
-Les tests de texte, de lancement et de tee sont Rust portables. Les tests qui utilisent les événements console ou PowerShell portent `#[cfg(windows)]` et expliquent cette restriction ; les permissions et signaux Unix portent leur restriction correspondante.
+### Contrat conservé et fichiers modifiés
 
-## Barrière et contrôles
+A et C modifient `src/capture_interrupt.rs`, le câblage de `src/command_capture.rs`, `tests/windows_launch_contract.rs`, `tests/interruption_contract.rs` et ajoutent `tests/exec_terminal.rs`. Sous Unix, `CommandExt::process_group(0)` remplace le callback `pre_exec` ; Rust 1.91 configure ce groupe dans son chemin `posix_spawn` ([source amont](https://github.com/rust-lang/rust/blob/1.91.0/library/std/src/sys/process/unix/unix.rs#L676)). Lorsque stdin est un terminal, aucun groupe séparé n’est créé et le relais cible le seul enfant. Les API console Windows restent sous `cfg(windows)`.
 
-| Commande | Passés | Échecs | Ignorés | Statut |
-| --- | ---: | ---: | ---: | ---: |
-| `cargo test --release --locked --workspace` | **1 283** | **1** | **1** | **101** |
-| Même commande avec `--no-fail-fast`, pour terminer tous les targets | **1 394** | **1** | **3** | **101** |
+B modifie `src/main.rs`, `src/command_capture.rs`, `tests/exec_streams.rs`, `tests/windows_tee_contract.rs`, le producteur et le harnais de `tests/support/`, et ajoute `tests/windows_stream_view_contract.rs`. La vue historique est rétablie : stdout puis `[stderr]`, annotation si les deux flux sont présents, champ JSON `streams`, stdout et stderr live sur leurs destinations natives. En `--stream --json`, stdout live précède le rapport JSON, comme sur la base.
 
-Sorties complètes : [barrière finale](.omx/windows-fix/logs/barrier-final.log), [tous targets](.omx/windows-fix/logs/all-final.log). Les rapports JSON et les originaux binaires sont conservés à côté, dans l’état de tee local. Ces comptes additionnent les résumés Cargo ; le passage strict s’arrête après l’échec du core.
+Le tee conserve les octets sans balise synthétique ni conversion. En capture séparée, les blocs y suivent l’ordre de drainage ; l’ordre d’émission entre flux n’est pas garanti. Cette limite, la frontière de la vue et leur distinction sont précisées dans `README.md`, `README.fr.md`, `CHANGELOG.md` et `docs/TOKEN-STATISTICS.md`. L’assertion Unix qui attendait `[stderr]` dans le tee est corrigée conformément à la mission ; elle exige maintenant cette balise dans la vue et son absence dans le brut. La capture partagée du mode par défaut est conservée. La branche de streaming partagé devenue inutilisée est supprimée. Aucune dépendance ajoutée, aucun autre défaut fonctionnel traité, aucune fusion de la lane Linux.
 
-Le test Hugging Face appelle `Api::new()`, puis `Cache::default()` et `dirs::home_dir()`. Sous Windows, cela utilise `SHGetKnownFolderPath(FOLDERID_Profile)` plutôt que HOME/USERPROFILE. Dans ce bac à sable, l’appel renvoie **0x80070002**, et hf-hub panique : **`Cache directory cannot be found`**. [Sonde Windows indépendante](.omx/windows-fix/logs/windows-profile-probe.txt). Le test n’est ni ignoré ni modifié ici.
+### Vérification Windows
 
-- `cargo fmt --all -- --check` : succès ; `git diff --check` : succès.
-- `cargo clippy --release --locked --bin lm-resizer -- -D warnings` : succès, [sortie](.omx/windows-fix/logs/clippy-bin.log).
-- `cargo clippy --release --locked --workspace --all-targets` : succès, avec avertissements préexistants, [sortie](.omx/windows-fix/logs/clippy-workspace.log). Cette compilation vérifie aussi les types du workspace.
-- La variante workspace avec `-D warnings` échoue notamment sur `items_after_test_module` dans `src/mcp_proxy.rs`, hors périmètre : [sortie](.omx/windows-fix/logs/clippy.log).
-- Revue indépendante du périmètre Windows terminée sans défaut ouvert après correction des courses de signaux et du faux positif possible du harnais Ctrl-C.
+Rust 1.95.0, cible `x86_64-pc-windows-msvc`, compilation debug.
 
-Schannel a initialement refusé les téléchargements Cargo. Les archives manquantes ont été téléchargées via HTTPS Node avec validation de certificat et SHA-256 comparé à Cargo.lock : [sommes vérifiées](.omx/windows-fix/logs/dependency-checksums.json). Le cache est isolé sous `.omx/windows-fix/target/cargo`, avec une jonction locale pour conserver les chemins Cargo. Le premier passage avait détecté les fichiers Python de ce cache ; son déplacement sous `target` a résolu cet artefact d’environnement sans changer le contrôle Rust.
+- `cargo test --workspace --no-fail-fast --locked -- --skip tokenizer::hf_impl::tests::from_pretrained_invalid_repo_returns_hub_error` : **1 396 passés, 0 échec, 3 ignorés, 1 filtré**, sortie **0**. Résultats comptés dans les résumés du journal brut, pas dans la vue réduite.
+- `cargo clippy --bin lm-resizer --locked -- -D warnings` : sortie **0**.
+- `cargo fmt --all -- --check` et `git diff --check` : sortie **0**.
+- Nouveaux tests B posés sur un export exact d’`ac01374`, avec un target distinct : **3 rouges**, sortie **101**. La vérification des seuls octets du tee était déjà verte sur cet arbre ; les assertions finales de provenance sont vérifiées sur le correctif.
 
-## Fichiers et simplifications
+Un premier `cargo test --workspace --no-fail-fast --locked`, sans exclusion, a donné **1 394 passés, 3 échecs, 3 ignorés**, sortie **101**. Deux échecs tenaient au dispositif local : les copies de dépendances et de l’ancien arbre sous `.omx` étaient parcourues par le contrôle « Rust uniquement » ; l’alias Windows `python3` était inaccessible. Les copies ont été déplacées sous un répertoire `target`, et un relais Python local a été utilisé. Ces deux tests passent dans le run final, sans modification de leur code.
 
-Code produit : `src/main.rs`, `src/command_capture.rs`, nouveau `src/capture_interrupt.rs`. Scripts : `install.ps1`, `scripts/sign-windows-release.ps1`. README : uniquement l’exemple Windows autorisé. Harnais : les sept fichiers de contrats ci-dessus, `tests/support/mod.rs` et deux producteurs Rust sous `tests/fixtures/`.
+Le troisième échec était `tokenizer::hf_impl::tests::from_pretrained_invalid_repo_returns_hub_error`, explicitement hors mission : `Cache directory cannot be found`. Ce constat porte sur le profil Windows du bac à sable ; aucune dépendance au réseau n’en est déduite. Ce test et `crates/` restent inchangés.
 
-Les lecteurs séparés, le réassemblage stdout-puis-stderr et l’ajout de marqueurs ont été supprimés. La capture partagée sert tous les modes. Aucun ajout de dépendance, aucune modification de Cargo.toml/Cargo.lock, des vues longues, de git log, du crochet Claude ou des autres documents.
+Cargo a initialement échoué avant compilation avec `Schannel: SEC_E_NO_CREDENTIALS`. Trois archives manquantes ont été récupérées avec validation TLS puis vérifiées contre les SHA-256 de `Cargo.lock`. Le cache Cargo et le relais Python restent locaux sous `.omx/reprise-026/target/` ; aucun profil ni PATH utilisateur réel n’est modifié.
 
-## Ouvert et non vérifié
+Preuves locales : `.omx/reprise-026/logs/b-avant.log`, `workspace-windows.log`, `workspace-windows-final.log`, `clippy-final.log`, `fmt-final.log`. Les originaux complets restent dans `.omx/reprise-026/outil/tee/`. Ces fichiers de validation ne sont pas suivis par Git.
 
-- **Barrière workspace non verte** : intégration d’un correctif du périmètre Cargo/core de la lane Linux, ou environnement Windows capable de fournir le dossier de profil, puis relance obligatoire de la commande exacte.
-- **Linux non exécuté** : WSL retourne `Wsl/EnumerateDistros/Service/E_ACCESSDENIED`. Les tests portables de lancement et le contrat SIGTERM/groupe sont prêts, sans preuve d’exécution Linux dans cette lane.
-- PATH utilisateur réel et nouveaux terminaux : uniquement simulés, afin de respecter l’interdiction de modifier le profil réel.
-- Authenticode, certificat, chaîne de confiance, SmartScreen et ZIP réellement signé : non vérifiés ; signataire simulé seulement. Aucune clé utilisée.
-- Images Windows invalides 193/216 : classification 126 ajoutée, mais lancement réel non retenu dans le harnais car un dialogue système peut bloquer un test sans surveillance. Le refus d’exécuter un répertoire est vérifié dans les trois modes.
-- `TerminateProcess` et SIGKILL restent non interceptables : pas de vue finale possible, récupération limitée aux octets déjà écrits dans le tee incrémental. L’arrêt forcé représente aussi une expiration externe ; exec n’a pas de timeout interne ajouté.
-- Le défaut cosmétique des messages d’idempotence, présent dans l’annexe mais non demandé, reste inchangé.
+### Rejeu Unix requis
 
-HOME, USERPROFILE, CODEX_HOME, AppData et temporaires des essais sont isolés dans `.omx`. Aucun push, publication, certificat réel ni modification du PATH utilisateur réel. Aucune exécution ni nouvel artefact d’un outil concurrent de compression hors `bench/`.
+Le pilote doit exécuter `cargo test --workspace --release --locked`, puis `cargo clippy --bin lm-resizer -- -D warnings`. Le contrôle ciblé est :
+
+```sh
+cargo test --locked -p lm-resizer --test exec_streams --test windows_launch_contract --test exec_terminal --test interruption_contract
+```
+
+Les quatre rouges propres à la branche signalés dans la revue sont couverts : `raw_failure_keeps_whitespace_and_stderr_only_is_labeled`, `legacy_filter_cannot_discard_the_stderr_boundary`, `non_utf8_bytes_survive_tee_in_captured_and_streamed_execution` et `invalid_executable_is_126_in_every_exec_mode`. Le nouveau test pty couvre le blocage supplémentaire. Les preuves rouges A/C viennent de la revue indépendante ; leur vert après correction reste à mesurer sous Unix.
+
+Risques résiduels : ordre inter-flux limité à l’ordre de drainage dans les modes séparés ; en mode terminal Unix, le relais cible seulement l’enfant immédiat pour préserver le groupe de premier plan ; macOS et Unix non exécutés ici. Les réserves non bloquantes de l’annexe sur la console Windows et la signature réelle ne sont pas élargies en nouvelles corrections.
 
 ## Mesure des outils
 
-**18 commandes enveloppées finalisées**, mesurées avec `tiktoken-rs/o200k_base`, comptage exact. La phase de bootstrap et les tests autonomes exécutés directement ne sont pas comptés comme commandes enveloppées.
+**9 commandes enveloppées de cette reprise**, sélectionnées dans l’état isolé de LM Resizer. **12 entrées synthétiques** produites par les tests sont exclues. Les commandes supplémentaires de bootstrap et les essais d’agent utilisant un autre état ne sont pas comptés.
 
 | Mesure | Résultat |
 | --- | ---: |
-| Octets originaux | 541 313 |
-| Octets des vues | 535 067 |
-| Gain octets net par soustraction | 6 246 |
-| Gain octets selon stats, borné à zéro par commande | 6 402 |
-| Tokens originaux | 135 091 |
-| Tokens des vues | 133 178 |
-| Tokens économisés nets | 1 913 |
+| Octets originaux | 322 854 |
+| Octets des vues | 170 336 |
+| Gain net par soustraction | 152 518 |
+| Gain selon `stats`, borné à zéro par commande | 153 204 |
+| Jetons économisés estimés par `stats` (octets ÷ 4) | 38 301 |
 
-Preuves : [stats des commandes réellement enveloppées](.omx/windows-fix/logs/wrapper-measurement.json), [périmètre de sélection](.omx/windows-fix/logs/measurement-scope.json). Le journal initial était partagé avec les tests synthétiques : 15 entrées synthétiques valides et 3 lignes non JSON ont été écartées. Les stats ci-dessus sont recalculées par `lm-resizer stats --json` sur une copie contenant uniquement les enregistrements des vraies commandes enveloppées. Les vues brutes sur échec dominent ces validations ; ces chiffres ne constituent ni un benchmark général ni une économie financière.
+Il s’agit d’une estimation de jetons, pas d’un comptage exact `o200k_base`. Périmètre : `.omx/reprise-026/mesure/exec-history.jsonl` ; résultat de `lm-resizer stats` : `.omx/reprise-026/logs/mesure-outils.json`. Les journaux bruts ont été relus pour identifier tous les échecs du premier run et compter les résultats du dernier.
+
+Code Explorer : **0 requête**. Une tentative `omx explore` a été refusée par le CLI car cette surface est retirée ; les lectures ont utilisé les outils locaux ordinaires.
