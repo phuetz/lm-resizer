@@ -4019,6 +4019,29 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
             }
         }
     }
+    // Git : la sous-commande se lit après les options globales (`--no-pager`, `-C`, `-c`…). Une
+    // sous-commande sans vue native (liste de commits, alias, `branch`, `blame`…) reste brute :
+    // le résumé générique supprime des lignes sans signal, donc des entrées.
+    if command
+        .first()
+        .is_some_and(|program| command_basename(program) == "git")
+    {
+        match command_views::git_without_globals(command) {
+            Some(plain) if plain.as_slice() != command => {
+                return filter_command_output(&plain, raw);
+            }
+            Some(plain)
+                if !matches!(
+                    plain.get(1).map(String::as_str),
+                    Some("log" | "diff" | "show" | "status")
+                ) =>
+            {
+                return ("git-passthrough".to_string(), raw.to_string());
+            }
+            None => return ("git-passthrough".to_string(), raw.to_string()),
+            Some(_) => {}
+        }
+    }
     if let Some(result) = command_views::filter(command, raw) {
         return result;
     }

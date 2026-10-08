@@ -13,6 +13,37 @@ pub fn direct_args(command: &[String]) -> Option<Vec<String>> {
     }
 }
 
+/// `git [options globales] <sous-commande> …` : la commande sans les options globales
+/// (`-C <dir>`, `-c <clé=valeur>`, `--git-dir`, `--no-pager`…), pour reconnaître la sous-commande.
+/// `None` quand aucune sous-commande ne se lit sûrement (option inconnue en fin de ligne).
+pub fn git_without_globals(command: &[String]) -> Option<Vec<String>> {
+    let program = command.first()?;
+    let mut rest = &command[1..];
+    // Options globales qui prennent la valeur suivante (sans `=`).
+    const WITH_VALUE: [&str; 7] = [
+        "-C",
+        "-c",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--super-prefix",
+        "--config-env",
+    ];
+    while let Some(first) = rest.first() {
+        if !first.starts_with('-') {
+            let mut out = vec![program.clone()];
+            out.extend(rest.iter().cloned());
+            return Some(out);
+        }
+        rest = if WITH_VALUE.contains(&first.as_str()) {
+            rest.get(2..)?
+        } else {
+            &rest[1..]
+        };
+    }
+    None
+}
+
 pub fn pipe_command(name: &str) -> Option<Vec<String>> {
     let words: &[&str] = match name {
         "git-log" => &["git", "log"],
@@ -62,7 +93,7 @@ pub fn filter(command: &[String], raw: &str) -> Option<(String, String)> {
     let name = super::command_basename(command.first()?);
     let sub = command.get(1).map(String::as_str).unwrap_or("");
     let (kind, candidate) = match (name.as_str(), sub) {
-        ("git", "log") => ("git-log", git_log(raw)),
+        ("git", "log") => ("git-log", git_log(raw, log_requests_patch(&command[2..]))),
         ("git", "diff") => ("git-diff", git_diff(raw)),
         ("git", "status") => ("git-status", git_status(raw)),
         ("git", "show") => (
@@ -115,11 +146,17 @@ pub fn filter(command: &[String], raw: &str) -> Option<(String, String)> {
 }
 
 fn git_diff(raw: &str) -> String {
+    git_diff_view(raw, true)
+}
+
+/// `truncate` : `git diff` garde la fenêtre d'ouverture d'un grand patch ; `git log` ne tronque
+/// jamais, une troncature y ferait disparaître des commits entiers.
+fn git_diff_view(raw: &str, truncate: bool) -> String {
     let rows: Vec<&str> = raw.lines().collect();
     // Large Git patches can dwarf every other command in an agent transcript.
     // Keep the opening patch records through the reference tool's visible
     // window and make the complete producer output recoverable through tee.
-    if rows.len() > 1000 && rows.first().is_some_and(|r| r.starts_with("diff --git ")) {
+    if truncate && rows.len() > 1000 && rows.first().is_some_and(|r| r.starts_with("diff --git ")) {
         let visible = rows.len().min(350);
         return format!(
             "{}\n[{} further patch lines; retrieve the complete output with tee]\n",
@@ -261,10 +298,58 @@ fn git_log_records(raw: &str) -> Option<String> {
         .then_some(view)
 }
 
-fn git_log(raw: &str) -> String {
-    // A patch is a distinct record type, never message prose.
-    if raw.lines().any(|s| s.starts_with("diff --")) {
-        return git_diff(raw);
+/// Les options de `git log` qui produisent un patch (`-p`, `-u`, `-U<n>`, `--patch…`, `--cc`, `-c`,
+/// `-L`, `--word-diff…`), sauf annulation par `--no-patch` / `-s` ensuite. `args` suit `log`.
+fn log_requests_patch(args: &[String]) -> bool {
+    let mut patch = false;
+    for arg in args {
+        let arg = arg.as_str();
+        if arg == "--" {
+            break;
+        }
+        if matches!(arg, "-s" | "--no-patch") {
+            patch = false;
+        } else if matches!(arg, "-p" | "-u" | "-c" | "--cc" | "--combined")
+            || arg.starts_with("-U")
+            || arg.starts_with("-L")
+            || arg.starts_with("--unified")
+            || arg.starts_with("--word-diff")
+            || arg.starts_with("--color-words")
+            || (arg.len() >= 5 && arg.starts_with("--") && "--patch-with-stat".starts_with(arg))
+            || arg.starts_with("--patch")
+        {
+            patch = true;
+        }
+    }
+    patch
+}
+
+/// Vue d'un `git log` dont la sortie contient des patchs : jamais tronquée, et rendue brute si le
+/// codec ne se déplie pas en l'original exact.
+fn git_log_patch(raw: &str) -> String {
+    let view = git_diff_view(raw, false);
+    if view.starts_with("Patch v") && patch_view::expand(&view).ok().as_deref() != Some(raw) {
+        return raw.to_owned();
+    }
+    view
+}
+
+fn git_log(raw: &str, patch_requested: bool) -> String {
+    // Un séparateur NUL (`-z`) commence les en-têtes suivants par `\0` : aucun découpage sûr.
+    if raw.contains('\0') {
+        return raw.to_owned();
+    }
+    // Un patch est un type d'enregistrement distinct, jamais de la prose de message. Le texte d'un
+    // message ne le décide pas : un message `diff --git …` dans `--format=%B` est de la prose.
+    // Il faut que la commande demande un patch, ou que la sortie ait le format ordinaire (message
+    // indenté, donc un `diff --` en colonne 0 est un vrai patch).
+    let has_patch_row = raw.lines().any(|s| s.starts_with("diff --"));
+    let headered = raw
+        .lines()
+        .find(|row| !row.trim().is_empty())
+        .is_some_and(is_commit_header);
+    if has_patch_row && (patch_requested || headered) {
+        return git_log_patch(raw);
     }
     // Aucun séparateur n'est déduit du texte d'un message : seuls les en-têtes `commit <hash>`
     // découpent, et toute forme sans en-tête (`--oneline`, `--format`, `--graph`) reste brute.
@@ -322,7 +407,7 @@ mod tests {
     fn git_author_stays_with_its_commit() {
         let body = "\n    ligne de corps".repeat(12);
         let raw = format!("commit aaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n{body}\n\ncommit bbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n{body}\n");
-        let view = git_log(&raw);
+        let view = git_log(&raw, false);
         assert!(view.starts_with(
             "commit aaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n"
         ));
@@ -383,7 +468,7 @@ mod tests {
     #[test]
     fn stat_log_keeps_every_commit_title_and_file() {
         let raw = stat_log();
-        let view = git_log(&raw);
+        let view = git_log(&raw, false);
         for fact in [
             "commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -413,7 +498,7 @@ mod tests {
     #[test]
     fn body_line_resembling_a_stat_summary_stays_message_text() {
         let raw = "commit aaaaaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    refactor\n\n    5 files changed in this refactor\n\ncommit bbbbbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n";
-        let view = git_log(raw);
+        let view = git_log(raw, false);
         for fact in [
             "commit aaaaaaa",
             "refactor",
@@ -429,7 +514,7 @@ mod tests {
     fn plain_log_shows_every_commit() {
         let raw = "commit aaaaaaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n\n    ligne 1\n    ligne 2\n    ligne 3\n    ligne 4\n    ligne 5\n\n    Signed-off-by: A <a@example.test>\n\ncommit bbbbbbbb (HEAD -> main)\nMerge: aaaaaaa ccccccc\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    fusion\n\ncommit cccccccc\nAuthor: Zoé <z@example.test>\nDate: before\n\n";
         assert_eq!(
-            git_log(raw),
+            git_log(raw, false),
             "commit aaaaaaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n  ligne 1\n  ligne 2\n  ligne 3\n  [+2 message lines omitted]\ncommit bbbbbbbb (HEAD -> main)\n  Merge: aaaaaaa ccccccc\n  Author: Bob <b@example.test>\n  Date: yesterday\n  fusion\ncommit cccccccc\n  Author: Zoé <z@example.test>\n  Date: before"
         );
     }
@@ -441,13 +526,13 @@ mod tests {
             "sujet cinq\nfusion\ntrois\n",
             "From aac6d6244a36c451c1361bc2e13918afadc3308a Mon Sep 17 00:00:00 2001\nSubject: x\n",
         ] {
-            assert_eq!(git_log(raw), raw);
+            assert_eq!(git_log(raw, false), raw);
         }
     }
     #[test]
     fn abbreviated_commit_headers_are_recognised() {
         let raw = format!("commit abcd\nAuthor: A <a@example.test>\nDate: d\n\n    t\n{}\ncommit ef01\nAuthor: B <b@example.test>\nDate: d\n\n    u\n", "\n    corps".repeat(40));
-        let view = git_log(&raw);
+        let view = git_log(&raw, false);
         assert!(
             view.contains("commit abcd") && view.contains("commit ef01"),
             "{view}"
@@ -457,7 +542,7 @@ mod tests {
     #[test]
     fn a_view_that_would_grow_the_log_is_returned_raw() {
         let raw = "commit aaaaaaa\nAuthor: A <a@example.test>\nDate: d\n\n    t\n";
-        assert_eq!(git_log(raw), raw);
+        assert_eq!(git_log(raw, false), raw);
     }
     #[test]
     fn old_sentinel_text_in_a_message_is_just_text() {
@@ -468,7 +553,7 @@ mod tests {
                 )
             })
             .collect();
-        let view = git_log(&raw);
+        let view = git_log(&raw, false);
         assert_eq!(
             view.lines()
                 .filter(|row| row.starts_with("commit "))
@@ -477,7 +562,69 @@ mod tests {
         );
         // Une forme sans en-tête avec la même chaîne reste brute.
         let oneline = "abc1234 sujet ---END--- un\ndef5678 deux\n";
-        assert_eq!(git_log(oneline), oneline);
+        assert_eq!(git_log(oneline, false), oneline);
+    }
+    fn words(line: &str) -> Vec<String> {
+        line.split_whitespace().map(str::to_string).collect()
+    }
+    #[test]
+    fn git_global_options_are_skipped_to_find_the_subcommand() {
+        for (line, expected) in [
+            ("git log -n 3", Some("git log -n 3")),
+            ("git --no-pager log --oneline", Some("git log --oneline")),
+            ("git -C /tmp/repo log", Some("git log")),
+            ("git -c color.ui=false -c a.b=c log -1", Some("git log -1")),
+            (
+                "git --git-dir=/x/.git --work-tree /x status",
+                Some("git status"),
+            ),
+            ("git --no-pager -C . --bare lg", Some("git lg")),
+            ("git --no-pager", None),
+            ("git -C", None),
+        ] {
+            let got = git_without_globals(&words(line)).map(|c| c.join(" "));
+            assert_eq!(got.as_deref(), expected, "{line}");
+        }
+    }
+    #[test]
+    fn only_patch_options_request_a_patch() {
+        for yes in [
+            "-p",
+            "-u",
+            "-U5",
+            "--patch",
+            "--patch-with-stat",
+            "--pat",
+            "--cc",
+            "-c",
+            "-L1,5:f",
+            "--word-diff",
+            "-n 2 -p",
+        ] {
+            assert!(log_requests_patch(&words(yes)), "{yes}");
+        }
+        for no in [
+            "--oneline",
+            "--stat",
+            "--format=%B",
+            "-n 3",
+            "-p --no-patch",
+            "-p -s",
+            "--pretty=fuller",
+            "--graph",
+        ] {
+            assert!(!log_requests_patch(&words(no)), "{no}");
+        }
+    }
+    #[test]
+    fn nul_separated_and_decoy_patch_text_stay_raw() {
+        let nul = "commit aaaaaaa\nAuthor: A <a@example.test>\n\n    t\n\0commit bbbbbbb\nAuthor: B <b@example.test>\n\n    u\n";
+        assert_eq!(git_log(nul, false), nul);
+        let decoy = format!("diff --git a/x b/x\n{}", "ligne\n".repeat(1200));
+        assert_eq!(git_log(&decoy, false), decoy);
+        // Même avec -p : un message n'est pas un patch, le codec se vérifie ou le brut est rendu.
+        let view = git_log(&decoy, true);
+        assert!(view == decoy || patch_view::expand(&view).unwrap() == decoy);
     }
     #[test]
     fn python_module_and_uv_runners_use_the_pytest_view() {

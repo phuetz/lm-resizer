@@ -91,39 +91,167 @@ fn lm_resizer(dir: &Path, state: &Path, args: &[&str]) -> std::process::Output {
         .unwrap()
 }
 
+/// (arguments après `git`, nombre de commits attendus, la sortie montre-t-elle le hash ?,
+/// montre-t-elle le sujet ?)
+type Form = (Vec<String>, usize, bool, bool);
+
+fn form(args: &[&str], count: usize, has_hash: bool, has_subject: bool) -> Form {
+    (
+        args.iter().map(|a| a.to_string()).collect(),
+        count,
+        has_hash,
+        has_subject,
+    )
+}
+
 #[test]
 fn every_git_log_form_keeps_each_commit_visible_or_raw() {
-    check_every_form(&repository(false), 7);
+    check_forms(&repository(false), &common_forms(7));
 }
 
 #[test]
 fn a_sentinel_inside_a_message_never_hides_a_commit() {
-    check_every_form(&repository(true), 9);
+    check_forms(&repository(true), &common_forms(9));
 }
 
-fn check_every_form(repo: &tempfile::TempDir, total: usize) {
-    let state = tempfile::tempdir().unwrap();
-    // (arguments, nombre de commits attendus, la forme montre-t-elle le hash court ?)
-    let forms: &[(&[&str], usize, bool)] = &[
-        (&["log"], total, true),
-        (&["log", "-n", "3"], 3, true),
-        (&["log", "--oneline"], total, true),
-        (&["log", "-p", "-n", "2"], 2, true),
-        (&["log", "-p"], total, true),
-        (&["log", "--stat"], total, true),
-        (&["log", "--stat", "-n", "3"], 3, true),
-        (&["log", "--pretty=fuller"], total, true),
-        (&["log", "--pretty=short"], total, true),
-        (&["log", "--decorate", "-n", "4"], 4, true),
-        (&["log", "--graph", "--oneline"], total, true),
-        (&["log", "--format=%h %s"], total, true),
-        (&["log", "--format=%s"], total, false),
+fn common_forms(total: usize) -> Vec<Form> {
+    vec![
+        form(&["log"], total, true, true),
+        form(&["log", "-n", "3"], 3, true, true),
+        form(&["log", "--oneline"], total, true, true),
+        form(&["log", "-p", "-n", "2"], 2, true, true),
+        form(&["log", "-p"], total, true, true),
+        form(&["log", "--stat"], total, true, true),
+        form(&["log", "--stat", "-n", "3"], 3, true, true),
+        form(&["log", "--pretty=fuller"], total, true, true),
+        form(&["log", "--pretty=short"], total, true, true),
+        form(&["log", "--decorate", "-n", "4"], 4, true, true),
+        form(&["log", "--graph", "--oneline"], total, true, true),
+        form(&["log", "--format=%h %s"], total, true, true),
+        form(&["log", "--format=%s"], total, false, true),
+    ]
+}
+
+/// Ajoute `extra` commits dont un à message vide : de quoi dépasser dix entrées de graphe.
+fn add_commits(repo: &tempfile::TempDir, extra: usize) {
+    for n in 0..extra {
+        let subject = format!("sujet supplémentaire {n}");
+        if n == 3 {
+            commit_file(repo.path(), "a.txt", &format!("extra {n}"), &[]);
+        } else {
+            commit_file(repo.path(), "a.txt", &format!("extra {n}"), &[&subject]);
+        }
+    }
+}
+
+#[test]
+fn git_global_options_never_hide_a_commit() {
+    let repo = repository(false);
+    add_commits(&repo, 10);
+    let path = repo.path().display().to_string();
+    let forms = vec![
+        form(&["--no-pager", "log"], 17, true, true),
+        form(&["--no-pager", "log", "--oneline"], 17, true, true),
+        form(
+            &["--no-pager", "log", "--graph", "--oneline"],
+            17,
+            true,
+            true,
+        ),
+        form(&["--no-pager", "log", "--format=%H"], 17, true, false),
+        form(&["--no-pager", "log", "--stat", "-n", "5"], 5, true, true),
+        form(&["--no-pager", "log", "-p", "-n", "2"], 2, true, true),
+        form(&["-C", &path, "log", "--oneline"], 17, true, true),
+        form(&["-C", &path, "log", "--format=%H"], 17, true, false),
+        form(
+            &["-c", "color.ui=false", "log", "--oneline"],
+            17,
+            true,
+            true,
+        ),
+        form(
+            &["-c", "color.ui=false", "log", "--format=%H"],
+            17,
+            true,
+            false,
+        ),
+        form(
+            &["--git-dir", &format!("{path}/.git"), "log", "--oneline"],
+            17,
+            true,
+            true,
+        ),
+        // Un alias ne se reconnaît pas : le brut est rendu.
+        form(&["-c", "alias.lg=log --oneline", "lg"], 17, true, true),
+        form(&["-c", "alias.lg=log --format=%H", "lg"], 17, true, false),
     ];
+    check_forms(&repo, &forms);
+}
+
+/// Commits dont le message a un corps de huit lignes : la vue par commit est alors plus courte
+/// que le brut et n'est pas rendue brute par la garde de non-croissance.
+fn add_long_commits(repo: &tempfile::TempDir, count: usize) {
+    let body = (0..8)
+        .map(|n| format!("ligne de corps numéro {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for n in 0..count {
+        let subject = format!("sujet long {n}");
+        commit_file(
+            repo.path(),
+            "a.txt",
+            &format!("long {n}"),
+            &[&subject, &body],
+        );
+    }
+}
+
+#[test]
+fn a_message_that_looks_like_a_patch_never_hides_a_commit() {
+    let repo = repository(false);
+    add_commits(&repo, 2);
+    // Le plus récent : sa première ligne est celle de `--format=%B`.
+    let body = (0..1200)
+        .map(|n| format!("ligne distincte {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    commit_file(
+        repo.path(),
+        "a.txt",
+        "leurre",
+        &["diff --git a/leurre b/leurre", &body],
+    );
+    let forms = vec![
+        form(&["log", "--format=%B%n%H"], 10, true, true),
+        form(&["log", "--format=%B"], 10, false, true),
+        form(&["log", "--format=diff --git %H%n%B"], 10, true, true),
+        form(&["log", "-p", "--format=%B%n%H"], 10, true, true),
+        form(&["log"], 10, true, true),
+        form(&["log", "--stat"], 10, true, true),
+    ];
+    check_forms(&repo, &forms);
+}
+
+#[test]
+fn nul_separated_log_keeps_every_subject() {
+    let repo = repository(false);
+    add_long_commits(&repo, 4);
+    let forms = vec![
+        form(&["log", "-z"], 11, true, true),
+        form(&["log", "-z", "--stat"], 11, true, true),
+        form(&["log", "-z", "--format=%h %s"], 11, true, true),
+        form(&["log", "-z", "--pretty=fuller"], 11, true, true),
+    ];
+    check_forms(&repo, &forms);
+}
+
+fn check_forms(repo: &tempfile::TempDir, forms: &[Form]) {
+    let state = tempfile::tempdir().unwrap();
     let mut failures = Vec::new();
-    for (args, count, has_hash) in forms {
+    for (args, count, has_hash, has_subject) in forms {
         let mut listing = vec!["log", "--format=%h%x09%s"];
-        if let Some(position) = args.iter().position(|a| *a == "-n") {
-            listing.extend(&args[position..position + 2]);
+        if let Some(position) = args.iter().position(|a| a == "-n") {
+            listing.extend([args[position].as_str(), args[position + 1].as_str()]);
         }
         let expected = String::from_utf8(git(repo.path(), &listing)).unwrap();
         let commits: Vec<(&str, &str)> = expected
@@ -132,9 +260,10 @@ fn check_every_form(repo: &tempfile::TempDir, total: usize) {
             .collect();
         assert_eq!(commits.len(), *count, "{args:?}");
 
-        let direct = git(repo.path(), args);
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let direct = git(repo.path(), &arg_refs);
         let mut wrapped = vec!["exec", "--", "git"];
-        wrapped.extend(*args);
+        wrapped.extend(&arg_refs);
         let out = lm_resizer(repo.path(), state.path(), &wrapped);
         assert!(out.status.success(), "{args:?}: {out:?}");
         let view = String::from_utf8(out.stdout).unwrap();
@@ -145,7 +274,7 @@ fn check_every_form(repo: &tempfile::TempDir, total: usize) {
                 if *has_hash && !view.contains(hash) {
                     lost.push(format!("hash {hash}"));
                 }
-                if !subject.is_empty() && !view.contains(subject) {
+                if *has_subject && !subject.is_empty() && !view.contains(subject) {
                     lost.push(format!("sujet {subject:?}"));
                 }
                 lost
