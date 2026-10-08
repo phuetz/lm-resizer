@@ -16,6 +16,8 @@ fi
 node scripts/test-source-install-docs.cjs
 node scripts/test-release-paths.cjs
 node scripts/test-binary-path-scan.cjs
+node bench/real/test-comparison-name.cjs
+node bench/real/check-comparison-name.cjs
 node scripts/test-install-fallback.cjs
 python3 bench/real/ensure_oracle_source.py
 python3 bench/real/test_source_similarity.py
@@ -38,7 +40,7 @@ python3 bench/real/test_large_capture.py
 "$root/scripts/package-release.sh"
 # The shipped archive, not only the build output: nothing of the builder may travel in it.
 for archive in dist/lm-resizer-*.tar.gz dist/lm-resizer-*.zip; do
-  [ -f "$archive" ] && node scripts/check-binary-paths.cjs "$archive"
+  [ -f "$archive" ] && node scripts/check-binary-paths.cjs "$archive" && node bench/real/check-comparison-name.cjs "$archive"
 done
 "$root/scripts/check-publish-readiness.sh" >/dev/null
 "$root/scripts/test-install-grok-skill.sh"
