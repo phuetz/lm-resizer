@@ -146,4 +146,109 @@ if ($script:writtenUserPath -ne "C:\existing;$destination") {{
             stderr
         );
     }
+
+    /// Windows-only because this executes the shipped signing script end to end.
+    /// Get-Command resolves signtool to a local byte-appending mock, so no key is used.
+    #[test]
+    fn signing_rebuilds_windows_zip_and_sidecar_from_signed_staging_tree() {
+        let signing_path = std::env::var_os("LM_RESIZER_TEST_SIGN_SOURCE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| repository_root().join("scripts/sign-windows-release.ps1"));
+        let signing = fs::read_to_string(&signing_path).expect("read signing contract source");
+        let checksums =
+            fs::read_to_string(repository_root().join("scripts/generate-checksums.ps1"))
+                .expect("read generate-checksums.ps1");
+
+        let sandbox = sandbox("signed-archive-contract");
+        let fake_root = sandbox.join("release-root");
+        let fake_scripts = fake_root.join("scripts");
+        fs::create_dir_all(&fake_scripts).expect("create fake release scripts directory");
+        fs::write(fake_scripts.join("sign-windows-release.ps1"), signing)
+            .expect("copy signing script into fake release root");
+        fs::write(fake_scripts.join("generate-checksums.ps1"), checksums)
+            .expect("copy checksum script into fake release root");
+        fs::write(
+            fake_scripts.join("fake-sign.ps1"),
+            r#"$target = $args[$args.Count - 1]
+$before = [IO.File]::ReadAllBytes($target)
+$marker = [byte[]](83, 73, 71, 78, 69, 68, 45, 66, 89, 45, 77, 79, 67, 75)
+$after = New-Object byte[] ($before.Length + $marker.Length)
+[Array]::Copy($before, 0, $after, 0, $before.Length)
+[Array]::Copy($marker, 0, $after, $before.Length, $marker.Length)
+[IO.File]::WriteAllBytes($target, $after)
+$global:LASTEXITCODE = 0
+"#,
+        )
+        .expect("write fake signtool");
+
+        let harness = sandbox.join("signed-archive-contract.ps1");
+        let escaped_root = fake_root.display().to_string().replace('\'', "''");
+        let script = format!(
+            r#"$root = '{escaped_root}'
+$scripts = Join-Path $root 'scripts'
+$global:fakeSignPath = Join-Path $scripts 'fake-sign.ps1'
+function global:Get-Command {{
+  param([string]$Name)
+  if ($Name -eq 'signtool.exe') {{ return [pscustomobject]@{{ Source = $global:fakeSignPath }} }}
+  throw "unexpected Get-Command call: $Name"
+}}
+
+$dist = Join-Path $root 'dist'
+$stage = Join-Path $dist 'lm-resizer-0.2.6-windows-x86_64'
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+$unsignedBytes = [byte[]](77, 90, 0, 85, 78, 83, 73, 71, 78, 69, 68, 255)
+$stagedExe = Join-Path $stage 'lm-resizer.exe'
+[IO.File]::WriteAllBytes($stagedExe, $unsignedBytes)
+$zip = "$stage.zip"
+Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
+[IO.File]::WriteAllText("$zip.sha256", ('0' * 64) + '  ' + [IO.Path]::GetFileName($zip))
+
+& (Join-Path $scripts 'sign-windows-release.ps1') -CertificateThumbprint 'simulation-no-key'
+if ($LASTEXITCODE -ne 0) {{ throw "signing script failed with $LASTEXITCODE" }}
+$signedBytes = [IO.File]::ReadAllBytes($stagedExe)
+if ([BitConverter]::ToString($signedBytes) -eq [BitConverter]::ToString($unsignedBytes)) {{
+  throw 'fake signtool did not modify the staged executable'
+}}
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [IO.Compression.ZipFile]::OpenRead($zip)
+try {{
+  $entry = $archive.GetEntry('lm-resizer.exe')
+  if (-not $entry) {{ throw 'rebuilt ZIP is missing lm-resizer.exe' }}
+  $stream = $entry.Open()
+  try {{
+    $actualBytes = New-Object byte[] $entry.Length
+    [void]$stream.Read($actualBytes, 0, $actualBytes.Length)
+  }} finally {{ $stream.Dispose() }}
+}} finally {{ $archive.Dispose() }}
+if ([BitConverter]::ToString($actualBytes) -ne [BitConverter]::ToString($signedBytes)) {{
+  throw 'ZIP still contains unsigned executable bytes after signing'
+}}
+$sha = [Security.Cryptography.SHA256]::Create()
+$inputFile = [IO.File]::OpenRead($zip)
+try {{
+  $expectedHash = [BitConverter]::ToString($sha.ComputeHash($inputFile)).Replace('-', '').ToLowerInvariant()
+}} finally {{
+  $inputFile.Dispose()
+  $sha.Dispose()
+}}
+$expectedLine = "$expectedHash  $([IO.Path]::GetFileName($zip))"
+$actualLine = (Get-Content -LiteralPath "$zip.sha256" -Raw).Trim()
+if ($actualLine -ne $expectedLine) {{ throw "stale ZIP sidecar: '$actualLine'" }}
+"#
+        );
+        fs::write(&harness, script).expect("write PowerShell harness");
+
+        let output = run_isolated_powershell(&sandbox, &harness);
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        fs::remove_dir_all(&sandbox).expect("remove sandbox");
+        assert!(
+            output.status.success(),
+            "PowerShell signed archive contract failed for {}:\nstdout:\n{}\nstderr:\n{}",
+            signing_path.display(),
+            stdout,
+            stderr
+        );
+    }
 }

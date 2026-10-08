@@ -8,6 +8,41 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# LM_RESIZER_SIGNED_ARCHIVE_HELPER_START
+function Update-LmResizerWindowsArchives {
+  param([Parameter(Mandatory = $true)][string]$DistRoot)
+
+  $stages = @(
+    Get-ChildItem -Path $DistRoot -Directory -Filter "lm-resizer-*-windows-x86_64" -ErrorAction SilentlyContinue
+  )
+  if ($stages.Count -eq 0) {
+    throw "no packaged Windows staging directory found; run package-release.ps1 before signing"
+  }
+
+  foreach ($stage in $stages) {
+    $stagedExe = Join-Path $stage.FullName "lm-resizer.exe"
+    if (-not (Test-Path -LiteralPath $stagedExe -PathType Leaf)) {
+      throw "packaged Windows staging directory is missing lm-resizer.exe: $($stage.FullName)"
+    }
+
+    $zip = "$($stage.FullName).zip"
+    Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+    Compress-Archive -Path (Join-Path $stage.FullName "*") -DestinationPath $zip
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $inputFile = [IO.File]::OpenRead($zip)
+    try {
+      $hash = [BitConverter]::ToString($sha.ComputeHash($inputFile)).Replace('-', '').ToLowerInvariant()
+    } finally {
+      $inputFile.Dispose()
+      $sha.Dispose()
+    }
+    Set-Content -LiteralPath "$zip.sha256" `
+      -Value "$hash  $([IO.Path]::GetFileName($zip))" -Encoding ASCII
+    Write-Host "Repackaged signed archive $zip"
+  }
+}
+# LM_RESIZER_SIGNED_ARCHIVE_HELPER_END
+
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
 if (-not $signtool -and -not $DryRun) {
@@ -52,7 +87,9 @@ foreach ($target in $targets) {
     if ($LASTEXITCODE -ne 0) { throw "signtool failed for $target" }
   }
 }
+# LM_RESIZER_SIGNING_COMPLETE
 
 if (-not $DryRun) {
+  Update-LmResizerWindowsArchives -DistRoot $distRoot
   powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "generate-checksums.ps1")
 }
