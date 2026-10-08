@@ -40,6 +40,7 @@ use walkdir::WalkDir;
 
 mod advice_cli;
 mod agent_hooks;
+mod capture_interrupt;
 mod command_capture;
 mod command_filters;
 mod command_views;

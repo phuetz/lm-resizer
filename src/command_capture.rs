@@ -164,21 +164,51 @@ fn run_with_stream(command: &[String], stream: bool, live_stderr: bool) -> anyho
         .ok_or_else(|| anyhow::anyhow!("missing producer"))?;
     let resolved = crate::resolve_command_path(program).unwrap_or_else(|| program.into());
     let (mut reader, writer) = std::io::pipe()?;
-    let result = build_command(&resolved, args)
+    let mut producer = build_command(&resolved, args);
+    producer
         .stdin(Stdio::inherit())
         .stdout(Stdio::from(writer.try_clone()?))
-        .stderr(Stdio::from(writer))
-        .spawn();
+        .stderr(Stdio::from(writer));
+    crate::capture_interrupt::configure_process_group(&mut producer);
+    // Install before spawn so a signal cannot terminate lm-resizer in the
+    // interval between creating the producer and registering the relay.
+    let interrupt_guard = crate::capture_interrupt::relay_interruptions()
+        .map_err(|error| anyhow::anyhow!("cannot install producer interruption relay: {error}"))?;
+    let result = producer.spawn();
+    // `Command` retains its configured Stdio handles after spawn. Close those
+    // parent-side writer copies so EOF reflects the producer group exiting.
+    drop(producer);
     match result {
         Ok(mut child) => {
+            if let Err(error) = interrupt_guard.set_child(&child) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(anyhow::anyhow!(
+                    "cannot register producer interruption relay: {error}"
+                ));
+            }
+            let mut tee = crate::capture_interrupt::DurableTee::create();
             let mut raw = Vec::new();
-            let mut show_live = stream;
             let mut chunk = [0u8; 8192];
+            let mut show_live = stream;
             loop {
-                let count = reader.read(&mut chunk)?;
+                let count = match reader.read(&mut chunk) {
+                    Ok(count) => count,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => {
+                        // A broken capture pipe can otherwise leave a producer
+                        // blocked forever. End it, reap it, and keep the
+                        // incrementally flushed tee available for diagnosis.
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        let _ = tee.finish(&raw);
+                        return Err(error.into());
+                    }
+                };
                 if count == 0 {
                     break;
                 }
+                tee.append(&chunk[..count]);
                 raw.extend_from_slice(&chunk[..count]);
                 if show_live {
                     // Reserve stdout for metadata in JSON mode; otherwise
@@ -202,6 +232,7 @@ fn run_with_stream(command: &[String], stream: bool, live_stderr: bool) -> anyho
                 }
             }
             let status = child.wait()?;
+            let _ = tee.finish(&raw);
             Ok(Capture {
                 raw,
                 code: crate::child_exit_code(status),
