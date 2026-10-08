@@ -412,7 +412,9 @@ fn pipe_recovery_hint_resolves_through_the_lm_command() {
     use std::io::Write;
     use std::process::Stdio;
     let dir = tempfile::tempdir().unwrap();
-    let raw = "commit abcdef\n".to_owned() + &"    complete commit detail\n".repeat(100);
+    // Disposition réelle du format par défaut : en-tête, Author:, Date:, ligne vide, message indenté.
+    let raw = "commit abcdef\nAuthor: A <a@example.test>\nDate:   today\n\n".to_owned()
+        + &"    complete commit detail\n".repeat(100);
     let mut child = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
         .env("LM_RESIZER_STATE_DIR", dir.path())
         .args(["pipe", "--filter", "git-log", "--json", "--exit-code", "2"])

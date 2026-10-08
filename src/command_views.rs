@@ -234,6 +234,36 @@ fn stat_row(row: &str) -> Option<String> {
 }
 
 /// `commit <hash>` : 40 chiffres, ou une abréviation (`--abbrev-commit`, quatre au minimum pour git).
+/// Défense en profondeur pour le texte déjà produit (`tool-output`, `pipe`), dont le format n'est pas
+/// connu par la commande : chaque en-tête `commit <hash>` est suivi de la disposition par défaut, des
+/// lignes `Merge:`, `Author:` et `Date:` seules jusqu'à la ligne vide. Un format qui imite un en-tête
+/// (`commit %T%n    …`) ne l'a pas. Ce contrôle ne remplace pas le contrat de la commande (voir
+/// [`git_log_default_format`]) : il en réduit seulement les trous.
+fn has_default_layout(raw: &str) -> bool {
+    let rows: Vec<&str> = raw.lines().collect();
+    let mut headers = 0usize;
+    for (i, row) in rows.iter().enumerate() {
+        if !is_commit_header(row) {
+            continue;
+        }
+        headers += 1;
+        let (mut author, mut date) = (false, false);
+        for line in rows[i + 1..].iter().take_while(|l| !l.trim().is_empty()) {
+            if line.starts_with("Author:") {
+                author = true;
+            } else if line.starts_with("Date:") {
+                date = true;
+            } else if !line.starts_with("Merge:") {
+                return false;
+            }
+        }
+        if !(author && date) {
+            return false;
+        }
+    }
+    headers > 0
+}
+
 fn is_commit_header(row: &str) -> bool {
     row.strip_prefix("commit ").is_some_and(|rest| {
         rest.split_whitespace()
@@ -253,6 +283,7 @@ fn git_log_records(raw: &str) -> Option<String> {
         .lines()
         .find(|row| !row.trim().is_empty())
         .is_some_and(is_commit_header)
+        || !has_default_layout(raw)
     {
         return None;
     }

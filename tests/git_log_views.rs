@@ -413,3 +413,52 @@ fn the_default_format_without_configuration_is_still_shortened() {
         assert!(view.contains(hash), "hash {hash} absent de la vue");
     }
 }
+
+/// Texte déjà produit (`tool-output`, `pipe`) : la commande décrite ne dit pas le format. Un format
+/// qui imite un en-tête sans la disposition par défaut (`Author:`, `Date:`) reste brut.
+#[test]
+fn already_captured_text_in_an_imitation_format_is_never_shortened() {
+    let repo = long_history();
+    let state = tempfile::tempdir().unwrap();
+    let hashes = String::from_utf8(git(repo.path(), &["log", "--format=%H"])).unwrap();
+    for format in [
+        "--format=commit %T%n%w(0,4,4)%b%n%H %s",
+        "--format=commit %T%n    ligne 1%n    ligne 2%n    ligne 3%n    ligne 4%n    %H %s",
+        "--format=commit deadbeef%n    ligne 1%n    ligne 2%n    ligne 3%n    ligne 4%n    %H %s",
+    ] {
+        let raw = git(repo.path(), &["log", format]);
+        let input = repo.path().join("capture.txt");
+        std::fs::write(&input, &raw).unwrap();
+        let input = input.to_str().unwrap();
+        let views = [
+            lm_resizer(
+                repo.path(),
+                state.path(),
+                &["tool-output", "--command", "git log", "--input", input],
+            )
+            .stdout,
+            {
+                use std::io::Write;
+                let mut child = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+                    .current_dir(repo.path())
+                    .env("LM_RESIZER_STATE_DIR", state.path())
+                    .env("LM_RESIZER_TRACKING", "0")
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .args(["pipe", "--filter", "git-log"])
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                child.stdin.take().unwrap().write_all(&raw).unwrap();
+                child.wait_with_output().unwrap().stdout
+            },
+        ];
+        for (route, view) in ["tool-output", "pipe"].iter().zip(views) {
+            let view = String::from_utf8(view).unwrap();
+            for hash in hashes.lines() {
+                assert!(view.contains(hash), "{route} {format}: hash {hash} absent");
+            }
+        }
+    }
+}
