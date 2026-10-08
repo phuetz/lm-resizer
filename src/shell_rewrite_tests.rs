@@ -53,6 +53,7 @@ impl Sandbox {
         Process::new("/bin/sh")
             .arg("-c")
             .arg(command)
+            .stdin(std::process::Stdio::null())
             .current_dir(&work)
             .env("PATH", path)
             .env("LMR_CALLS", &calls)
@@ -123,7 +124,8 @@ fn assert_same_behaviour(sandbox: &Sandbox, original: &str) {
         report.rewritten
     );
     if !report.changed {
-        assert_eq!(report.rewritten, original.trim());
+        // Seuls les blancs de bord peuvent différer (une espace échappée finale est conservée).
+        assert_eq!(report.rewritten.trim_end(), original.trim_end());
         return;
     }
     assert_eq!(
@@ -218,6 +220,14 @@ fn trap_corpus_never_changes_what_the_shell_runs() {
         "head -n 1 x\ntouch pwned",
         "head -n 1 x \\\ntouch pwned",
         "head -n 1 x # touch pwned",
+        "git log -1 \n && cargo test",
+        "git status\ncargo test",
+        "grep -rn && head -n 1 b c \\   \n",
+        "cargo test a\\ ",
+        "cargo test && ls \\",
+        "git status && \\\ncargo test",
+        "cargo test\r\ntouch pwned",
+        "git commit -m 'a\nb' && cargo test",
         "head -n 1 x#y",
         "head -n 1 'x';touch pwned",
         "head -n 1 \"x;touch pwned\"",
@@ -382,5 +392,102 @@ fn generated_command_shim_does_not_execute_a_hostile_install_path() {
         files,
         ["mark"],
         "le shim a exécuté une partie du chemin : {files:?}"
+    );
+}
+
+/// Générateur pseudo-aléatoire déterministe (LCG) : mêmes lignes à chaque exécution.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self, bound: usize) -> usize {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((self.0 >> 33) as usize) % bound
+    }
+}
+
+#[test]
+fn random_lines_of_shell_metacharacters_keep_their_meaning() {
+    const PROGRAMS: &[&str] = &[
+        "head -n 1",
+        "cargo test",
+        "git status",
+        "git log -1",
+        "psql -c",
+        "grep -rn",
+        "ls",
+        "echo",
+    ];
+    const PIECES: &[&str] = &[
+        " ",
+        " ",
+        " ",
+        "a",
+        "b c",
+        "'",
+        "'",
+        "\"",
+        "\"",
+        "\\",
+        "$",
+        "$HOME",
+        "`",
+        ";",
+        " && ",
+        " || ",
+        "#",
+        "\n",
+        "*",
+        "~",
+        "{x,y}",
+        "(",
+        ")",
+        " | ",
+        "é",
+        "-x",
+        "--flag=v",
+        "'it'\\''s'",
+        "\"\\\"\"",
+        "touch pwned",
+        "$(touch pwned)",
+        "\\;",
+        "2>&1",
+        "<",
+        ">out",
+    ];
+    let sandbox = Sandbox::new();
+    // Graine et nombre de lignes réglables pour une recherche plus longue :
+    // LMR_FUZZ_SEED=7 LMR_FUZZ_LINES=5000 cargo test random_lines
+    let seed = std::env::var("LMR_FUZZ_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0x5eed_1234_abcd_ef01);
+    let lines = std::env::var("LMR_FUZZ_LINES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(250);
+    let mut rng = Lcg(seed);
+    let mut rewritten = 0;
+    for _ in 0..lines {
+        let mut line = String::from(PROGRAMS[rng.next(PROGRAMS.len())]);
+        for _ in 0..1 + rng.next(5) {
+            if rng.next(4) == 0 {
+                line.push_str(" && ");
+                line.push_str(PROGRAMS[rng.next(PROGRAMS.len())]);
+            }
+            line.push(' ');
+            line.push_str(PIECES[rng.next(PIECES.len())]);
+        }
+        let report = rewrite_shell_report(&line);
+        rewritten += usize::from(report.changed);
+        // `echo` ne fait pas partie des stubs : sa sortie n'est pas enregistrée, mais la
+        // création de fichiers (touch pwned, redirections) l'est.
+        assert_same_behaviour(&sandbox, &line);
+    }
+    assert!(
+        rewritten >= 20,
+        "seulement {rewritten} lignes réécrites sur 400"
     );
 }

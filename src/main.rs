@@ -3493,7 +3493,58 @@ fn rewrite_command_report(command: &[String]) -> RewriteReport {
     }
 }
 
+/// Rogne les espaces de bord d'un segment de commande, sauf une espace échappée finale : dans
+/// `ls dossier\ ` la dernière espace fait partie du mot (le shell lit `dossier `), la rogner
+/// laisserait une barre oblique inverse en fin de ligne.
+fn trim_shell(text: &str) -> &str {
+    let start = text.trim_start();
+    let end = start.trim_end();
+    let backslashes = end.bytes().rev().take_while(|byte| *byte == b'\\').count();
+    if backslashes % 2 == 1 && end.len() < start.len() {
+        if let Some(next) = start[end.len()..].chars().next() {
+            return &start[..end.len() + next.len_utf8()];
+        }
+    }
+    end
+}
+
+/// Vrai si la ligne contient une nouvelle ligne hors citation (ou une barre oblique inverse
+/// devant une nouvelle ligne) : pour le shell c'est un séparateur de commandes ou une
+/// continuation, que la reconstruction segment par segment ne sait pas reproduire.
+fn has_unquoted_newline(command: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for ch in trim_shell(command).chars() {
+        if matches!(ch, '\n' | '\r') && (escaped || (!in_single && !in_double)) {
+            return true;
+        }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn rewrite_shell_report(command: &str) -> RewriteShellReport {
+    // Une nouvelle ligne séparant deux commandes serait perdue par la reconstruction (les
+    // segments sont rognés) : `A \n && B` est une erreur de syntaxe pour le shell, mais la ligne
+    // réécrite `A && B` exécuterait B. Dans le doute, la ligne reste telle quelle.
+    if has_unquoted_newline(command) {
+        return RewriteShellReport {
+            command: command.to_string(),
+            changed: false,
+            rewritten: trim_shell(command).to_string(),
+            rewrites: Vec::new(),
+        };
+    }
     let tokens = split_shell_operators(command);
     let mut output = String::new();
     let mut rewrites = Vec::new();
@@ -3510,7 +3561,7 @@ fn rewrite_shell_report(command: &str) -> RewriteShellReport {
                 after_pipe = operator_consumes_output(op);
             }
             ShellToken::Segment(segment) => {
-                let trimmed = segment.trim();
+                let trimmed = trim_shell(segment);
                 if trimmed.is_empty() {
                     continue;
                 }
@@ -3543,13 +3594,19 @@ fn rewrite_shell_report(command: &str) -> RewriteShellReport {
 
     // Aucun segment réécrit : rendre la ligne d'origine, sans normaliser les espaces.
     let rewritten = if rewrites.is_empty() {
-        command.trim().to_string()
+        trim_shell(command).to_string()
     } else {
-        output.trim().to_string()
+        // `output` se termine par l'espace de séparation ajoutée ci-dessus, pas par une espace
+        // échappée d'origine : la retirer seule, sans rogner davantage.
+        let mut text = output;
+        if text.ends_with(' ') {
+            text.pop();
+        }
+        text.trim_start().to_string()
     };
     RewriteShellReport {
         command: command.to_string(),
-        changed: rewritten != command.trim(),
+        changed: rewritten != trim_shell(command),
         rewritten,
         rewrites,
     }
@@ -3565,7 +3622,7 @@ fn rewrite_shell_segment(segment: &str) -> Option<(String, String)> {
     if segment_must_not_be_rewritten(segment) {
         return None;
     }
-    let segment = segment.trim();
+    let segment = trim_shell(segment);
     // Découpage POSIX strict : s'il refuse la ligne (citation non fermée, opérateur non cité,
     // commentaire, nouvelle ligne), la ligne d'origine reste telle quelle.
     let args = posix_split(segment)?;
@@ -3843,7 +3900,7 @@ fn split_shell_operators(command: &str) -> Vec<ShellToken> {
 
 fn push_shell_segment(tokens: &mut Vec<ShellToken>, segment: &str) {
     if !segment.trim().is_empty() {
-        tokens.push(ShellToken::Segment(segment.trim().to_string()));
+        tokens.push(ShellToken::Segment(trim_shell(segment).to_string()));
     }
 }
 
