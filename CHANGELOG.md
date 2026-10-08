@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.6] - préparation du 2026-10-08
+
+La 0.2.5 est publiée. Cette version ajoute le résumé syntaxique local de `smart`, corrige la vue `git log --stat` et documente le rejeu du banc en une commande.
+
+### `smart --ast`
+- `lm-resizer smart <fichier> --ast` résume localement (tree-sitter, sans modèle ni réseau) la structure de fichiers Rust, Python, JavaScript et TypeScript : imports, types, signatures et numéro de ligne réel de chaque déclaration, corps omis. Une source invalide ou une extension inconnue donne un repli annoncé en tête (`[smart AST: repli …]`) et la sortie historique de `smart`. Sans `--ast`, la sortie de `smart` reste identique octet pour octet à celle de la 0.2.5 (fixtures `tests/fixtures/smart/`).
+- Mesures sur trois fichiers réels du dépôt, en octets : 82,29 %, 93,47 % et 89,08 % de réduction ([`bench/real/smart-ast-measurements.json`](bench/real/smart-ast-measurements.json)). Les jetons du JSON `--ast` restent une estimation octets ÷ 4 (`token_count_method: "approximate"`), contrairement au reste du produit.
+- Correction relevée à la relecture : les attributs Rust `#[…]` n'apparaissent plus comme documentation de la déclaration (ils étaient rendus en `// [derive(…)]`), les commentaires s'y lisent au-dessus des attributs ; `#` n'ouvre un commentaire qu'en Python, un champ privé JavaScript `#secret` n'est plus pris pour un commentaire.
+- Poids : le binaire release grossit d'environ 12 % (+3,9 Mo mesurés à la relecture) ; dépendances nouvelles tree-sitter (MIT) et streaming-iterator, ajoutées à [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES).
+
+### `git log --stat`
+- La vue montrait le premier commit seulement (mesuré : 1 commit sur 40 et 1 fichier sur 316 visibles, soit 99 % de « réduction » en masquant le reste). Elle affiche désormais chaque commit (en-tête, auteur, date, titre, trois lignes de corps au plus) et chaque fichier avec son nombre de lignes, sans les barres de proportion. Mesuré sur quatre dépôts : 40/40 commits et 316/316 fichiers visibles, réduction de 9 à 58 % en jetons `o200k_base`. Le brut reste dans tee.
+- Les autres formes de `git log` ne changent pas, ce qui préserve les chiffres du banc ; leur limite est consignée dans [`docs/KNOWN-MISSES.md`](docs/KNOWN-MISSES.md).
+
+### Banc
+- [`bench/real/rejouer.sh`](bench/real/rejouer.sh) rejoue les 61 captures en une étape : Python isolé avec tiktoken, oracle construit depuis l'archive épinglée, binaire du checkout, dossier de rejeu neuf, synthèse (médiane, moyenne, bruts récupérés, codes du producteur). Le README ne renvoie plus à `parity_rtk.py` seul, qui exige ses arguments.
+- Banc rejoué avec ce script sur le code de cette préparation (corpus de 61 captures, `o200k_base`) : médiane **25,18 %**, moyenne **34,68 %**, brut récupéré 61/61, code du producteur conservé 61/61, vues strictement égales à l'oracle 41/61 — chiffres identiques à ceux de la 0.2.5, vue par vue (aucun des 61 cas n'a changé). Le même script, lancé sur une copie neuve de l'arbre, redonne ces chiffres.
+
 ## [0.2.5] - publication prévue le 2026-10-08
 
 La version 0.2.4 n'a jamais été étiquetée ni publiée : son contenu (section suivante) est livré avec 0.2.5, qui est la première version publiée depuis 0.2.3.
