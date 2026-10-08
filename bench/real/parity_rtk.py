@@ -87,7 +87,7 @@ def visible_body(report):
     hint = report.get("tee_hint")
     if hint:
         key = hint.removeprefix("[raw: ").removesuffix("]")
-        trailer = f"[tee:{key}]\n".encode()
+        trailer = f"[tee:{key}] lm-resizer tee read {key}\n".encode()
         if output.endswith(trailer):
             return output[:-len(trailer)]
     return output

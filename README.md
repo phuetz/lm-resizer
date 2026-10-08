@@ -40,7 +40,7 @@ thread 'parse::reject_empty' panicked at src/parser.rs:42:9:
 assertion `left == right` failed: expected=422 observed=200
 
 test result: FAILED. 70 passed; 1 failed; finished in 0.09s
-[tee:78bf04f25902]
+[tee:78bf04f25902] lm-resizer tee read 78bf04f25902
 ~~~
 
 The same command run on the 78-line file reports **792** original tokens and **80** compressed tokens. Four bundled captures, measured on this machine with `o200k_base`:

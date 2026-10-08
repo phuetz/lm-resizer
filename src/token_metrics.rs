@@ -33,7 +33,8 @@ fn count_cached(text: &str) -> usize {
                 let suffix = &text[known.len()..];
                 if suffix.len() <= 100
                     && (suffix.starts_with("[raw: ") || suffix.starts_with("[tee:"))
-                    && suffix.ends_with("]\n")
+                    && suffix.ends_with('\n')
+                    && !suffix[..suffix.len() - 1].contains('\n')
                 {
                     prefix_count = Some((*count, known.len()));
                 }
@@ -256,7 +257,7 @@ mod tests {
         ] {
             for repeats in [1, 17, 1000] {
                 let raw = prefix.repeat(repeats);
-                let trailer = "[tee:abcdef012345]\n";
+                let trailer = "[tee:abcdef012345] lm-resizer tee read abcdef012345\n";
                 assert_eq!(count_cached(&raw), COUNTER.count_text(&raw));
                 let combined = raw + trailer;
                 assert_eq!(count_cached(&combined), COUNTER.count_text(&combined));

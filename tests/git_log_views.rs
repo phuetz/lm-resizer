@@ -158,7 +158,7 @@ fn check_every_form(repo: &tempfile::TempDir, total: usize) {
         if let Some(id) = view
             .lines()
             .filter_map(|row| row.strip_prefix("[tee:"))
-            .filter_map(|row| row.strip_suffix(']'))
+            .filter_map(|row| row.split_once(']').map(|(id, _)| id))
             .next_back()
         {
             let recalled = lm_resizer(repo.path(), state.path(), &["tee", "read", id]);

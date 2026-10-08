@@ -40,7 +40,7 @@ thread 'parse::reject_empty' panicked at src/parser.rs:42:9:
 assertion `left == right` failed: expected=422 observed=200
 
 test result: FAILED. 70 passed; 1 failed; finished in 0.09s
-[tee:78bf04f25902]
+[tee:78bf04f25902] lm-resizer tee read 78bf04f25902
 ~~~
 
 La même commande sur le fichier de 78 lignes compte **792** jetons d'origine et **80** jetons compressés. Quatre captures fournies, mesurées sur cette machine avec `o200k_base` :

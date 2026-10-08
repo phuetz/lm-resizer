@@ -5582,7 +5582,7 @@ fn append_recovery_instruction(output: &mut String, hint: &str, raw: &str) {
     if !candidate.ends_with('\n') && !candidate.is_empty() {
         candidate.push('\n');
     }
-    candidate.push_str(&format!("[tee:{id}]\n"));
+    candidate.push_str(&format!("[tee:{id}] lm-resizer tee read {id}\n"));
     // Storage and JSON metadata remain available even when the visible hint
     // would consume more tokens than the reduction pays for. Reserve a visible
     // trailer for substantial savings: at least 30% including the trailer.
@@ -14299,7 +14299,7 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
         assert_eq!(small_gain, before);
         let mut large_gain = "summary\n".to_string();
         append_recovery_instruction(&mut large_gain, hint, &raw);
-        assert!(large_gain.ends_with("[tee:012345abcdef]\n"));
+        assert!(large_gain.ends_with("[tee:012345abcdef] lm-resizer tee read 012345abcdef\n"));
         assert!(TokenCounts::measure(&raw, &large_gain).tokens_saved > 0);
         let mut expansion = "word ".repeat(120);
         let before = expansion.clone();
