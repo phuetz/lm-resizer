@@ -39,6 +39,22 @@ follows no upstream redirect. Any local account that can reach the port can stil
 upstream key it holds: do not run it on a shared machine. Give the key through
 `LM_RESIZER_API_KEY` or `--api-key-file`, never on the command line.
 
+## Agent hooks and permission rules
+
+The native hooks (`init-native-hooks`, `install-hooks`) rewrite a supported Bash command
+into `lm-resizer exec -- <command>` through `updatedInput`.
+
+- For Claude Code the hook does not send `permissionDecision`: the rewritten command goes
+  through the normal approval prompt. Only the Codex handler answers `allow`, because Codex
+  marks the hook as failed otherwise. Before 0.2.6 the Claude hook answered `allow` as well,
+  and Claude Code ran the rewritten command without asking.
+- A permission rule matches the command text. After the rewrite the text is
+  `lm-resizer exec -- <command>`, so a `deny` rule written for the original, such as
+  `Bash(cargo test)`, no longer applies. Checked on Claude Code 2.1.294 with `allow: Bash` and
+  `deny: Bash(cargo test)`: the rewritten command ran. Adding `Bash(*exec -- cargo test*)` to
+  `deny` blocked it. Add such a rule for every command you deny, or do not install the hook.
+  An `allow` rule for the original form likewise stops matching.
+
 ## Supply Chain
 
 The WASM package is published manually through a protected GitHub Actions

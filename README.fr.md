@@ -134,6 +134,10 @@ lm-resizer install --client all --scope project
 
 Cette commande écrit les fichiers du projet et la configuration Codex de votre compte, y compris avec `--scope project`. Gemini CLI n'est pas couvert par `install` : utilisez `lm-resizer init --client gemini --project-dir .` ([guide des hooks d'agents](docs/AGENT_HOOKS.md)).
 
+### Crochets et permissions
+
+Les crochets d'agent (`lm-resizer init-native-hooks`, `lm-resizer install-hooks`) réécrivent une commande Bash prise en charge en `lm-resizer exec -- <command>`. Pour Claude Code le crochet ne fait que réécrire : il n'accorde aucune permission, donc Claude Code demande l'accord pour la commande réécrite comme pour toute autre (vérifié sur Claude Code 2.1.294). Seul Codex exige que le crochet réponde `permissionDecision: allow`. La commande réécrite ne correspond plus à une règle de permission écrite pour l'original : **une règle `deny` comme `Bash(cargo test)` n'arrête pas `lm-resizer exec -- cargo test`**. Ajoutez aussi une règle deny pour la forme enveloppée, par exemple `Bash(*exec -- cargo test*)`, ou n'installez pas le crochet. Voir [SECURITY.md](SECURITY.md).
+
 ## Statistiques de jetons reproductibles
 
 `lm-resizer stats --markdown` affiche les comptes exacts du texte avec le tokenizer existant **tiktoken-rs / o200k_base** (famille GPT-4o). Les JSON `exec`, `tool-output` et `compress` exposent `original_tokens`, `compressed_tokens`, le gain signé `tokens_saved`, `tokenizer` et `token_count_method: "exact"`. Le compte inclut les marqueurs de récupération finaux ; un gain négatif signifie davantage de jetons en sortie. Cet encodage de référence ne mesure ni le tokenizer de Claude/Llama ni une facture fournisseur.

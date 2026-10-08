@@ -134,6 +134,10 @@ lm-resizer install --client all --scope project
 
 This writes project files and your account's Codex configuration, including with `--scope project`. Gemini CLI is not covered by `install`: use `lm-resizer init --client gemini --project-dir .` ([agent hooks guide](docs/AGENT_HOOKS.md)).
 
+### Hooks and permissions
+
+The agent hooks (`lm-resizer init-native-hooks`, `lm-resizer install-hooks`) rewrite a supported Bash command into `lm-resizer exec -- <command>`. For Claude Code the hook only rewrites: it does not grant permission, so Claude Code asks for approval of the rewritten command like any other (checked on Claude Code 2.1.294). Only Codex requires the hook to answer `permissionDecision: allow`. The rewritten command no longer matches a permission rule written for the original: **a `deny` rule such as `Bash(cargo test)` does not stop `lm-resizer exec -- cargo test`**. Add a deny rule for the wrapped form too, for example `Bash(*exec -- cargo test*)`, or do not install the hook. See [SECURITY.md](SECURITY.md).
+
 ## Reproducible token statistics
 
 `lm-resizer stats --markdown` reports exact text token counts using the existing **tiktoken-rs / o200k_base** tokenizer (GPT-4o family). `exec`, `tool-output` and `compress` JSON expose `original_tokens`, `compressed_tokens`, signed `tokens_saved`, `tokenizer` and `token_count_method: "exact"`. Counts include the final recovery markers; a negative saving means the output uses more tokens. This reference encoding is not a claim about Claude, Llama or provider billing.

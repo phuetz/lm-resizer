@@ -135,6 +135,12 @@ The generated config wires `lm-resizer hook` on two `Bash` events:
   command line is preserved verbatim (quoting and backslashes intact), the hook
   never re-wraps its own `exec` invocations, and an unsupported or unparseable
   command emits nothing — the command runs raw. It never blocks.
+  For Claude Code the hook sends no `permissionDecision`, so the normal approval prompt
+  applies to the rewritten command; only Codex receives `permissionDecision: allow`
+  (Codex needs it, otherwise it runs the original command). Permission rules match the
+  command text, so a rule written for the original, such as `deny` on `Bash(cargo test)`,
+  does **not** match `lm-resizer exec -- cargo test`: add a deny rule on the wrapped form too
+  (`Bash(*exec -- cargo test*)`) or do not install the hook. See `SECURITY.md`.
 - `PostToolUse` — records command-output savings telemetry when it can identify
   a command and output, and exits successfully when the event shape is unknown.
 
