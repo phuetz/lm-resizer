@@ -111,7 +111,7 @@ LM Resizer shortens, it does not hide. Command views keep literal numbers, paths
 
 ~~~bash
 lm-resizer tee list
-lm-resizer tee read <id>
+lm-resizer tee read e3b0c44298fc
 ~~~
 
 `lm-resizer --version` reports `lm-resizer 0.2.6`. JSON recovery metadata uses a marker such as `[raw: e3b0c44298fc]`; the archives have a `.log` extension.

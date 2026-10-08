@@ -169,7 +169,7 @@ without executing anything.
 ```bash
 lm-resizer stats --markdown
 lm-resizer tee list --json
-lm-resizer tee read <id>
+lm-resizer tee read e3b0c44298fc
 ```
 
 `tee list` is ordered by file name (a hash of the content), not by date: take `<id>` from the

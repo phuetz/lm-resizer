@@ -111,7 +111,7 @@ LM Resizer raccourcit, il ne cache pas. Les vues de commandes conservent littér
 
 ~~~bash
 lm-resizer tee list
-lm-resizer tee read <id>
+lm-resizer tee read e3b0c44298fc
 ~~~
 
 `lm-resizer --version` affiche `lm-resizer 0.2.6`. Le rappel JSON porte un identifiant tel que `[raw: e3b0c44298fc]` ; les archives ont l'extension `.log`.
