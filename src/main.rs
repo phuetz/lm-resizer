@@ -807,9 +807,15 @@ enum Commands {
         #[arg(long, env = "LM_RESIZER_UPSTREAM")]
         upstream: Option<String>,
         /// Optional bearer token for the upstream provider. Its value is never
-        /// shown by `--help`, even when taken from the environment.
+        /// shown by `--help`, even when taken from the environment. Prefer
+        /// `LM_RESIZER_API_KEY` or `--api-key-file`: a value given on the command
+        /// line is readable by every local account through `ps`.
         #[arg(long, env = "LM_RESIZER_API_KEY", hide_env_values = true)]
         api_key: Option<String>,
+        /// File holding the upstream token (first line). On Unix it must not be
+        /// readable by group or others (mode 0600). Takes precedence over `--api-key`.
+        #[arg(long, env = "LM_RESIZER_API_KEY_FILE")]
+        api_key_file: Option<PathBuf>,
         /// Upstream provider header mode: openai, anthropic, bedrock, or vertex.
         #[arg(long, env = "LM_RESIZER_PROVIDER", default_value = "openai")]
         provider: String,
@@ -834,9 +840,15 @@ enum Commands {
         #[arg(long, env = "LM_RESIZER_UPSTREAM")]
         upstream: Option<String>,
         /// Optional bearer token for the upstream provider. Its value is never
-        /// shown by `--help`, even when taken from the environment.
+        /// shown by `--help`, even when taken from the environment. Prefer
+        /// `LM_RESIZER_API_KEY` or `--api-key-file`: a value given on the command
+        /// line is readable by every local account through `ps`.
         #[arg(long, env = "LM_RESIZER_API_KEY", hide_env_values = true)]
         api_key: Option<String>,
+        /// File holding the upstream token (first line). On Unix it must not be
+        /// readable by group or others (mode 0600). Takes precedence over `--api-key`.
+        #[arg(long, env = "LM_RESIZER_API_KEY_FILE")]
+        api_key_file: Option<PathBuf>,
         /// Upstream provider header mode: openai, anthropic, bedrock, or vertex.
         #[arg(long, env = "LM_RESIZER_PROVIDER", default_value = "openai")]
         provider: String,
@@ -2460,20 +2472,28 @@ async fn run(cli: Cli) -> Result<()> {
             bind,
             upstream,
             api_key,
+            api_key_file,
             provider,
             store,
             dashboard,
-        } => run_http(bind, upstream, api_key, provider.parse()?, store, dashboard).await?,
+        } => {
+            warn_if_api_key_on_command_line();
+            let api_key = resolve_api_key(api_key, api_key_file)?;
+            run_http(bind, upstream, api_key, provider.parse()?, store, dashboard).await?
+        }
         Commands::Wrap {
             agent,
             args,
             bind,
             upstream,
             api_key,
+            api_key_file,
             provider,
             store,
             timeout_sec,
         } => {
+            warn_if_api_key_on_command_line();
+            let api_key = resolve_api_key(api_key, api_key_file)?;
             wrap_agent(
                 agent,
                 args,
@@ -9115,22 +9135,87 @@ fn spawn_proxy(
     store: Option<PathBuf>,
 ) -> Result<Child> {
     let exe = std::env::current_exe().context("could not resolve current executable")?;
+    let mut cmd = proxy_command(&exe, bind, upstream, api_key, provider, store);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
+    cmd.spawn().context("failed to start lm-resizer proxy")
+}
+
+/// Ligne de commande du proxy lancé par `wrap`. La clé d'API n'y figure jamais : `/proc/<pid>/cmdline`
+/// est lisible par tous les comptes locaux, `/proc/<pid>/environ` seulement par le propriétaire.
+/// Le fils la reçoit par `LM_RESIZER_API_KEY`, que `serve` lit déjà.
+fn proxy_command(
+    exe: &Path,
+    bind: SocketAddr,
+    upstream: Option<String>,
+    api_key: Option<String>,
+    provider: ProviderKind,
+    store: Option<PathBuf>,
+) -> Command {
     let mut cmd = Command::new(exe);
     cmd.arg("serve").arg("--bind").arg(bind.to_string());
     if let Some(upstream) = upstream {
         cmd.arg("--upstream").arg(upstream);
     }
-    if let Some(api_key) = api_key {
-        cmd.arg("--api-key").arg(api_key);
+    match api_key {
+        Some(api_key) => {
+            cmd.env("LM_RESIZER_API_KEY", api_key);
+        }
+        None => {
+            cmd.env_remove("LM_RESIZER_API_KEY");
+        }
     }
+    // Le fichier de clé a déjà été lu par le parent ; le fils n'a pas à le relire.
+    cmd.env_remove("LM_RESIZER_API_KEY_FILE");
     cmd.arg("--provider").arg(provider_label(provider));
     if let Some(store) = store {
         cmd.arg("--store").arg(store);
     }
-    cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::null());
-    cmd.stderr(Stdio::null());
-    cmd.spawn().context("failed to start lm-resizer proxy")
+    cmd
+}
+
+/// Clé d'API : `--api-key-file` l'emporte sur `--api-key` / `LM_RESIZER_API_KEY`. Le fichier
+/// doit rester privé (0600) ; sa première ligne est la clé.
+fn resolve_api_key(api_key: Option<String>, file: Option<PathBuf>) -> Result<Option<String>> {
+    let Some(file) = file else {
+        return Ok(api_key);
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&file)
+            .with_context(|| format!("cannot read API key file {}", file.display()))?
+            .permissions()
+            .mode();
+        if mode & 0o077 != 0 {
+            anyhow::bail!(
+                "API key file {} is accessible to other accounts (mode {:04o}); run `chmod 600 {}`",
+                file.display(),
+                mode & 0o7777,
+                file.display()
+            );
+        }
+    }
+    let text = std::fs::read_to_string(&file)
+        .with_context(|| format!("cannot read API key file {}", file.display()))?;
+    let key = text.lines().next().unwrap_or("").trim().to_string();
+    anyhow::ensure!(!key.is_empty(), "API key file {} is empty", file.display());
+    Ok(Some(key))
+}
+
+/// Une clé donnée par `--api-key` reste dans la ligne de commande de CE processus, donc visible
+/// par `ps` : le signaler plutôt que de laisser croire que l'aide masque aussi la ligne de commande.
+fn warn_if_api_key_on_command_line() {
+    let given = std::env::args_os().skip(1).any(|arg| {
+        arg.to_str()
+            .is_some_and(|a| a == "--api-key" || a.starts_with("--api-key="))
+    });
+    if given {
+        eprintln!(
+            "lm-resizer: --api-key est visible par tous les comptes locaux (ps, /proc). Préférez LM_RESIZER_API_KEY ou --api-key-file."
+        );
+    }
 }
 
 async fn wait_for_proxy(proxy_url: &str) -> Result<()> {

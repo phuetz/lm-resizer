@@ -111,7 +111,8 @@ approximation de jetons**, pas une tokenisation. Les petits fichiers déjà limi
 | Option | Commande | Effet |
 | --- | --- | --- |
 | `-q`, `--query <texte>` | `compress`, `exec`, `smart`, `share`, `batch`, `tool-output` | Requête utilisée par les compresseurs sensibles à la pertinence (défaut : vide). |
-| `--api-key <jeton>` | `serve`, `wrap` | Jeton porteur optionnel envoyé au fournisseur amont. Sa valeur n'est jamais affichée par `--help`, même lue depuis `LM_RESIZER_API_KEY`. |
+| `--api-key <jeton>` | `serve`, `wrap` | Jeton porteur optionnel envoyé au fournisseur amont. Sa valeur n'est jamais affichée par `--help`, même lue depuis `LM_RESIZER_API_KEY`. Donné sur la ligne de commande, il est lisible par tous les comptes locaux (`ps`, `/proc`) : un avertissement est écrit ; préférer `LM_RESIZER_API_KEY` ou `--api-key-file`. `wrap` ne le transmet jamais en argument au proxy qu'il lance, seulement par l'environnement du processus fils. |
+| `--api-key-file <chemin>` | `serve`, `wrap` | Fichier dont la première ligne est le jeton amont. Sous Unix il doit être privé (mode 0600) ; sinon la commande s'arrête avec la consigne `chmod 600`. L'emporte sur `--api-key`. |
 | `--exit-code <n>` | `tool-output`, `pipe` | Code de sortie de la commande d'origine (défaut : 0), recopié dans `exit_code` du rapport `--json`. |
 | `--event <nom>` | `hook` | Nom de l'événement du hook (par exemple `PostToolUse`), recopié dans le rapport `--json`. Défaut : `unknown`. |
 | `--ext <liste>` | `batch` | Liste blanche d'extensions séparées par des virgules (`log,json,diff,txt`). |
@@ -258,6 +259,7 @@ fait que le décrire.
 | --- | --- |
 | `LM_RESIZER_UPSTREAM` | URL de base du fournisseur compatible OpenAI, valeur par défaut de `--upstream` pour `serve` et `wrap`. |
 | `LM_RESIZER_API_KEY` | Valeur par défaut de `--api-key` (jamais affichée). |
+| `LM_RESIZER_API_KEY_FILE` | Valeur par défaut de `--api-key-file`. |
 | `LM_RESIZER_PROVIDER` | Valeur par défaut de `--provider` pour `serve` et `wrap` seulement : `openai`, `anthropic`, `bedrock` ou `vertex`. Une autre valeur est refusée quand ces commandes lisent leurs arguments (`unsupported provider 'bogus'. Use openai, anthropic, bedrock, or vertex`, code 1). Ce n'est pas un refus au démarrage de toute commande : `stats` et `doctor` avec `bogus` sortent 0, stderr vide. |
 | `LM_RESIZER_CODE_EXPLORER_BIN` | Binaire Code Explorer utilisé par `compress --advice-from-code-explorer` (d'après son `--help`) ; à défaut, `code-explorer` dans le `PATH`. |
 | `LM_RESIZER_TEE` | `0` coupe l'archive du brut de `exec` (`[raw: …]`, `tee_hint`) ; le hash CCR de `compress` reste émis. |
