@@ -280,6 +280,13 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
             }
         }
     }
+    // La fin d'un script porte souvent son verdict (« release check passed ») : la dernière ligne
+    // non vide ne tombe pas avec les lignes sans signal.
+    if matches!(mode, Mode::Summary) {
+        if let Some(i) = lines.iter().rposition(|line| !line.trim().is_empty()) {
+            keep[i] = true;
+        }
+    }
     let candidate = lines
         .iter()
         .zip(keep)
