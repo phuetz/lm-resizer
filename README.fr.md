@@ -2,7 +2,7 @@
 
 **Raccourcissez les sorties de commande bruyantes avant qu'elles n'atteignent votre agent de code — sans jamais perdre un seul échec.** LM Resizer est un CLI Rust local et rapide, destiné aux développeurs qui pilotent tests, compilations, Git, conteneurs et autres outils depuis un agent de code comme Claude Code, Codex, Cursor, Gemini CLI, un client MCP ou un pipeline maison. Il lance une commande, garde un résultat compact pour l'agent et conserve l'original exact pour un rappel immédiat.
 
-Sur un banc de 61 captures de commandes, il économise une médiane de **21,32 %** de jetons, rappel du brut compris, conserve le code de sortie du producteur dans **61/61** cas et démarre en environ **8 ms**. Zéro télémétrie, 100 % local, déterministe.
+Sur un banc de 61 captures de commandes, il économise une médiane de **21,32 %** de jetons, rappel du brut compris, conserve le code de sortie du producteur dans **61/61** cas et démarre en environ **5 ms** (`lm-resizer --version` ; un `exec` lance aussi la commande enveloppée et prend environ **20 ms**). Zéro télémétrie, 100 % local, déterministe.
 
 ![Exemple de traitement d'une sortie de commande par LM Resizer](docs/lm-resizer-hero.png)
 
@@ -155,7 +155,7 @@ Les nouvelles entrées d'historique conservent les deux comptes. Les statistique
 
 Le produit utilise ses propres filtres Rust et TOML. Les commandes d'inspection explicites incluent `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` et `dedup`. Les lectures de fichiers restent littérales. Les plis réversibles de chemins et correspondances, tables JSON et répétitions exactes complètent les filtres de commandes ; le contour syntaxique et la déduplication de blocs sont explicites.
 
-**Médiane tee compris : 21,32 %.** La moyenne est de 28,97 % ; les 61 récupérations du brut et les codes de sortie du producteur passent tous, et les mesures de démarrage entrelacées donnent environ 8 ms. Ces médianes de corpus ne sont pas une affirmation sur des dépôts vivants arbitraires. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
+**Médiane tee compris : 21,32 %.** La moyenne est de 28,97 % ; les 61 récupérations du brut et les codes de sortie du producteur passent tous, et le démarrage mesure environ 5 ms pour `lm-resizer --version` et environ 20 ms pour `lm-resizer exec -- echo hello` (médiane de 60 lancements, Linux, build release, machine chargée). Ces médianes de corpus ne sont pas une affirmation sur des dépôts vivants arbitraires. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
 
 `env` masque les noms contenant `PASSPHRASE` (y compris `PASSPHRASE_FILE`) et un composant de nom `PASS`. Cela masque volontairement aussi des noms inoffensifs comme `PASS_COUNT` ; le filtrage est prudent, fondé sur les noms et les formes d'URL à identifiants.
 

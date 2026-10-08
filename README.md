@@ -2,7 +2,7 @@
 
 **Shorten noisy command output before it reaches your coding agent — and never lose a failure.** LM Resizer is a fast, local Rust CLI for developers who drive tests, builds, Git, containers and other tools through an AI coding agent such as Claude Code, Codex, Cursor, Gemini CLI, an MCP client or a custom pipeline. It runs a command, keeps a compact result for the agent, and stores the byte-exact original for instant recall.
 
-On a benchmark of 61 command captures it saves a median **21.32%** of tokens with the raw recovery included, keeps the producer's exit code in **61/61** cases and starts in about **8 ms**. Zero telemetry, 100% local, deterministic.
+On a benchmark of 61 command captures it saves a median **21.32%** of tokens with the raw recovery included, keeps the producer's exit code in **61/61** cases and starts in about **5 ms** (`lm-resizer --version`; an `exec` run also launches the wrapped command and takes about **20 ms**). Zero telemetry, 100% local, deterministic.
 
 ![Example of LM Resizer processing command output](docs/lm-resizer-hero.png)
 
@@ -155,7 +155,7 @@ New execution history records persist both counts. Stats keep existing byte coun
 
 The product uses its own Rust and TOML filters. Explicit inspection commands include `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` and `dedup`. File reads remain literal. Reversible path/match folds, JSON tables and identical-line runs supplement command filters; syntax outlines and exact repeated-message folding are opt-in.
 
-**Median saving including tee: 21.32%.** Mean saving is 28.97%; all 61 raw recoveries and producer exit codes pass, and interleaved startup measurements give about 8 ms. These corpus medians are not a claim about arbitrary live repositories. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
+**Median saving including tee: 21.32%.** Mean saving is 28.97%; all 61 raw recoveries and producer exit codes pass, and startup measures about 5 ms for `lm-resizer --version` and about 20 ms for `lm-resizer exec -- echo hello` (median of 60 runs, Linux, release build, loaded machine). These corpus medians are not a claim about arbitrary live repositories. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
 
 `env` masks names containing `PASSPHRASE` (including `PASSPHRASE_FILE`) and a `PASS` name component. This deliberately also masks benign names such as `PASS_COUNT`; filtering is conservative, based on names and credential URL shapes.
 
