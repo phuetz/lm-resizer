@@ -2546,6 +2546,47 @@ async fn read_input(path: Option<&Path>) -> Result<String> {
     Ok(input)
 }
 
+/// Crée `dir` et ses parents manquants. Sous Unix, chaque dossier créé est en 0700 : l'état
+/// contient les lignes de commande et les sorties brutes, lisibles sinon selon le umask.
+fn create_private_dir_all(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)
+    }
+}
+
+/// Ouvre `path` en ajout ; un fichier créé ici l'est en 0600 sous Unix.
+fn open_private_append(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+/// Écrit `bytes` dans `path` ; un fichier créé ici l'est en 0600 sous Unix.
+fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)?.write_all(bytes)
+}
+
 fn default_store_path() -> Result<PathBuf> {
     if let Ok(path) = std::env::var("LM_RESIZER_STORE") {
         return Ok(PathBuf::from(path));
@@ -2568,7 +2609,11 @@ fn default_state_dir() -> Result<PathBuf> {
 fn open_store(path: Option<PathBuf>) -> Result<Box<dyn CcrStore>> {
     let path = path.unwrap_or(default_store_path()?);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        create_private_dir_all(parent)?;
+    }
+    // Créée vide en 0600 avant SQLite : ses fichiers `-wal` et `-shm` héritent de ce mode.
+    if !path.exists() {
+        open_private_append(&path)?;
     }
     let cfg = CcrBackendConfig::sqlite_default(path);
     Ok(from_config(&cfg)?)
@@ -5492,7 +5537,7 @@ fn archive_raw_bytes(raw: &[u8]) -> Result<Option<String>> {
     let tee_dir = state_dir.join("tee");
     let digest = format!("{:x}", Sha256::digest(raw));
     let path = tee_dir.join(format!("{digest}.log"));
-    let written = std::fs::create_dir_all(&tee_dir).and_then(|()| std::fs::write(&path, raw));
+    let written = create_private_dir_all(&tee_dir).and_then(|()| write_private_file(&path, raw));
     if written.is_err() {
         warn_state_unwritable(&state_dir);
         return Ok(None);
@@ -5627,7 +5672,7 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
 
 fn write_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     let dir = default_state_dir()?;
-    std::fs::create_dir_all(&dir)?;
+    create_private_dir_all(&dir)?;
     let path = dir.join("exec-history.jsonl");
     let record = ExecHistoryRecord {
         cwd: std::env::current_dir()?.to_string_lossy().into_owned(),
@@ -5642,10 +5687,7 @@ fn write_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
         bytes_saved: report.bytes_saved,
         duration_ms: elapsed.as_millis(),
     };
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut file = open_private_append(&path)?;
     writeln!(file, "{}", serde_json::to_string(&record)?)?;
     Ok(())
 }
@@ -5975,11 +6017,8 @@ fn emit_pretooluse_rewrite(event: &str, client: &str) {
             // Local counters only; no command arguments or remote telemetry.
             let _ = (|| -> Result<()> {
                 let dir = default_state_dir()?;
-                std::fs::create_dir_all(&dir)?;
-                let mut file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(dir.join("hook-audit.jsonl"))?;
+                create_private_dir_all(&dir)?;
+                let mut file = open_private_append(&dir.join("hook-audit.jsonl"))?;
                 writeln!(
                     file,
                     "{}",
@@ -6193,7 +6232,7 @@ fn record_retrieval_feedback(hash: &str, bytes: usize, source: &str) -> Result<(
         return Ok(());
     }
     let dir = default_state_dir()?;
-    std::fs::create_dir_all(&dir)?;
+    create_private_dir_all(&dir)?;
     let path = dir.join("retrieval-feedback.jsonl");
     let record = json!({
         "timestamp_unix": unix_timestamp(),
@@ -6201,10 +6240,7 @@ fn record_retrieval_feedback(hash: &str, bytes: usize, source: &str) -> Result<(
         "bytes": bytes,
         "source": source,
     });
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut file = open_private_append(&path)?;
     writeln!(file, "{}", serde_json::to_string(&record)?)?;
     Ok(())
 }
@@ -7912,7 +7948,7 @@ fn record_proxy_history(
         return Ok(());
     }
     let dir = default_state_dir()?;
-    std::fs::create_dir_all(&dir)?;
+    create_private_dir_all(&dir)?;
     let history_path = dir.join("proxy-history.jsonl");
     // `bytes_saved` is measured (bytes in, bytes out). `provider_usage` is what
     // the provider reported. They are never added together.
@@ -7926,10 +7962,7 @@ fn record_proxy_history(
     });
     let line = serde_json::to_string(&record)?;
     use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_path)?;
+    let mut file = open_private_append(&history_path)?;
     writeln!(file, "{line}")?;
     Ok(())
 }

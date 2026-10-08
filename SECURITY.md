@@ -27,6 +27,18 @@ Some commands can store raw command output locally for recovery:
 Set `LM_RESIZER_TEE=0` to disable raw-output recovery and
 `LM_RESIZER_TRACKING=0` to disable local history/retrieval counters.
 
+The state directory is created with mode 0700 and its files (raw-output archives,
+`exec-history.jsonl`, the CCR database) with mode 0600 on Unix, whatever the caller's
+umask. Directories and files created by an earlier version keep their old mode: run
+`chmod -R go-rwx ~/lm-resizer` (or your `LM_RESIZER_STATE_DIR`) once. The history stores
+command lines as typed and is not redacted: treat it like a shell history file.
+
+The local proxy (`serve`, `wrap`) has no client authentication. It listens on loopback only
+unless `--allow-non-loopback` is given, answers only requests whose `Host` is local, and
+follows no upstream redirect. Any local account that can reach the port can still use the
+upstream key it holds: do not run it on a shared machine. Give the key through
+`LM_RESIZER_API_KEY` or `--api-key-file`, never on the command line.
+
 ## Supply Chain
 
 The WASM package is published manually through a protected GitHub Actions
