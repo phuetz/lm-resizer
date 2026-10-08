@@ -72,6 +72,8 @@ LM Resizer's replayed median (21.32%) exceeds the reference filter's (15.81%) on
 
 Check the install works anywhere, with no repository needed:
 
+On Windows, use `lm-resizer exec -- cmd.exe /d /c echo hello` for the first example.
+
 ~~~bash
 lm-resizer exec -- echo hello
 lm-resizer git log -20
