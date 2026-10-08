@@ -24,7 +24,7 @@ Windows PowerShell :
 irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.6/install.ps1 | iex
 ~~~
 
-L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire avant de poser `lm-resizer` dans `~/.local/bin` par défaut. Plateformes préparées : Linux x86_64, macOS x86_64/arm64 et Windows x86_64. La release v0.2.2 existante n'a pas d'archives précompilées.
+L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire avant de poser `lm-resizer` dans `~/.local/bin` par défaut. Plateformes préparées : Linux x86_64, macOS x86_64/arm64 et Windows x86_64.
 
 Sur Linux et macOS, l'installeur affiche la ligne à ajouter quand `~/.local/bin` n'est pas dans le `PATH` ; pour la rendre permanente sous Bash, lancez `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc` (`~/.zshrc` pour zsh) puis ouvrez un nouveau terminal. L'installeur Windows met à jour le `PATH` utilisateur. `LM_RESIZER_INSTALL_DIR` permet de choisir un autre répertoire. Pour désinstaller un binaire précompilé, retirez-le de ce répertoire. [Windows : repli TLS, PowerShell 5.1 et récupération exacte](docs/WINDOWS.md).
 
@@ -95,7 +95,7 @@ Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagno
 
 Pour les scripts, utiliser `lm-resizer gain --json`.
 
-`exec` conserve le statut du producteur (128 + signal sous Unix). Les routes shells, `--stream` et `--raw-on-failure` conservent leurs flux séparés et le marqueur `[stderr]`.
+`exec` conserve le statut du producteur (128 + signal sous Unix). `--stream` et `--raw-on-failure` gardent stdout et stderr séparés et affichent le marqueur `[stderr]` ; la vue raccourcie par défaut ne le fait pas, utilisez l'une des deux quand l'origine d'une ligne compte.
 
 ## La garantie diagnostique
 
