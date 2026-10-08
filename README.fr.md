@@ -35,19 +35,20 @@ Sur Linux et macOS, l'installeur affiche la ligne à ajouter quand `~/.local/bin
 ~~~console
 $ lm-resizer tool-output --command 'cargo test' --input bench/corpus/cargo_fail.txt
 FAILURES (1):
-1.     parse::reject_empty
+1. ---- parse::reject_empty stdout ----
+thread 'parse::reject_empty' panicked at src/parser.rs:42:9:
+assertion `left == right` failed: expected=422 observed=200
 
-test result: FAILED. 70 passed; 1 failed; finished in 0.09s
 test result: FAILED. 70 passed; 1 failed; finished in 0.09s
 [tee:78bf04f25902]
 ~~~
 
-La même commande sur le fichier de 78 lignes compte **792** jetons d'origine et **65** jetons compressés. Quatre captures fournies, mesurées sur cette machine avec `o200k_base` :
+La même commande sur le fichier de 78 lignes compte **792** jetons d'origine et **80** jetons compressés. Quatre captures fournies, mesurées sur cette machine avec `o200k_base` :
 
 | Capture (`bench/corpus/`) | `--command` | Origine | Compressé |
 |---|---|---:|---:|
 | `cargo_ok.txt` | `cargo test` | 837 | 24 |
-| `cargo_fail.txt` | `cargo test` | 792 | 65 |
+| `cargo_fail.txt` | `cargo test` | 792 | 80 |
 | `pytest_ok.txt` | `pytest` | 937 | 17 |
 | `git_log.txt` | `git log` | 2320 | 2320 |
 

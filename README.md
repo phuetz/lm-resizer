@@ -35,19 +35,20 @@ On Linux and macOS the installer prints the line to add when `~/.local/bin` is n
 ~~~console
 $ lm-resizer tool-output --command 'cargo test' --input bench/corpus/cargo_fail.txt
 FAILURES (1):
-1.     parse::reject_empty
+1. ---- parse::reject_empty stdout ----
+thread 'parse::reject_empty' panicked at src/parser.rs:42:9:
+assertion `left == right` failed: expected=422 observed=200
 
-test result: FAILED. 70 passed; 1 failed; finished in 0.09s
 test result: FAILED. 70 passed; 1 failed; finished in 0.09s
 [tee:78bf04f25902]
 ~~~
 
-The same command run on the 78-line file reports **792** original tokens and **65** compressed tokens. Four bundled captures, measured on this machine with `o200k_base`:
+The same command run on the 78-line file reports **792** original tokens and **80** compressed tokens. Four bundled captures, measured on this machine with `o200k_base`:
 
 | Capture (`bench/corpus/`) | `--command` | Original | Compressed |
 |---|---|---:|---:|
 | `cargo_ok.txt` | `cargo test` | 837 | 24 |
-| `cargo_fail.txt` | `cargo test` | 792 | 65 |
+| `cargo_fail.txt` | `cargo test` | 792 | 80 |
 | `pytest_ok.txt` | `pytest` | 937 | 17 |
 | `git_log.txt` | `git log` | 2320 | 2320 |
 

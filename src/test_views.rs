@@ -67,30 +67,19 @@ pub fn cargo(raw: &str) -> String {
     if summaries.is_empty() {
         return raw.into();
     }
-    // Failure sections are separated into paragraphs without altering paths,
-    // assertion operands or stack locations. A section-ending summary is also
-    // retained in the section's footer, as well as the suite summary list.
-    let mut blocks = Vec::new();
-    let mut section = Vec::new();
-    let mut active = false;
-    for line in raw.lines() {
-        if line == "failures:" {
-            active = true;
-            continue;
-        }
-        if line.starts_with("test result:") {
-            active = false;
-            continue;
-        }
-        if active {
-            section.push(line);
-        }
-    }
-    let text = section.join("\n");
-    for paragraph in text.split("\n\n") {
-        let p = paragraph.trim_matches('\n');
-        if !p.trim().is_empty() {
-            blocks.push(p);
+    // Un échec = un bloc `---- nom stdout ----` (message, valeurs, position, rien n'est retouché) ;
+    // les noms de la liste finale `failures:` qu'aucun bloc ne couvre sont listés tels quels.
+    let (details, names) = cargo_failures(raw);
+    let mut blocks: Vec<String> = details.iter().map(|block| block.join("\n")).collect();
+    for name in &names {
+        let covered = details.iter().any(|block| {
+            block[0]
+                .strip_prefix("---- ")
+                .and_then(|rest| rest.strip_suffix(" stdout ----"))
+                == Some(name.trim())
+        });
+        if !covered {
+            blocks.push((*name).to_string());
         }
     }
     if blocks.is_empty() {
@@ -138,23 +127,51 @@ pub fn cargo(raw: &str) -> String {
         n => format!("\n… +{n} more failures\n"),
     };
     let mut out = format!("FAILURES ({}):\n{numbered}{trailer}\n", blocks.len());
-    // Preserve the transcript order and section footer occurrence.
-    let mut inside = false;
+    // Chaque bilan de suite une seule fois, puis l'indication de relance de cargo, dans l'ordre.
     for line in raw.lines() {
-        if line == "failures:" {
-            inside = true;
-        }
-        if line.starts_with("test result:") {
+        if line.starts_with("test result:") || line.starts_with("error: test failed") {
             out.push_str(line);
             out.push('\n');
-            if inside {
-                out.push_str(line);
-                out.push('\n');
-                inside = false;
-            }
         }
     }
     out.trim_end().into()
+}
+
+/// Blocs `---- nom stdout ----` (sans lignes vides) et noms de la liste `failures:` d'une sortie
+/// `cargo test`, toutes suites confondues.
+fn cargo_failures(raw: &str) -> (Vec<Vec<&str>>, Vec<&str>) {
+    #[derive(PartialEq)]
+    enum Zone {
+        Outside,
+        Detail,
+        List,
+    }
+    let mut details: Vec<Vec<&str>> = Vec::new();
+    let mut names = Vec::new();
+    let mut zone = Zone::Outside;
+    for line in raw.lines() {
+        if line.starts_with("test result:") {
+            zone = Zone::Outside;
+        } else if line == "failures:" {
+            zone = Zone::List;
+        } else if line.starts_with("---- ") && line.ends_with(" ----") {
+            details.push(vec![line]);
+            zone = Zone::Detail;
+        } else if line.trim().is_empty() {
+            continue;
+        } else if zone == Zone::Detail {
+            if let Some(block) = details.last_mut() {
+                block.push(line);
+            }
+        } else if zone == Zone::List {
+            if line.starts_with("    ") {
+                names.push(line);
+            } else {
+                zone = Zone::Outside;
+            }
+        }
+    }
+    (details, names)
 }
 
 pub fn pytest(raw: &str) -> String {
@@ -561,6 +578,75 @@ FAILED test_demo.py::test_param[2] - assert 2 == 1
         );
         assert!(cargo(&cargo_raw).contains(&assertion));
     }
+    /// Sortie réelle de `cargo test` (Rust 1.95) : une suite, deux tests en échec.
+    const CARGO_TWO_FAILURES: &str = include_str!("../tests/fixtures/cargo_test_two_failures.txt");
+
+    #[test]
+    fn cargo_counts_failed_tests_not_paragraphs() {
+        let view = cargo(CARGO_TWO_FAILURES);
+        assert!(view.starts_with("FAILURES (2):\n"), "{view}");
+        assert!(
+            view.contains("\n1. ---- tests::bad_other stdout ----\n"),
+            "{view}"
+        );
+        assert!(
+            view.contains("\n2. ---- tests::bad_sum stdout ----\n"),
+            "{view}"
+        );
+        assert!(!view.contains("\n3. "), "{view}");
+        for fact in [
+            "assertion failed: add(1, 1) == 3",
+            "assertion `left == right` failed: somme attendue",
+            "  left: 4",
+            " right: 5",
+            "src/lib.rs:8:30",
+            "src/lib.rs:7:28",
+        ] {
+            assert!(view.contains(fact), "manque {fact:?} dans\n{view}");
+        }
+    }
+
+    #[test]
+    fn cargo_prints_each_suite_summary_once_and_keeps_the_rerun_hint() {
+        let view = cargo(CARGO_TWO_FAILURES);
+        assert_eq!(
+            view.matches("test result: FAILED. 2 passed; 2 failed")
+                .count(),
+            1,
+            "{view}"
+        );
+        assert!(
+            view.ends_with("error: test failed, to rerun pass `--lib`"),
+            "{view}"
+        );
+    }
+
+    #[test]
+    fn cargo_workspace_keeps_every_suite_summary_and_counts_all_failures() {
+        let raw = format!(
+            "{}\n     Running tests/integ.rs (target/debug/deps/integ-1)\n\nrunning 1 test\ntest integ_ok ... FAILED\n\nfailures:\n\n---- integ_ok stdout ----\n\nthread 'integ_ok' panicked at tests/integ.rs:1:1:\nboom\n\n\nfailures:\n    integ_ok\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\nerror: test failed, to rerun pass `--test integ`\n",
+            CARGO_TWO_FAILURES.replace("error: test failed, to rerun pass `--lib`\n", "")
+        );
+        let view = cargo(&raw);
+        assert!(view.starts_with("FAILURES (3):\n"), "{view}");
+        assert!(view.contains("\n3. ---- integ_ok stdout ----\nthread 'integ_ok' panicked at tests/integ.rs:1:1:\nboom\n"), "{view}");
+        assert_eq!(view.matches("test result:").count(), 2, "{view}");
+        assert!(
+            view.ends_with("error: test failed, to rerun pass `--test integ`"),
+            "{view}"
+        );
+    }
+
+    #[test]
+    fn cargo_failure_names_without_a_detail_block_are_still_counted() {
+        let raw = "failures:\n    a::one\n    a::two\n\ntest result: FAILED. 0 passed; 2 failed; 0 ignored; finished in 0.01s\n";
+        let view = cargo(raw);
+        assert!(
+            view.starts_with("FAILURES (2):\n1.     a::one\n2.     a::two\n"),
+            "{view}"
+        );
+    }
+
     #[test]
     fn cargo_unknown_and_compile_errors_stay_literal() {
         for raw in [
