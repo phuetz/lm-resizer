@@ -129,7 +129,9 @@ def main():
                     LM_RESIZER_STATE_DIR=str(work / "state"),
                     HF_HOME=str(work / "hf"), XDG_CACHE_HOME=str(work / "cache"),
                     PYTHONDONTWRITEBYTECODE="1", HEADROOM_CCR_SQLITE_PATH=str(work / "headroom.sqlite"),
-                    XDG_CONFIG_HOME=str(work / "config"), XDG_DATA_HOME=str(work / "data"))
+                    XDG_CONFIG_HOME=str(work / "config"), XDG_DATA_HOME=str(work / "data"),
+                    # La vue de `git log` lit la configuration de Git : le banc n'y lit que le vide.
+                    GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
     base_env.pop("RTK_RECALL", None)
     base_env.pop("RTK_TEE", None)
     rows = []

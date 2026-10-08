@@ -4037,6 +4037,9 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
         .is_some_and(|program| command_basename(program) == "git")
     {
         match command_views::git_without_globals(command) {
+            Some(plain) if plain.get(1).map(String::as_str) == Some("log") => {
+                return command_views::git_log_filter(command, raw);
+            }
             Some(plain) if plain.as_slice() != command => {
                 return filter_command_output(&plain, raw);
             }

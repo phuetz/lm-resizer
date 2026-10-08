@@ -298,3 +298,118 @@ fn check_forms(repo: &tempfile::TempDir, forms: &[Form]) {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Sortie de `exec -- git <args>` comparée à celle de Git seul : octet pour octet.
+fn assert_raw_identical(
+    repo: &tempfile::TempDir,
+    state: &Path,
+    args: &[&str],
+    failures: &mut Vec<String>,
+) {
+    let direct = git(repo.path(), args);
+    let mut wrapped = vec!["exec", "--", "git"];
+    wrapped.extend(args);
+    let out = lm_resizer(repo.path(), state, &wrapped);
+    if !out.status.success() {
+        failures.push(format!("{args:?}: code {:?}", out.status.code()));
+    } else if out.stdout != direct {
+        failures.push(format!(
+            "{args:?}: la vue n'est pas le brut ({} octets contre {})",
+            out.stdout.len(),
+            direct.len()
+        ));
+    }
+}
+
+fn long_history() -> tempfile::TempDir {
+    let repo = repository(false);
+    add_long_commits(&repo, 8);
+    repo
+}
+
+#[test]
+fn user_chosen_formats_that_imitate_a_commit_header_stay_raw() {
+    let repo = long_history();
+    let state = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+    for args in [
+        // `%T` est le hash d'arbre : ces en-têtes ne sont pas des identités de commit.
+        vec!["log", "--format=commit %T%n%w(0,4,4)%b%n%H %s"],
+        vec![
+            "log",
+            "--format=commit %T%n    ligne 1%n    ligne 2%n    ligne 3%n    ligne 4%n    %H %s",
+        ],
+        vec![
+            "log",
+            "--format=commit deadbeef%n    ligne 1%n    ligne 2%n    ligne 3%n    ligne 4%n    %H %s",
+        ],
+        vec![
+            "log",
+            "--pretty=format:commit %T%n    a%n    b%n    c%n    d%n    %H %s",
+        ],
+        vec![
+            "log",
+            "--pretty=tformat:commit %T%n    a%n    b%n    c%n    d%n    %H %s",
+        ],
+        vec!["-c", "format.pretty=format:commit %T%n%w(0,4,4)%b%n%H %s", "log"],
+        vec!["-c", "color.ui=false", "log"],
+        vec!["log", "--oneline"],
+        vec!["log", "-z"],
+    ] {
+        assert_raw_identical(&repo, state.path(), &args, &mut failures);
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn format_pretty_from_the_git_configuration_keeps_the_log_raw() {
+    let repo = long_history();
+    git(
+        repo.path(),
+        &[
+            "config",
+            "format.pretty",
+            "format:commit %T%n    l1%n    l2%n    l3%n    l4%n    %H %s",
+        ],
+    );
+    let state = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+    for args in [
+        vec!["log"],
+        vec!["log", "-n", "5"],
+        vec!["--no-pager", "log"],
+    ] {
+        assert_raw_identical(&repo, state.path(), &args, &mut failures);
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn any_log_configuration_keeps_the_log_raw() {
+    let repo = long_history();
+    git(repo.path(), &["config", "log.date", "iso"]);
+    let state = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+    assert_raw_identical(&repo, state.path(), &["log"], &mut failures);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn the_default_format_without_configuration_is_still_shortened() {
+    let repo = long_history();
+    let state = tempfile::tempdir().unwrap();
+    let direct = git(repo.path(), &["log"]);
+    let out = lm_resizer(repo.path(), state.path(), &["exec", "--", "git", "log"]);
+    assert!(out.status.success());
+    assert!(
+        out.stdout.len() < direct.len(),
+        "le format par défaut n'est plus raccourci ({} contre {} octets)",
+        out.stdout.len(),
+        direct.len()
+    );
+    let view = String::from_utf8(out.stdout).unwrap();
+    let hashes = String::from_utf8(git(repo.path(), &["log", "--format=%H"])).unwrap();
+    for hash in hashes.lines() {
+        assert!(view.contains(hash), "hash {hash} absent de la vue");
+    }
+}
