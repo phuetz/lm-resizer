@@ -19,6 +19,7 @@ node scripts/test-binary-path-scan.cjs
 node scripts/test-install-fallback.cjs
 python3 bench/real/ensure_oracle_source.py
 python3 bench/real/test_source_similarity.py
+python3 bench/real/test_synthese_rejeu.py
 python3 bench/real/check_source_similarity.py
 cargo fmt --check
 # `--workspace` is required to test all members since the root Cargo.toml doesn't define `default-members`.

@@ -2,8 +2,10 @@
 # Rejeu en une étape du banc de 61 captures (médiane, moyenne, vues, codes de sortie).
 #
 #   bench/real/rejouer.sh [--sans-headroom] [--repetitions N] [--work DOSSIER]
+#                         [--captures N] [--seuil-mediane P] [--seuil-moyenne P]
 #
-# Ce que fait le script, dans l'ordre, sans rien écrire hors de target/ :
+# Ce que fait le script, dans l'ordre, sans rien écrire hors de target/ (hors le cache habituel de
+# cargo, CARGO_HOME, et le dossier cible de cargo s'il est redirigé) :
 #   1. un environnement Python isolé avec tiktoken 0.14.0 (et Headroom 0.39.1 + ONNX Runtime
 #      1.24.4, sauf --sans-headroom) ;
 #   2. l'oracle de comparaison, construit depuis l'archive amont épinglée dans
@@ -13,10 +15,12 @@
 #   5. une synthèse lue dans results.json.
 #
 # Réseau nécessaire la première fois (archive amont, crates, paquets Python).
-# Sortie du script : 0 si la médiane de LM Resizer atteint celle de l'oracle ET si les 61 bruts
-# se récupèrent ET si les 61 codes de sortie du producteur sont conservés. L'égalité stricte des
-# vues n'est pas une condition : parity_rtk.py sort en 1 tant que des vues diffèrent
-# (écarts publiés dans bench/native/README.md) ; le nombre exact est affiché.
+# Sortie du script : 0 seulement si les 61 captures sont mesurées, si la médiane et la moyenne de
+# LM Resizer atteignent les seuils de la 0.2.5 (25,18 % et 34,68 %, modifiables) ET la médiane de
+# l'oracle, si les 61 bruts se récupèrent ET si les 61 codes du producteur sont conservés (voir
+# synthese_rejeu.py). L'égalité stricte des vues n'est pas une condition : parity_rtk.py sort en 1
+# tant que des vues diffèrent (écarts publiés dans bench/native/README.md) ; le nombre exact est
+# affiché.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -24,19 +28,27 @@ qa_dir="$repo_dir/target/rejeu"
 headroom=1
 repetitions=3
 work=""
+seuils=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sans-headroom) headroom=0; shift ;;
     --repetitions) repetitions="${2:?--repetitions demande un entier}"; shift 2 ;;
     --work) work="${2:?--work demande un dossier}"; shift 2 ;;
-    -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "usage: bench/real/rejouer.sh [--sans-headroom] [--repetitions N] [--work DOSSIER]" >&2; exit 2 ;;
+    --captures) seuils+=(--captures "${2:?--captures demande un entier}"); shift 2 ;;
+    --seuil-mediane) seuils+=(--mediane-min "${2:?--seuil-mediane demande un pourcentage}"); shift 2 ;;
+    --seuil-moyenne) seuils+=(--moyenne-min "${2:?--seuil-moyenne demande un pourcentage}"); shift 2 ;;
+    -h|--help) sed -n '2,24p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "usage: bench/real/rejouer.sh [--sans-headroom] [--repetitions N] [--work DOSSIER] [--captures N] [--seuil-mediane P] [--seuil-moyenne P]" >&2; exit 2 ;;
   esac
 done
 # parity_rtk.py refuse un dossier existant : chaque rejeu garde ses propres chemins.
 work="${work:-$qa_dir/rejeu-$(date +%Y%m%d-%H%M%S)-$$}"
 mkdir -p "$qa_dir"
 cd "$repo_dir"
+# Tout ce que les outils Python écrivent reste sous target/ : sans cela `uv venv` crée son cache
+# dans ~/.cache/uv et échoue quand HOME n'est pas inscriptible (contre-revue du 08/10/2026), et
+# tiktoken dépose ses encodages dans le dossier temporaire du système.
+export UV_CACHE_DIR="$qa_dir/uv-cache" PIP_CACHE_DIR="$qa_dir/pip-cache" TIKTOKEN_CACHE_DIR="$qa_dir/tiktoken-cache"
 
 for outil in python3 cargo git curl; do
   command -v "$outil" >/dev/null || { echo "outil manquant : $outil" >&2; exit 2; }
@@ -50,9 +62,9 @@ fi
 paquets=('tiktoken==0.14.0')
 if [[ "$headroom" == 1 ]]; then paquets+=('headroom-ai[code]==0.39.1' 'onnxruntime==1.24.4'); fi
 if command -v uv >/dev/null 2>&1; then
-  UV_CACHE_DIR="$qa_dir/uv-cache" uv pip install --quiet --python "$venv/bin/python" "${paquets[@]}"
+  uv pip install --quiet --python "$venv/bin/python" "${paquets[@]}"
 else
-  PIP_CACHE_DIR="$qa_dir/pip-cache" "$venv/bin/python" -m pip install --quiet "${paquets[@]}"
+  "$venv/bin/python" -m pip install --quiet "${paquets[@]}"
 fi
 
 echo "== 2/5 oracle construit depuis l'archive épinglée"
@@ -84,23 +96,5 @@ tail -3 "$qa_dir/dernier-rejeu.log" | cut -c1-200
 [[ -f "$work/results.json" ]] || { echo "pas de results.json (code $statut) : voir $qa_dir/dernier-rejeu.log" >&2; exit 1; }
 
 echo "== 5/5 synthèse"
-"$venv/bin/python" -I - "$work/results.json" <<'PY'
-import json, sys
-r = json.load(open(sys.argv[1], encoding="utf-8"))
-rows, s = r["cases"], r["summary"]
-n = len(rows)
-strict = sum(1 for x in rows if x["parity"])
-brut = sum(1 for x in rows if x["tee_verified"])
-code = sum(1 for x in rows if x["producer_exit_preserved"])
-lm, ref = s["lm_total_tokens"], s["rtk_tokens"]
-print(f"binaire lm-resizer sha256 {r['lm_sha256'][:16]}…  corpus sha256 {r['corpus_sha256'][:16]}…")
-print(f"LM Resizer, tee compris : médiane {lm['median']:.2f} %  moyenne {lm['mean']:.2f} %  ({lm['cases']} captures)")
-print(f"oracle                  : médiane {ref['median']:.2f} %  moyenne {ref['mean']:.2f} %")
-hr = s["headroom_tokens"]
-if hr["median"] is not None:
-    print(f"Headroom                : médiane {hr['median']:.2f} %  moyenne {hr['mean']:.2f} %")
-print(f"vues strictement égales {strict}/{n} ; bruts récupérés {brut}/{n} ; codes du producteur conservés {code}/{n}")
-ok = r["median_goal_met"] and brut == n and code == n
-print("VERDICT :", "tenu" if ok else "NON tenu")
-sys.exit(0 if ok else 1)
-PY
+# Les seuils par défaut sont ceux publiés pour la 0.2.5 (61 captures, médiane 25,18 %, moyenne 34,68 %).
+"$venv/bin/python" -I "$repo_dir/bench/real/synthese_rejeu.py" "$work/results.json" ${seuils[@]+"${seuils[@]}"}
