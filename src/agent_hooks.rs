@@ -26,7 +26,18 @@ pub fn rewrite(value: &Value, exe: &str, event: &str, client: &str) -> Option<Va
         "gemini" => json!({"hookSpecificOutput":{"hookEventName":"BeforeTool","tool_input":input}}),
         "copilot" => json!({"modifiedArgs":input}),
         "cursor" => json!({"permission":"allow","updated_input":input}),
-        _ => result,
+        // Codex exige `permissionDecision: "allow"` (voir `pretooluse_rewrite_json`). Tout autre
+        // client ne la reçoit pas : avec `allow`, Claude Code exécute la commande réécrite sans
+        // demander l'accord de l'utilisateur, et l'invite d'approbation disparaît.
+        "codex" => result,
+        _ => {
+            let mut result = result;
+            if let Some(Value::Object(output)) = result.get_mut("hookSpecificOutput") {
+                output.remove("permissionDecision");
+                output.remove("permissionDecisionReason");
+            }
+            result
+        }
     })
 }
 
@@ -56,6 +67,33 @@ pub fn config(exe: &str, client: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_codex_receives_a_permission_decision() {
+        let value = json!({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cargo test"}});
+        for client in ["claude", "unknown", "claude-code"] {
+            let out = rewrite(&value, "/opt/lm", "PreToolUse", client).unwrap();
+            let output = out.get("hookSpecificOutput").unwrap();
+            assert!(
+                output.get("permissionDecision").is_none(),
+                "{client}: {out}"
+            );
+            assert!(output.get("permissionDecisionReason").is_none(), "{client}");
+            assert_eq!(
+                output
+                    .pointer("/updatedInput/command")
+                    .and_then(Value::as_str),
+                Some("\"/opt/lm\" exec -- cargo test"),
+                "{client}"
+            );
+        }
+        let codex = rewrite(&value, "/opt/lm", "PreToolUse", "codex").unwrap();
+        assert_eq!(
+            codex
+                .pointer("/hookSpecificOutput/permissionDecision")
+                .and_then(Value::as_str),
+            Some("allow")
+        );
+    }
     #[test]
     fn adapters_preserve_tool_arguments_and_do_not_rewrite_other_tools() {
         for (client, tool, path) in [
