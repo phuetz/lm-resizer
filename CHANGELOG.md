@@ -15,7 +15,7 @@ La 0.2.5 est publiée. Cette version ajoute le résumé syntaxique local de `sma
 - Les autres formes de `git log` ne changent pas, ce qui préserve les chiffres du banc ; leur limite est consignée dans [`docs/KNOWN-MISSES.md`](docs/KNOWN-MISSES.md).
 
 ### Banc
-- [`bench/real/rejouer.sh`](bench/real/rejouer.sh) rejoue les 61 captures en une étape : Python isolé avec tiktoken, oracle construit depuis l'archive épinglée, binaire du checkout, dossier de rejeu neuf, synthèse (médiane, moyenne, bruts récupérés, codes du producteur). Le README ne renvoie plus à `parity_rtk.py` seul, qui exige ses arguments.
+- [`bench/real/rejouer.sh`](bench/real/rejouer.sh) rejoue les 61 captures en une étape : Python isolé avec tiktoken, oracle construit depuis l'archive épinglée, binaire du checkout, dossier de rejeu neuf, synthèse (médiane, moyenne, bruts récupérés, codes du producteur). Le README ne renvoie plus au seul script Python du banc, qui exige ses arguments.
 - Banc rejoué avec ce script sur le code de cette préparation (corpus de 61 captures, `o200k_base`) : médiane **25,18 %**, moyenne **34,68 %**, brut récupéré 61/61, code du producteur conservé 61/61, vues strictement égales à l'oracle 41/61 — chiffres identiques à ceux de la 0.2.5, vue par vue (aucun des 61 cas n'a changé). Le même script, lancé sur une copie neuve de l'arbre, redonne ces chiffres.
 
 ## [0.2.5] - publication prévue le 2026-10-08
