@@ -816,6 +816,10 @@ enum Commands {
         /// readable by group or others (mode 0600). Takes precedence over `--api-key`.
         #[arg(long, env = "LM_RESIZER_API_KEY_FILE")]
         api_key_file: Option<PathBuf>,
+        /// Accept a non-loopback `--bind` address. The proxy has no client authentication:
+        /// anyone who can reach it can spend the upstream key.
+        #[arg(long)]
+        allow_non_loopback: bool,
         /// Upstream provider header mode: openai, anthropic, bedrock, or vertex.
         #[arg(long, env = "LM_RESIZER_PROVIDER", default_value = "openai")]
         provider: String,
@@ -849,6 +853,10 @@ enum Commands {
         /// readable by group or others (mode 0600). Takes precedence over `--api-key`.
         #[arg(long, env = "LM_RESIZER_API_KEY_FILE")]
         api_key_file: Option<PathBuf>,
+        /// Accept a non-loopback `--bind` address. The proxy has no client authentication:
+        /// anyone who can reach it can spend the upstream key.
+        #[arg(long)]
+        allow_non_loopback: bool,
         /// Upstream provider header mode: openai, anthropic, bedrock, or vertex.
         #[arg(long, env = "LM_RESIZER_PROVIDER", default_value = "openai")]
         provider: String,
@@ -1408,6 +1416,8 @@ struct AppState {
     provider: ProviderKind,
     client: Client,
     dashboard_enabled: bool,
+    /// Adresse d'écoute à laquelle `Host` doit correspondre (anti rebinding DNS).
+    host_guard: Option<SocketAddr>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -2473,13 +2483,24 @@ async fn run(cli: Cli) -> Result<()> {
             upstream,
             api_key,
             api_key_file,
+            allow_non_loopback,
             provider,
             store,
             dashboard,
         } => {
             warn_if_api_key_on_command_line();
+            ensure_loopback_bind(bind, allow_non_loopback)?;
             let api_key = resolve_api_key(api_key, api_key_file)?;
-            run_http(bind, upstream, api_key, provider.parse()?, store, dashboard).await?
+            run_http(
+                bind,
+                upstream,
+                api_key,
+                provider.parse()?,
+                store,
+                dashboard,
+                allow_non_loopback,
+            )
+            .await?
         }
         Commands::Wrap {
             agent,
@@ -2488,11 +2509,13 @@ async fn run(cli: Cli) -> Result<()> {
             upstream,
             api_key,
             api_key_file,
+            allow_non_loopback,
             provider,
             store,
             timeout_sec,
         } => {
             warn_if_api_key_on_command_line();
+            ensure_loopback_bind(bind, allow_non_loopback)?;
             let api_key = resolve_api_key(api_key, api_key_file)?;
             wrap_agent(
                 agent,
@@ -2503,6 +2526,7 @@ async fn run(cli: Cli) -> Result<()> {
                 provider.parse()?,
                 store,
                 timeout_sec,
+                allow_non_loopback,
             )
             .await?
         }
@@ -4691,21 +4715,22 @@ fn is_sensitive_key(key: &str) -> bool {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .collect::<String>()
         .to_ascii_lowercase();
-    matches!(
-        normalized.as_str(),
-        "apikey"
-            | "authorization"
-            | "bearer"
-            | "token"
-            | "accesstoken"
-            | "refreshtoken"
-            | "secret"
-            | "secretkey"
-            | "clientsecret"
-            | "password"
-            | "privatekey"
-            | "signature"
-    )
+    // Noms d'en-têtes et de variables composés : `x-api-key`, `x-goog-api-key`,
+    // `openai_api_key`, `aws_secret_access_key`, `proxy-authorization`, `db_password`…
+    const CONTAINS: &[&str] = &[
+        "apikey",
+        "authorization",
+        "secret",
+        "password",
+        "privatekey",
+        "credential",
+    ];
+    if CONTAINS.iter().any(|part| normalized.contains(part)) {
+        return true;
+    }
+    // `token` isolé ou suffixe (`accesstoken`, `x-amz-security-token`), jamais le pluriel :
+    // `max_tokens`, `input_tokens` sont des compteurs que les fixtures doivent garder.
+    normalized.ends_with("token") || matches!(normalized.as_str(), "bearer" | "signature")
 }
 
 fn looks_like_json_payload(text: &str) -> bool {
@@ -9084,9 +9109,10 @@ async fn wrap_agent(
     provider: ProviderKind,
     store: Option<PathBuf>,
     timeout_sec: Option<u64>,
+    allow_non_loopback: bool,
 ) -> Result<()> {
     let proxy_url = format!("http://{bind}");
-    let mut proxy = spawn_proxy(bind, upstream, api_key, provider, store)?;
+    let mut proxy = spawn_proxy(bind, upstream, api_key, provider, store, allow_non_loopback)?;
     if let Err(err) = wait_for_proxy(&proxy_url).await {
         let _ = proxy.kill();
         return Err(err);
@@ -9133,9 +9159,18 @@ fn spawn_proxy(
     api_key: Option<String>,
     provider: ProviderKind,
     store: Option<PathBuf>,
+    allow_non_loopback: bool,
 ) -> Result<Child> {
     let exe = std::env::current_exe().context("could not resolve current executable")?;
-    let mut cmd = proxy_command(&exe, bind, upstream, api_key, provider, store);
+    let mut cmd = proxy_command(
+        &exe,
+        bind,
+        upstream,
+        api_key,
+        provider,
+        store,
+        allow_non_loopback,
+    );
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::null());
@@ -9152,9 +9187,13 @@ fn proxy_command(
     api_key: Option<String>,
     provider: ProviderKind,
     store: Option<PathBuf>,
+    allow_non_loopback: bool,
 ) -> Command {
     let mut cmd = Command::new(exe);
     cmd.arg("serve").arg("--bind").arg(bind.to_string());
+    if allow_non_loopback {
+        cmd.arg("--allow-non-loopback");
+    }
     if let Some(upstream) = upstream {
         cmd.arg("--upstream").arg(upstream);
     }
@@ -9340,15 +9379,22 @@ async fn run_http(
     provider: ProviderKind,
     store: Option<PathBuf>,
     dashboard_enabled: bool,
+    allow_non_loopback: bool,
 ) -> Result<()> {
-    let state = AppState {
+    let state = Arc::new(AppState {
         store_path: store.unwrap_or(default_store_path()?),
         upstream,
         api_key,
         provider,
-        client: Client::new(),
+        // Jamais de redirection : l'amont choisirait l'hôte qui reçoit `x-api-key`, que
+        // reqwest ne retire pas quand l'origine change (audit du 08/10/2026).
+        client: Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?,
         dashboard_enabled,
-    };
+        // Hors boucle locale explicitement voulue, les noms d'hôte légitimes sont inconnus.
+        host_guard: (!allow_non_loopback).then_some(bind),
+    });
     let app = Router::new()
         .route("/health", get(|| async { Json(json!({"ok": true})) }))
         .route("/compress", post(http_compress))
@@ -9375,12 +9421,74 @@ async fn run_http(
             "/v1beta/projects/:project/locations/:location/publishers/:publisher/models/*model_method",
             post(http_provider_original_uri),
         )
-        .with_state(Arc::new(state));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_local_host,
+        ))
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind).await?;
     println!("lm-resizer listening on http://{bind}");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn ensure_loopback_bind(bind: SocketAddr, allow_non_loopback: bool) -> Result<()> {
+    if bind.ip().is_loopback() || allow_non_loopback {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "refusing to listen on {bind}: the proxy has no client authentication, so anyone who can reach it can spend the upstream API key; use a loopback address or pass --allow-non-loopback"
+    )
+}
+
+/// Nom d'hôte d'un en-tête `Host` (sans port, crochets d'IPv6 retirés).
+fn host_name(value: &str) -> &str {
+    let value = value.trim();
+    if let Some(rest) = value.strip_prefix('[') {
+        return rest.split(']').next().unwrap_or(rest);
+    }
+    value.rsplit_once(':').map_or(value, |(host, port)| {
+        if port.chars().all(|c| c.is_ascii_digit()) {
+            host
+        } else {
+            value
+        }
+    })
+}
+
+/// Refuse une requête dont `Host` n'est pas la boucle locale ou l'adresse d'écoute : une page
+/// web qui rebinde son nom DNS vers 127.0.0.1 joindrait sinon le proxy depuis le navigateur.
+async fn require_local_host(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let Some(bind) = state.host_guard else {
+        return next.run(request).await;
+    };
+    let host = request
+        .headers()
+        .get(axum::http::header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .or_else(|| request.uri().authority().map(|a| a.to_string()));
+    let allowed = host.as_deref().is_none_or(|host| {
+        let name = host_name(host).to_ascii_lowercase();
+        name == "localhost" || name == bind.ip().to_string() || {
+            name.parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
+        }
+    });
+    if allowed {
+        next.run(request).await
+    } else {
+        (
+            axum::http::StatusCode::MISDIRECTED_REQUEST,
+            Json(json!({"error": "host not allowed: this proxy only answers on its loopback address"})),
+        )
+            .into_response()
+    }
 }
 
 async fn http_compress(
@@ -12035,6 +12143,74 @@ unknown_action = true
             assert_eq!(verify.failed, 0, "profile {profile:?}");
             assert_eq!(verify.diagnostics.len(), 0, "profile {profile:?}");
         }
+    }
+
+    #[test]
+    fn sensitive_keys_cover_header_spellings_but_not_token_counters() {
+        // Audit du 08/10/2026 : `x-api-key` et `x-goog-api-key` restaient en clair.
+        for key in [
+            "x-api-key",
+            "X-Goog-Api-Key",
+            "api-key",
+            "api_key",
+            "apiKey",
+            "Authorization",
+            "proxy-authorization",
+            "x-amz-security-token",
+            "access_token",
+            "id_token",
+            "client_secret",
+            "x-webhook-secret",
+            "db_password",
+            "private_key",
+            "openai_api_key",
+            "aws_secret_access_key",
+            "credentials",
+        ] {
+            assert!(is_sensitive_key(key), "{key} devrait être masqué");
+        }
+        // Compteurs et champs ordinaires d'un fixture : à garder lisibles.
+        for key in [
+            "max_tokens",
+            "input_tokens",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "cache_creation_input_tokens",
+            "model",
+            "content",
+            "role",
+            "stop_reason",
+            "tokenizer",
+            "authors",
+        ] {
+            assert!(!is_sensitive_key(key), "{key} ne devrait pas être masqué");
+        }
+    }
+
+    #[test]
+    fn sanitize_provider_fixture_redacts_header_style_keys() {
+        let root = tempfile::tempdir().unwrap();
+        let input = root.path().join("input.json");
+        let output = root.path().join("fixture.json");
+        std::fs::write(
+            &input,
+            serde_json::to_string(&json!({
+                "headers": {"x-api-key": "sk-fixture-1", "x-goog-api-key": "sk-fixture-2"},
+                "max_tokens": 64,
+                "usage": {"input_tokens": 12}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let report =
+            sanitize_provider_fixture(ProviderKind::Anthropic, &input, &output, 10).unwrap();
+        assert_eq!(report.redacted_fields, 2);
+        let text = std::fs::read_to_string(output).unwrap();
+        assert!(!text.contains("sk-fixture"), "{text}");
+        let value: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value["max_tokens"], 64);
+        assert_eq!(value["usage"]["input_tokens"], 12);
     }
 
     #[test]
