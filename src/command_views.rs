@@ -181,7 +181,12 @@ fn is_commit_header(row: &str) -> bool {
 /// les lignes vides et les pieds `Signed-off-by` / `Co-authored-by`. Les trois premières
 /// lignes de corps suivent le titre ; le reste est compté et récupérable dans tee.
 fn git_log_stat(raw: &str) -> Option<String> {
+    // Le bilan commence par exactement une espace ; le corps d'un message est
+    // indenté de quatre et ne doit pas suffire à déclencher cette vue.
     let has_summary = raw.lines().any(|row| {
+        if !row.starts_with(' ') || row.starts_with("  ") {
+            return false;
+        }
         let row = row.trim_start();
         row.split_once(" file").is_some_and(|(n, rest)| {
             !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) && rest.contains("changed")
@@ -417,6 +422,12 @@ mod tests {
         );
         assert!(!view.contains("Co-Authored-By"));
         assert!(view.len() < raw.len());
+    }
+    #[test]
+    fn body_line_resembling_a_stat_summary_does_not_switch_views() {
+        let raw = "commit aaaaaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    refactor\n\n    5 files changed in this refactor\n\ncommit bbbbbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n";
+        assert!(git_log_stat(raw).is_none());
+        assert!(git_log(raw).contains("lines omitted"));
     }
     #[test]
     fn plain_log_without_stat_keeps_the_historical_view() {
