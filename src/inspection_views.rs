@@ -12,6 +12,17 @@ pub enum Mode {
     Summary,
 }
 
+/// Bilan d'AVA : `1 test failed`, `3 tests passed`, `2 known failures`, `1 test skipped`.
+fn ava_total(text: &str) -> bool {
+    let mut words = text.split_whitespace();
+    words
+        .next()
+        .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
+        && words
+            .next()
+            .is_some_and(|w| matches!(w, "test" | "tests" | "known" | "uncaught" | "unhandled"))
+}
+
 pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
     if matches!(mode, Mode::Raw) {
         return raw.into();
@@ -277,6 +288,23 @@ pub fn summarize(mode: Mode, raw: &str, exit: i32) -> String {
                 if i >= 5 {
                     *slot = false;
                 }
+            }
+        }
+    }
+    // AVA écrit chaque échec sur un bloc (`✘ [fail]: titre`, message, valeur obtenue, extrait de la
+    // source) que seuls les voisins immédiats d'un mot-clé auraient sauvé : le bloc entier reste,
+    // jusqu'au bilan (`1 test failed`).
+    if matches!(mode, Mode::Summary | Mode::Tests) {
+        let mut open = false;
+        for (i, line) in plain.iter().enumerate() {
+            let text = line.trim_start();
+            if text.starts_with("✘ [fail]") || text.starts_with("✖ [fail]") {
+                open = true;
+            } else if open && ava_total(text) {
+                open = false;
+            }
+            if open {
+                keep[i] = true;
             }
         }
     }
@@ -748,6 +776,24 @@ mod tests {
                     assert!(out.starts_with(&format!("[FAIL] Command failed (exit code: {exit})")));
                 }
             }
+        }
+    }
+    /// Sortie réelle d'AVA (recette du 08/10/2026) : un test en échec.
+    const AVA_FAILURE: &str = include_str!("../tests/fixtures/ava_failure.txt");
+
+    #[test]
+    fn an_ava_failure_block_keeps_its_assertion_value_and_source_line() {
+        let view = summarize(Mode::Summary, AVA_FAILURE, 1);
+        for fact in [
+            "✘ [fail]: main",
+            "test.js:14",
+            "14:   t.false(isPlainObject({}));",
+            "15:   t.true(isPlainObject({foo: true}));",
+            "Value is not `false`:",
+            "  true",
+            "1 test failed",
+        ] {
+            assert!(view.contains(fact), "manque {fact:?} dans\n{view}");
         }
     }
     #[test]
