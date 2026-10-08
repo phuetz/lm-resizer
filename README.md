@@ -4,9 +4,11 @@
 
 On a benchmark of 61 command captures it saves a median **25.18%** of tokens with the raw recovery included, keeps the producer's exit code in **61/61** cases and starts in about **8 ms**. Zero telemetry, 100% local, deterministic.
 
-![Example of LM Resizer processing command output](docs/lm-resizer-hero.png)
+![LM Resizer: compact command output for coding agents, byte-exact original kept, measured on 61 real command captures](docs/lm-resizer-infographic.webp)
 
 [Français](README.fr.md) · [Comparison benchmark](bench/native/README.md)
+
+Pairs with [Code Explorer](https://github.com/phuetz/code-explorer), a code graph for agents, by the same author.
 
 ## Install
 
@@ -29,6 +31,24 @@ The installer verifies the archive's SHA-256 checksum and binary version before 
 On Linux and macOS the installer prints the line to add when `~/.local/bin` is not on your `PATH`; to make it permanent in Bash, run `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc` (use `~/.zshrc` for zsh) and open a new terminal. The Windows installer updates the user `PATH`. `LM_RESIZER_INSTALL_DIR` selects another destination. To uninstall a prebuilt binary, remove it from that destination. [Windows: TLS fallback, PowerShell 5.1 and byte-exact recovery](docs/WINDOWS.md).
 
 ## See it work
+
+`exec` runs the command and gives the agent the short view. A real run with release 0.2.5 on a project with 61 tests, one of them failing (5816 bytes of raw output → 258 bytes):
+
+~~~console
+$ lm-resizer exec -- pytest -v
+Pytest: 60 passed, 1 failed
+
+Failures:
+1. [FAIL] test_invoice
+     >       assert total([20, 22]) == 42
+     E       assert 43 == 42
+     E        +  where 43 = total([20, 22])
+[tee:bd6486c7978f]
+$ echo $?
+1
+~~~
+
+The assertion stays whole, the producer's exit code is kept, and `lm-resizer tee read bd6486c7978f` returns the full original.
 
 `tool-output` filters output that a host already captured. The reduced view keeps the failing test and points to the exact original:
 
@@ -64,7 +84,7 @@ Two other tools are commonly used to shrink command output. Their own published 
 | Producer exit code preserved | 61/61 | 52/61 | not measured |
 | Byte-exact raw recoverable | 61/61 | partial or none | no |
 
-LM Resizer's replayed median and mean both exceed RTK's on this corpus. Long patches retain the opening diagnostic window and keep the complete original in tee; test assertions and compiler diagnostics stay intact. RTK returns exit code 0 in **9** of the 61 captures where the producer failed; LM Resizer keeps the producer's code. On one capture LM Resizer returns 251 tokens against RTK's 40 because it states the **457** collection errors and lists the first ten failing files, which RTK omits. Headroom compresses LLM API context semantically and has no dedicated CLI tool filters, so its median saving on this command corpus is 0.00%. Strict view equality is 41/61; the twenty differences and their reasons are listed in the benchmark file, and the benchmark's strict checker exits 1 by design. The numbers are replayed with `python3 bench/real/parity_rtk.py`; see [the benchmark](bench/native/README.md).
+LM Resizer's replayed median and mean both exceed RTK's on this corpus. Long patches retain the opening diagnostic window and keep the complete original in tee; test assertions and compiler diagnostics stay intact. RTK returns exit code 0 in **9** of the 61 captures where the producer failed; LM Resizer keeps the producer's code. On one capture LM Resizer returns 251 tokens against RTK's 40 because it states the **457** collection errors and lists the first ten failing files, which RTK omits. Headroom compresses LLM API context semantically and has no dedicated CLI tool filters, so its median saving on this command corpus is 0.00%. Strict view equality is 41/61; the twenty differences and their reasons are listed in the benchmark file, and the benchmark's strict checker exits 1 by design. The numbers are replayed with `python3 bench/real/parity_rtk.py` after building the pinned oracle (`python3 bench/real/build_oracle.py`; the full command with its arguments is in [the benchmark](bench/native/README.md#reproduction-et-limites)); see [the benchmark](bench/native/README.md).
 
 ## Try it on your project
 
