@@ -116,6 +116,24 @@ fn apostrophes(text: &str) -> String {
 /// La ligne réécrite fait, dans le shell, exactement ce que faisait la ligne d'origine.
 fn assert_same_behaviour(sandbox: &Sandbox, original: &str) {
     let report = rewrite_shell_report(original);
+    assert_equivalent(sandbox, original, &report.rewritten, report.changed);
+}
+
+/// Idem pour la ligne que produit le hook PreToolUse (`None` : la commande reste brute).
+fn assert_hook_behaviour(sandbox: &Sandbox, original: &str) {
+    let exe = sandbox.dir.path().join("bin").join("lm-resizer");
+    if let Some(wrapped) = rewrite_command_for_hook(original, exe.to_str().unwrap()) {
+        assert_equivalent(sandbox, original, &wrapped, true);
+    }
+}
+
+fn assert_equivalent(sandbox: &Sandbox, original: &str, rewritten: &str, changed: bool) {
+    let report = RewriteShellReport {
+        command: original.to_string(),
+        changed,
+        rewritten: rewritten.to_string(),
+        rewrites: Vec::new(),
+    };
     let (before_calls, before_files) = sandbox.run(original);
     let (after_calls, after_files) = sandbox.run(&report.rewritten);
     assert_eq!(
@@ -262,6 +280,7 @@ fn trap_corpus_never_changes_what_the_shell_runs() {
     let mut rewritten = 0;
     for trap in traps {
         assert_same_behaviour(&sandbox, trap);
+        assert_hook_behaviour(&sandbox, trap);
         rewritten += usize::from(rewrite_shell_report(trap).changed);
     }
     // Garde contre un test vacueux : si plus rien n'était réécrit, rien ne serait jugé.
