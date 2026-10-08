@@ -15,6 +15,7 @@ if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; th
 fi
 node scripts/test-source-install-docs.cjs
 node scripts/test-release-paths.cjs
+node scripts/test-binary-path-scan.cjs
 node scripts/test-install-fallback.cjs
 python3 bench/real/ensure_oracle_source.py
 python3 bench/real/test_source_similarity.py
@@ -25,6 +26,8 @@ cargo test --workspace --release
 cargo check --release
 cargo check --release --examples
 node scripts/build-release-artifact.cjs native
+# Rust paths are remapped by rustc; C sources compiled by build scripts need the same prefixes.
+node scripts/check-binary-paths.cjs target/release/lm-resizer
 python3 bench/real/check_native_surface.py target/release/lm-resizer
 python3 bench/real/check_windows_contract.py --binary target/release/lm-resizer --output target/windows-contract.json
 python3 bench/real/test_large_capture.py
@@ -32,6 +35,10 @@ python3 bench/real/test_large_capture.py
 "$root/scripts/check-wasm-package.sh"
 "$root/scripts/publish-wasm.sh" --dry-run
 "$root/scripts/package-release.sh"
+# The shipped archive, not only the build output: nothing of the builder may travel in it.
+for archive in dist/lm-resizer-*.tar.gz dist/lm-resizer-*.zip; do
+  [ -f "$archive" ] && node scripts/check-binary-paths.cjs "$archive"
+done
 "$root/scripts/check-publish-readiness.sh" >/dev/null
 "$root/scripts/test-install-grok-skill.sh"
 "$root/scripts/check-readme-install.sh"
