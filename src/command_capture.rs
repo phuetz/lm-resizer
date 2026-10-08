@@ -172,21 +172,29 @@ pub fn run(command: &[String]) -> anyhow::Result<Capture> {
                 launch_error: None,
             })
         }
-        Err(error) => Ok(Capture {
-            raw: Vec::new(),
-            code: if error.kind() == std::io::ErrorKind::PermissionDenied {
-                126
-            } else {
-                127
-            },
-            launch_error: Some(launch_error_message(program, &error)),
-        }),
+        Err(error) => {
+            let (code, message) = launch_failure(program, &error);
+            Ok(Capture {
+                raw: Vec::new(),
+                code,
+                launch_error: Some(message),
+            })
+        }
     }
 }
 
 /// Message d'échec de lancement. Pour une commande introuvable, on nomme la
 /// commande et on dit où elle a été cherchée, au lieu du seul « os error 2 »
 /// qui laisse croire à un fichier d'lm-resizer manquant.
+pub fn launch_failure(program: &str, error: &std::io::Error) -> (i32, String) {
+    let code = if error.kind() == std::io::ErrorKind::PermissionDenied {
+        126
+    } else {
+        127
+    };
+    (code, launch_error_message(program, error))
+}
+
 fn launch_error_message(program: &str, error: &std::io::Error) -> String {
     if error.kind() == std::io::ErrorKind::NotFound {
         format!(

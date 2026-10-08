@@ -2396,7 +2396,15 @@ async fn run(cli: Cli) -> Result<()> {
         } => {
             // PreToolUse: rewrite a supported Bash command to run through `lm-resizer exec --`
             // (in-place output substitution, the native role). PostToolUse: measure-only telemetry.
-            if event.eq_ignore_ascii_case("PreToolUse") || event == "BeforeTool" {
+            if event == "Capabilities" {
+                // Side-effect-free handshake for clients requiring these contracts.
+                println!(
+                    "{}",
+                    json!({"hook_capabilities": {
+                        "schema_version": 1, "live_commands_raw": true, "launch_failure_status": true
+                    }})
+                );
+            } else if event.eq_ignore_ascii_case("PreToolUse") || event == "BeforeTool" {
                 emit_pretooluse_rewrite(&event, &client);
             } else {
                 let report = run_native_hook(&client, &event);
@@ -3104,15 +3112,22 @@ fn run_exec_command(
     let (exit_code, raw_bytes, streams) = if stream {
         run_command_streaming(&resolved_program, args, &command.join(" "))?
     } else {
-        let output = command_capture::build_command(&resolved_program, args)
+        match command_capture::build_command(&resolved_program, args)
             .stdin(Stdio::inherit())
             .output()
-            .with_context(|| format!("failed to execute '{}'", command.join(" ")))?;
-        (
-            child_exit_code(output.status),
-            combine_command_bytes(&output.stdout, &output.stderr),
-            CapturedStreams::new(&output.stdout, &output.stderr),
-        )
+        {
+            Ok(output) => (
+                child_exit_code(output.status),
+                combine_command_bytes(&output.stdout, &output.stderr),
+                CapturedStreams::new(&output.stdout, &output.stderr),
+            ),
+            Err(error) => {
+                let (code, message) = command_capture::launch_failure(program, &error);
+                let bytes = message.into_bytes();
+                let streams = CapturedStreams::new(&[], &bytes);
+                (code, bytes, streams)
+            }
+        }
     };
 
     let raw = display_captured_bytes(&raw_bytes);
@@ -3341,12 +3356,20 @@ fn run_command_streaming(
     args: &[String],
     display: &str,
 ) -> Result<(i32, Vec<u8>, CapturedStreams)> {
-    let mut child = command_capture::build_command(program, args)
+    let result = command_capture::build_command(program, args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("failed to execute '{display}'"))?;
+        .spawn();
+    let mut child = match result {
+        Ok(child) => child,
+        Err(error) => {
+            let (code, message) = command_capture::launch_failure(display, &error);
+            let bytes = message.into_bytes();
+            let streams = CapturedStreams::new(&[], &bytes);
+            return Ok((code, bytes, streams));
+        }
+    };
 
     let stdout = child.stdout.take().context("failed to capture stdout")?;
     let stderr = child.stderr.take().context("failed to capture stderr")?;
@@ -5840,6 +5863,9 @@ fn command_is_interactive(words: &[String]) -> bool {
         return false;
     };
     let base = command_basename(program);
+    if command_requires_live_output(&base, &words[1..]) {
+        return true;
+    }
     const ALWAYS: &[&str] = &[
         "vim",
         "nvim",
@@ -5889,6 +5915,72 @@ fn command_is_interactive(words: &[String]) -> bool {
         return git_command_is_interactive(words);
     }
     false
+}
+
+/// Capturing until exit hides output from followers, watchers and foreground
+/// servers. Keep this policy in the engine so every native hook shares it.
+fn command_requires_live_output(base: &str, args: &[String]) -> bool {
+    if args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "--watch" | "--watchAll" | "--follow" | "--looponfail"
+        ) || arg.starts_with("--watch=")
+            || arg.starts_with("--watchAll=")
+            || arg.starts_with("--follow=")
+    }) {
+        return true;
+    }
+    let short_follow = args.iter().any(|arg| {
+        arg.starts_with('-')
+            && !arg.starts_with("--")
+            && (arg.contains('f') || (base == "tail" && arg.contains('F')))
+    });
+    if matches!(base, "tail" | "journalctl") && short_follow {
+        return true;
+    }
+    if matches!(base, "docker" | "podman" | "kubectl")
+        && args.iter().any(|arg| arg == "logs")
+        && short_follow
+    {
+        return true;
+    }
+    if base == "pytest" && args.iter().any(|arg| arg == "-f") {
+        return true;
+    }
+    if matches!(base, "cargo" | "dotnet") && args.first().is_some_and(|arg| arg == "watch") {
+        return true;
+    }
+    if base == "cat"
+        && (args.iter().all(|arg| arg.starts_with('-')) || args.iter().any(|arg| arg == "-"))
+    {
+        return !args
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "--help" | "--version"));
+    }
+    if matches!(base, "npm" | "pnpm" | "yarn" | "bun") {
+        let server_script = |arg: &str| {
+            matches!(
+                arg.split(':').next(),
+                Some("dev" | "start" | "serve" | "watch" | "preview")
+            )
+        };
+        if args.iter().any(|arg| server_script(arg)) {
+            return true;
+        }
+    }
+    if (base == "docker-compose"
+        || (matches!(base, "docker" | "podman") && args.iter().any(|arg| arg == "compose")))
+        && args.iter().any(|arg| arg == "up")
+        && !args
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "-d" | "--detach" | "--detach=true"))
+    {
+        return true;
+    }
+    base == "vitest"
+        && !args
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "run" | "--run" | "--help" | "--version"))
 }
 
 fn repl_without_script(words: &[String]) -> bool {
@@ -6014,6 +6106,13 @@ fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
 /// nothing → run raw) when the command is unsupported/compound/redirected or is our own exec
 /// invocation. Pure/testable: takes the parsed event + resolved exe path.
 fn pretooluse_rewrite_json(value: &Value, exe: &str, event: &str) -> Option<Value> {
+    if value
+        .pointer("/tool_input/run_in_background")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        return None;
+    }
     let command = extract_hook_command(value)?;
     let mut rewritten = rewrite_command_for_hook(&command, exe)?;
     let shell = value
@@ -13209,6 +13308,62 @@ Successfully tagged localhost/app:latest\n";
     }
 
     #[test]
+    fn native_hook_keeps_followers_servers_watchers_and_stdin_raw() {
+        for command in [
+            "tail -f output.log",
+            "tail -F output.log",
+            "tail --follow=name output.log",
+            "journalctl -xf",
+            "docker logs -f web",
+            "kubectl logs --follow=true pod",
+            "npm run dev",
+            "npm --prefix app start",
+            "pnpm run --filter app dev",
+            "npm run start:dev",
+            "yarn serve",
+            "bun run watch",
+            "docker compose up",
+            "docker compose -f compose.yaml up",
+            "docker-compose up",
+            "cat",
+            "cat -",
+            "pytest --looponfail",
+            "cargo watch -x test",
+            "dotnet watch run",
+            "npm run preview",
+            "npm test -- --watch",
+            "vitest",
+            "vitest --watch",
+        ] {
+            assert!(
+                rewrite_command_for_hook(command, "/opt/lm").is_none(),
+                "{command}"
+            );
+        }
+        for command in [
+            "tail -n 20 output.log",
+            "cat output.log",
+            "npm run build",
+            "npm test",
+            "cargo test",
+            "pytest tests",
+            "docker compose up -d",
+            "vitest run",
+        ] {
+            assert!(
+                rewrite_command_for_hook(command, "/opt/lm").is_some(),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn native_hook_skips_explicit_background_tools() {
+        let value = json!({"tool_input": {"command": "cargo test", "run_in_background": true}});
+        assert!(pretooluse_rewrite_json(&value, "/opt/lm", "PreToolUse").is_none());
+    }
+
+    #[test]
     fn normalized_command_text_strips_windows_script_extension() {
         let command = vec![
             "C:/tmp/terraform.cmd".to_string(),
@@ -14174,9 +14329,20 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
                 continue;
             }
             let path = entry.path();
-            // Python is a benchmark dependency, never a product runtime dependency.
-            // The real-token benchmark explicitly requires Python tiktoken.
+            // The native CLI remains Rust-only. The optional Claude Code adapter
+            // explicitly documents Python, independently of the CLI runtime.
+            // Keep this exception exact rather than admitting Python across plugins.
             if path.starts_with(root.join("bench/real")) {
+                continue;
+            }
+            if [
+                "plugins/claude-code/scripts/hook.py",
+                "plugins/claude-code/tests/test_hook.py",
+                "plugins/claude-code/tests/test_execution.py",
+            ]
+            .iter()
+            .any(|relative| path == root.join(relative))
+            {
                 continue;
             }
             let file_name = path
