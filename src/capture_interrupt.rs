@@ -163,7 +163,6 @@ mod platform {
 
     unsafe extern "C" {
         fn kill(pid: c_int, signal: c_int) -> c_int;
-        fn setpgid(pid: c_int, pgid: c_int) -> c_int;
         fn signal(signal: c_int, handler: usize) -> usize;
     }
 
@@ -189,14 +188,10 @@ mod platform {
     }
 
     pub fn configure_process_group(command: &mut Command) {
-        unsafe {
-            command.pre_exec(|| {
-                if setpgid(0, 0) == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
+        // Preserve Rust's posix_spawn path and its ENOEXEC launch error.
+        // A pre_exec callback forces execvp, which executes invalid images
+        // through /bin/sh instead of reporting the failed launch.
+        command.process_group(0);
     }
 
     pub fn install() -> io::Result<Guard> {

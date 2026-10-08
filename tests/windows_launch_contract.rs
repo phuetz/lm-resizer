@@ -8,7 +8,14 @@ fn invalid_executable_is_126_in_every_exec_mode() {
     let file = dir
         .path()
         .join(format!("invalid{}", std::env::consts::EXE_SUFFIX));
-    std::fs::write(&file, b"this is not an executable image").unwrap();
+    let executed = dir.path().join("unexpected-shell-execution");
+    // Valid shell text without a shebang must remain an invalid image. If
+    // execvp falls back to sh, this creates observable evidence before exit.
+    std::fs::write(
+        &file,
+        format!("printf executed > '{}'\nexit 23\n", executed.display()),
+    )
+    .unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -21,6 +28,10 @@ fn invalid_executable_is_126_in_every_exec_mode() {
             cmd.arg(option);
         }
         let out = cmd.arg("--").arg(&file).output().unwrap();
+        assert!(
+            !executed.exists(),
+            "an invalid image was interpreted by a shell: {out:?}"
+        );
         assert_eq!(out.status.code(), Some(126), "{out:?}");
         assert!(report(&out)["output"]
             .as_str()
