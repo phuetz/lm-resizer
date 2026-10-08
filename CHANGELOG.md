@@ -18,6 +18,7 @@ La 0.2.5 est publiée. Cette version corrige deux failles de sécurité relevée
 - La dernière ligne non vide d'une sortie longue n'est plus supprimée de la vue : `exec -- sh scripts/check-release.sh` (2958 lignes, code 0) perdait « release check passed » sans aucun `[tee:]`.
 - Tout `[tee:<id>]` affiché dit comment relire l'original : `[tee:<id>] lm-resizer tee read <id>` (+12 jetons quand il s'affiche, voir le banc ci-dessous).
 - Le refus d'un fichier de crochets existant précise que `--force` écrase le fichier entier ; `install.sh` renvoie à la section « Install from source ».
+- Un échec AVA garde son assertion, la valeur obtenue et la ligne fautive (le bloc `✘ [fail]` reste jusqu'au bilan) ; une vue raccourcie finit par un retour à la ligne ; depuis une archive sans `.git`, le contrôle des captures publiques demande de cloner au lieu d'afficher une trace.
 
 ### Vue `cargo test`
 - `FAILURES (n)` compte les tests en échec : sur une vraie sortie à deux échecs, la vue annonçait `FAILURES (5)` (des paragraphes), imprimait deux fois la ligne `test result:` et perdait `error: test failed, to rerun pass …`. Un échec est un bloc `---- nom stdout ----` (message, valeurs et position intacts), chaque bilan de suite est imprimé une fois et la relance est conservée. Sur la capture du README, le message d'assertion, placé avant la ligne `failures:`, était aussi perdu. L'exemple du README est la sortie réelle de la commande indiquée, rejouée par [`tests/readme_example.rs`](tests/readme_example.rs).
