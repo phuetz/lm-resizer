@@ -4,9 +4,11 @@
 
 Sur un banc de 61 captures de commandes, il économise une médiane de **25,18 %** de jetons, rappel du brut compris, conserve le code de sortie du producteur dans **61/61** cas et démarre en environ **8 ms**. Zéro télémétrie, 100 % local, déterministe.
 
-![Exemple de traitement d'une sortie de commande par LM Resizer](docs/lm-resizer-hero.png)
+![LM Resizer : sortie de commande compacte pour les agents de code, original conservé octet pour octet, mesuré sur 61 captures réelles](docs/lm-resizer-infographic.webp)
 
 [English](README.md) · [Banc de comparaison](bench/native/README.md)
+
+Se combine avec [Code Explorer](https://github.com/phuetz/code-explorer), un graphe de code pour les agents, du même auteur.
 
 ## Installation
 
@@ -29,6 +31,24 @@ L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire ava
 Sur Linux et macOS, l'installeur affiche la ligne à ajouter quand `~/.local/bin` n'est pas dans le `PATH` ; pour la rendre permanente sous Bash, lancez `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc` (`~/.zshrc` pour zsh) puis ouvrez un nouveau terminal. L'installeur Windows met à jour le `PATH` utilisateur. `LM_RESIZER_INSTALL_DIR` permet de choisir un autre répertoire. Pour désinstaller un binaire précompilé, retirez-le de ce répertoire. [Windows : repli TLS, PowerShell 5.1 et récupération exacte](docs/WINDOWS.md).
 
 ## Voyez le résultat
+
+`exec` lance la commande et donne la vue courte à l'agent. Une exécution réelle avec la version 0.2.5 sur un projet de 61 tests dont un en échec (5 816 octets de sortie brute → 258 octets) :
+
+~~~console
+$ lm-resizer exec -- pytest -v
+Pytest: 60 passed, 1 failed
+
+Failures:
+1. [FAIL] test_invoice
+     >       assert total([20, 22]) == 42
+     E       assert 43 == 42
+     E        +  where 43 = total([20, 22])
+[tee:bd6486c7978f]
+$ echo $?
+1
+~~~
+
+L'assertion reste entière, le code de sortie du producteur est conservé, et `lm-resizer tee read bd6486c7978f` rend l'original complet.
 
 `tool-output` filtre une sortie déjà capturée par un hôte. La vue réduite conserve le test en échec et pointe vers l'original exact :
 
@@ -64,7 +84,7 @@ Deux autres outils servent souvent à réduire les sorties de commande. Leurs ch
 | Code de sortie du producteur conservé | 61/61 | 52/61 | non mesuré |
 | Brut exact récupérable | 61/61 | partiel ou absent | non |
 
-La médiane et la moyenne rejouées dépassent celles de RTK sur ce corpus. Les grands patchs gardent leur début diagnostique et leur brut intégral reste dans tee ; les assertions et diagnostics du compilateur restent entiers. RTK retourne le code de sortie 0 dans **9** des 61 captures où le producteur échoue ; LM Resizer conserve le code du producteur. Sur une capture, LM Resizer rend 251 jetons contre 40 chez RTK parce qu'il indique les **457** erreurs de collecte et liste les dix premiers fichiers en échec, ce que RTK omet. Headroom compresse sémantiquement le contexte d'API LLM et n'a pas de filtres dédiés aux outils CLI : sa médiane d'économie sur ce corpus de commandes est de 0,00 %. L'égalité stricte des vues est de 41/61 ; les vingt écarts et leurs raisons sont listés dans le fichier du banc, et le contrôle strict du banc sort en code 1 par construction. Les chiffres se rejouent avec `python3 bench/real/parity_rtk.py` ; voir [le banc](bench/native/README.md).
+La médiane et la moyenne rejouées dépassent celles de RTK sur ce corpus. Les grands patchs gardent leur début diagnostique et leur brut intégral reste dans tee ; les assertions et diagnostics du compilateur restent entiers. RTK retourne le code de sortie 0 dans **9** des 61 captures où le producteur échoue ; LM Resizer conserve le code du producteur. Sur une capture, LM Resizer rend 251 jetons contre 40 chez RTK parce qu'il indique les **457** erreurs de collecte et liste les dix premiers fichiers en échec, ce que RTK omet. Headroom compresse sémantiquement le contexte d'API LLM et n'a pas de filtres dédiés aux outils CLI : sa médiane d'économie sur ce corpus de commandes est de 0,00 %. L'égalité stricte des vues est de 41/61 ; les vingt écarts et leurs raisons sont listés dans le fichier du banc, et le contrôle strict du banc sort en code 1 par construction. Les chiffres se rejouent avec `python3 bench/real/parity_rtk.py` après construction de l’oracle épinglé (`python3 bench/real/build_oracle.py` ; la commande complète avec ses arguments est dans [le banc](bench/native/README.md#reproduction-et-limites)) ; voir [le banc](bench/native/README.md).
 
 ## Essayez sur votre projet
 
