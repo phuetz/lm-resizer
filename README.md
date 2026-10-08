@@ -74,12 +74,22 @@ LM Resizer's replayed median (21.32%) exceeds the reference filter's (15.81%) on
 Check the install works anywhere, with no repository needed:
 
 ~~~bash
+lm-resizer --version
 lm-resizer exec -- echo hello
+lm-resizer tee list
+~~~
+
+On Windows `echo` is a built-in of `cmd` and PowerShell, not a program, so `exec` cannot launch it: use `lm-resizer exec -- cmd /c echo hello`.
+
+Then, from a Git repository and from a Rust project:
+
+~~~bash
 lm-resizer git log -20
 lm-resizer exec --raw-on-failure -- cargo test
-lm-resizer tee list
 lm-resizer gain --history --project
 ~~~
+
+`gain` can start negative: on a tiny output the view and the recovery line cost more tokens than the original. Real outputs turn the total positive.
 
 For any producer, `lm-resizer err|test|summary -- <command>` keeps diagnostics or test totals with adjacent context and a failure status header. `exec` and `tool-output` also summarize commands without a dedicated filter. Every output remains recoverable with `tee read`. `gain` shows measured command and token totals; `gain --json` returns the full counters. See the [CLI reference](docs/CLI-REFERENCE.md).
 

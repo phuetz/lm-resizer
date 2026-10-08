@@ -74,12 +74,22 @@ La médiane rejouée de LM Resizer (21,32 %) dépasse celle du filtre de référ
 Vérifiez que l'installation fonctionne partout, sans dépôt :
 
 ~~~bash
+lm-resizer --version
 lm-resizer exec -- echo hello
+lm-resizer tee list
+~~~
+
+Sous Windows `echo` est une commande interne de `cmd` et de PowerShell, pas un programme, et `exec` ne peut pas la lancer : utilisez `lm-resizer exec -- cmd /c echo hello`.
+
+Ensuite, depuis un dépôt Git et depuis un projet Rust :
+
+~~~bash
 lm-resizer git log -20
 lm-resizer exec --raw-on-failure -- cargo test
-lm-resizer tee list
 lm-resizer gain --history --project
 ~~~
+
+`gain` peut commencer négatif : sur une sortie minuscule, la vue et la ligne de rappel coûtent plus de jetons que l'original. Les vraies sorties rendent le total positif.
 
 Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagnostics ou bilans de tests avec une ligne de contexte et le code d’échec en tête. `exec` et `tool-output` résument aussi les commandes sans filtre dédié. Chaque sortie reste récupérable avec `tee read`. `gain` affiche les commandes et jetons mesurés ; `gain --json` donne les compteurs complets. Voir la [référence CLI](docs/CLI-REFERENCE.md).
 
