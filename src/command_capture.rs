@@ -1,7 +1,7 @@
 //! One producer and one shared pipe for both output channels. Drain before
 //! waiting, without a byte limit or per-stream reconstruction; EOF also covers
 //! inherited writers that outlive the immediate producer.
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 
 pub struct Capture {
@@ -151,6 +151,14 @@ pub fn build_command(program: &std::path::Path, args: &[String]) -> Command {
 }
 
 pub fn run(command: &[String]) -> anyhow::Result<Capture> {
+    run_with_stream(command, false, false)
+}
+
+pub fn run_streaming(command: &[String], live_stderr: bool) -> anyhow::Result<Capture> {
+    run_with_stream(command, true, live_stderr)
+}
+
+fn run_with_stream(command: &[String], stream: bool, live_stderr: bool) -> anyhow::Result<Capture> {
     let (program, args) = command
         .split_first()
         .ok_or_else(|| anyhow::anyhow!("missing producer"))?;
@@ -164,7 +172,35 @@ pub fn run(command: &[String]) -> anyhow::Result<Capture> {
     match result {
         Ok(mut child) => {
             let mut raw = Vec::new();
-            reader.read_to_end(&mut raw)?;
+            let mut show_live = stream;
+            let mut chunk = [0u8; 8192];
+            loop {
+                let count = reader.read(&mut chunk)?;
+                if count == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&chunk[..count]);
+                if show_live {
+                    // Reserve stdout for metadata in JSON mode; otherwise
+                    // retain the live output on stdout for pipelines.
+                    let result = if live_stderr {
+                        let mut output = std::io::stderr().lock();
+                        output
+                            .write_all(&chunk[..count])
+                            .and_then(|()| output.flush())
+                    } else {
+                        let mut output = std::io::stdout().lock();
+                        output
+                            .write_all(&chunk[..count])
+                            .and_then(|()| output.flush())
+                    };
+                    if result.is_err() {
+                        // A closed consumer of the live view must not discard
+                        // the tee or abandon the producer before it is reaped.
+                        show_live = false;
+                    }
+                }
+            }
             let status = child.wait()?;
             Ok(Capture {
                 raw,
