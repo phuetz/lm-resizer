@@ -84,7 +84,7 @@ Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagno
 
 Pour les scripts, utiliser `lm-resizer gain --json`.
 
-`exec` conserve le statut du producteur (128 + signal sous Unix). Les routes shells, `--stream` et `--raw-on-failure` conservent leurs flux séparés et le marqueur `[stderr]`.
+`exec` conserve le statut du producteur (128 + signal sous Unix). Avec `--stream` ou `--raw-on-failure`, la vue conserve les flux séparés : stdout vient d'abord, puis la frontière `[stderr]`, sans promettre la chronologie entre flux. Les rapports JSON exposent les nombres d'octets et cette disposition dans `streams`.
 
 ## La garantie diagnostique
 
@@ -94,7 +94,7 @@ LM Resizer raccourcit, il ne cache pas. Les vues de commandes conservent littér
 
 ## Récupérer la sortie exacte
 
-`exec` archive stdout et stderr entrelacés jusqu'à EOF, sans plafond de 10 Mio. Une vue suffisamment réduite peut afficher `[tee:<id>]` ; le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.
+`exec` archive la sortie jusqu'à EOF, sans plafond de 10 Mio. Le tee ne contient que les octets du producteur : jamais la frontière `[stderr]` ni l'annotation ajoutées à la vue. Dans les modes à flux séparés, les blocs sont archivés dans l'ordre de leur drainage ; leur ordre d'émission entre flux n'est pas garanti. Une vue suffisamment réduite peut afficher `[tee:<id>]` ; le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.
 
 Depuis Bash, récupérer un original listé lorsqu'il en existe un :
 

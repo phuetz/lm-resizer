@@ -118,7 +118,7 @@ fn non_utf8_bytes_survive_tee_in_captured_and_streamed_execution() {
                 "--",
                 "sh",
                 "-c",
-                "printf 'caf\\351_budget.txt\\n'; printf 'err\\377\\n' >&2; exit 9",
+                "printf 'caf\\351_budget.txt\\n'; sleep 0.05; printf 'err\\377\\n' >&2; exit 9",
             ])
             .output()
             .unwrap();
@@ -134,6 +134,15 @@ fn non_utf8_bytes_survive_tee_in_captured_and_streamed_execution() {
         assert!(view.contains("non-UTF-8 capture"));
         assert!(view.contains("caf\\xE9_budget.txt"));
         assert!(!view.contains('\u{fffd}'));
+        if stream {
+            assert!(view.contains("[stderr]\nerr\\xFF\n"));
+            assert_eq!(report["streams"]["stdout_bytes"], 16);
+            assert_eq!(report["streams"]["stderr_bytes"], 5);
+            assert_eq!(&out.stdout[..start], b"caf\xe9_budget.txt\n");
+            assert_eq!(out.stderr, b"err\xff\n");
+        } else {
+            assert!(report["streams"].is_null());
+        }
         let hint = report["tee_hint"].as_str().unwrap();
         let hash = hint
             .strip_prefix("[raw: ")
@@ -148,14 +157,7 @@ fn non_utf8_bytes_survive_tee_in_captured_and_streamed_execution() {
             .output()
             .unwrap();
         assert!(recovered.status.success());
-        assert_eq!(
-            recovered.stdout,
-            if stream {
-                &b"caf\xe9_budget.txt\n\n[stderr]\nerr\xff\n"[..]
-            } else {
-                &b"caf\xe9_budget.txt\nerr\xff\n"[..]
-            }
-        );
+        assert_eq!(recovered.stdout, b"caf\xe9_budget.txt\nerr\xff\n");
     }
 }
 

@@ -977,6 +977,16 @@ struct CapturedStreams {
     layout: &'static str,
 }
 
+impl CapturedStreams {
+    fn new(stdout: &[u8], stderr: &[u8]) -> Self {
+        Self {
+            stdout_bytes: stdout.len(),
+            stderr_bytes: stderr.len(),
+            layout: "stdout_then_stderr; [stderr] boundary; no cross-stream chronology",
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct ExecReport {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1856,7 +1866,7 @@ async fn run(cli: Cli) -> Result<()> {
                 anyhow::bail!("unknown command '{program}'; use --help or exec -- <program>");
             }
             let store = open_store_or_warn(None);
-            let report = run_exec_command(&command, "", false, false, false, store.as_deref())?;
+            let report = run_exec_command(&command, "", false, false, store.as_deref())?;
             print!("{}", report.output);
             if report.exit_code != 0 {
                 std::process::exit(report.exit_code);
@@ -1871,14 +1881,8 @@ async fn run(cli: Cli) -> Result<()> {
             command,
         } => {
             let store = open_store_or_warn(store);
-            let report = run_exec_command(
-                &command,
-                &query,
-                raw_on_failure,
-                stream,
-                json,
-                store.as_deref(),
-            )?;
+            let report =
+                run_exec_command(&command, &query, raw_on_failure, stream, store.as_deref())?;
             let exit_code = report.exit_code;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
@@ -3090,23 +3094,27 @@ fn run_exec_command(
     query: &str,
     raw_on_failure: bool,
     stream: bool,
-    json: bool,
     store: Option<&dyn CcrStore>,
 ) -> Result<ExecReport> {
     if !raw_on_failure && !stream {
         return run_inspected_command(command, None, store, query);
     }
     let started = Instant::now();
-    let captured = if stream {
-        command_capture::run_streaming(command, json)?
-    } else {
-        command_capture::run(command)?
-    };
+    let captured = command_capture::run_separated(command, stream)?;
     let exit_code = captured.code;
     let raw_bytes = captured.raw;
+    let view_bytes = captured
+        .streams
+        .as_ref()
+        .map(|streams| combine_command_bytes(&streams.stdout, &streams.stderr))
+        .unwrap_or_else(|| raw_bytes.clone());
+    let streams = captured
+        .streams
+        .as_ref()
+        .map(|streams| CapturedStreams::new(&streams.stdout, &streams.stderr));
     let launch_error = captured.launch_error;
     let failed_to_launch = launch_error.is_some();
-    let raw = launch_error.unwrap_or_else(|| display_captured_bytes(&raw_bytes));
+    let raw = launch_error.unwrap_or_else(|| display_captured_bytes(&view_bytes));
     perf_stage("capture", started.elapsed());
     let phase = Instant::now();
     let (filter, mut filtered) = if failed_to_launch {
@@ -3195,6 +3203,15 @@ fn run_exec_command(
     // Le tee doit couvrir les omissions de toutes les étapes d'exec.
     let tee_hint = archive_raw_bytes(&raw_bytes)?;
     let mut final_output = compressed.output;
+    if streams
+        .as_ref()
+        .is_some_and(|streams| streams.stdout_bytes > 0 && streams.stderr_bytes > 0)
+    {
+        if !final_output.ends_with('\n') {
+            final_output.push('\n');
+        }
+        final_output.push_str("[capture: stdout and stderr captured separately; displayed order is not chronological]\n");
+    }
     if let Some(hint) = &tee_hint {
         append_recovery_instruction(&mut final_output, hint, &raw);
     }
@@ -3203,15 +3220,15 @@ fn run_exec_command(
     perf_stage("tee", phase.elapsed());
     let phase = Instant::now();
     let report = ExecReport {
-        streams: None,
+        streams,
         tokens: TokenCounts::measure(&raw, &final_output),
         command: command.join(" "),
         exit_code,
         filter,
-        original_bytes: raw_bytes.len(),
+        original_bytes: view_bytes.len(),
         filtered_bytes: filtered.len(),
         compressed_bytes: final_output.len(),
-        bytes_saved: raw_bytes.len().saturating_sub(final_output.len()),
+        bytes_saved: view_bytes.len().saturating_sub(final_output.len()),
         compression_steps: compressed.steps_applied,
         cache_keys: compressed.cache_keys,
         tee_hint,
@@ -3332,6 +3349,18 @@ fn child_exit_code(status: std::process::ExitStatus) -> i32 {
     #[cfg(not(unix))]
     let interrupted = None;
     status.code().or(interrupted).unwrap_or(1)
+}
+
+fn combine_command_bytes(stdout: &[u8], stderr: &[u8]) -> Vec<u8> {
+    let mut bytes = stdout.to_vec();
+    if !stderr.is_empty() {
+        if !stdout.is_empty() {
+            bytes.push(b'\n');
+        }
+        bytes.extend_from_slice(b"[stderr]\n");
+        bytes.extend_from_slice(stderr);
+    }
+    bytes
 }
 
 fn display_captured_bytes(bytes: &[u8]) -> String {

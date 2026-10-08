@@ -86,7 +86,7 @@ For any producer, `lm-resizer err|test|summary -- <command>` keeps diagnostics o
 
 For scripts, use `lm-resizer gain --json`.
 
-`exec` preserves the producer's status (128 + signal on Unix). Shell commands, `--stream` and `--raw-on-failure` retain separate streams and the `[stderr]` marker.
+`exec` preserves the producer's status (128 + signal on Unix). With `--stream` or `--raw-on-failure`, the displayed view retains separate streams: stdout comes first, then the `[stderr]` boundary, so cross-stream chronology is not implied. JSON reports expose the byte counts and this layout in `streams`.
 
 ## The diagnostic guarantee
 
@@ -96,7 +96,7 @@ LM Resizer shortens, it does not hide. Command views keep literal numbers, paths
 
 ## Recover the exact output
 
-`exec` drains a shared stdout/stderr pipe through EOF, without a 10 MiB ceiling. A sufficiently reduced view may display `[tee:<id>]`; read it with `lm-resizer tee read <id>`; otherwise `tee list` and the JSON `tee_hint` field provide recovery without adding tokens to the view.
+`exec` drains output through EOF, without a 10 MiB ceiling. The tee contains the producer bytes only: it never includes the view's `[stderr]` boundary or capture annotation. In separate-stream modes, chunks are archived in drain order; their cross-stream emission order is not guaranteed. A sufficiently reduced view may display `[tee:<id>]`; read it with `lm-resizer tee read <id>`; otherwise `tee list` and the JSON `tee_hint` field provide recovery without adding tokens to the view.
 
 From Bash, retrieve a listed original when one exists:
 

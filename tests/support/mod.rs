@@ -41,7 +41,12 @@ pub fn lm(root: &Path) -> Command {
 }
 
 pub fn report(out: &Output) -> serde_json::Value {
-    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {out:?}"))
+    out.stdout
+        .iter()
+        .enumerate()
+        .filter(|(_, byte)| **byte == b'{')
+        .find_map(|(start, _)| serde_json::from_slice(&out.stdout[start..]).ok())
+        .unwrap_or_else(|| panic!("no JSON report in output: {out:?}"))
 }
 
 pub fn recovered(root: &Path, value: &serde_json::Value) -> Vec<u8> {
