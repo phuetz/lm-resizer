@@ -7731,7 +7731,7 @@ fn write_managed_text_file(path: &Path, content: &str, force: bool, kind: &str) 
         }
         if !force {
             anyhow::bail!(
-                "{kind} already exists: {} (rerun with --force to overwrite)",
+                "{kind} already exists: {} (--force overwrites the whole file, including any permissions or other hooks in it: back it up first)",
                 path.display()
             );
         }
