@@ -48,6 +48,10 @@ magika = ["lm-resizer-core/magika"]
 [dependencies]
 syn = { version = "2", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
+tree-sitter = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.25"
 tempfile = "3"
 anyhow = { workspace = true }
 axum = { workspace = true }

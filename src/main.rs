@@ -57,6 +57,7 @@ mod patch_view;
 mod provider_usage;
 mod reversible_views;
 mod shared_context;
+mod smart_ast;
 mod structured_views;
 mod test_views;
 mod token_metrics;
@@ -270,6 +271,9 @@ enum Commands {
     Smart {
         /// Source file to summarize.
         input: PathBuf,
+        /// Résumer la structure syntaxique localement, avec signatures et lignes.
+        #[arg(long)]
+        ast: bool,
         /// User query used by relevance-aware compressors.
         #[arg(short, long, default_value = "")]
         query: String,
@@ -1693,13 +1697,44 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Commands::Smart {
             input,
+            ast,
             query,
             json,
             store,
         } => {
             let source = read_input(Some(input.as_path())).await?;
+            let fallback = if ast {
+                match smart_ast::summarize(&input, &source) {
+                    Ok(output) => {
+                        if json {
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&json!({
+                                    "content_type": "source_code",
+                                    "original_bytes": source.len(),
+                                    "compressed_bytes": output.len(),
+                                    "bytes_saved": source.len().saturating_sub(output.len()),
+                                    "original_tokens": source.len() as f64 / 4.0,
+                                    "compressed_tokens": output.len() as f64 / 4.0,
+                                    "token_count_method": "approximate",
+                                    "tokenizer": "bytes/4",
+                                    "steps_applied": ["smart_ast"],
+                                    "cache_keys": [],
+                                    "output": output
+                                }))?
+                            );
+                        } else {
+                            print!("{output}");
+                        }
+                        return Ok(());
+                    }
+                    Err(reason) => Some(reason.marker()),
+                }
+            } else {
+                None
+            };
             let store = open_store(store)?;
-            let (report, advice) = compress_with_optional_advice(
+            let (mut report, advice) = compress_with_optional_advice(
                 &source,
                 Some(input.as_path()),
                 &query,
@@ -1708,6 +1743,13 @@ async fn run(cli: Cli) -> Result<()> {
                 None,
                 true,
             )?;
+            if let Some(marker) = fallback {
+                report.output.insert_str(0, marker);
+                report.compressed_bytes = report.output.len();
+                report.bytes_saved = source.len().saturating_sub(report.output.len());
+                report.tokens = TokenCounts::measure(&source, &report.output);
+                report.steps_applied.insert(0, "smart_ast:fallback".into());
+            }
             if json {
                 let mut value = serde_json::to_value(&report)?;
                 if let Some(advice) = advice {
