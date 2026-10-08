@@ -2,7 +2,23 @@
 
 ## [0.2.6] - préparation du 2026-10-08
 
-La 0.2.5 est publiée. Cette version ajoute le résumé syntaxique local de `smart`, corrige la vue `git log --stat` et documente le rejeu du banc en une commande.
+La 0.2.5 est publiée. Cette version corrige deux failles de sécurité relevées par un audit, ajoute le résumé syntaxique local de `smart`, corrige les vues `git log --stat` et pytest, retire les chemins du constructeur du binaire et documente le rejeu du banc en une commande.
+
+### Sécurité
+- **`rewrite-shell` pouvait exécuter du shell injecté.** Il citait les arguments entre guillemets doubles sans échapper la barre oblique inverse, qu'il tenait même pour sûre : `head -n 1 '\" ;touch X;#'` donnait une ligne dont `sh -c` créait `X`. Les arguments reconstruits sont cités en apostrophes POSIX ; une commande simplement enveloppée par `exec` garde ses octets d'origine ; un lecteur POSIX strict refuse (et laisse la ligne telle quelle) citation non fermée, opérateur ou nouvelle ligne non cités, commentaire, et toute chaîne qui ne se redécoupe pas à l'identique. Le hook utilise le même lecteur et cite le chemin du programme quand le shell le réinterpréterait. Tests jugés par `sh -c` avec des programmes de substitution, dont le cas de l'audit et un corpus de chaînes piégées.
+- **La clé d'API n'est plus dans la ligne de commande du proxy.** `wrap` relançait `serve --api-key <clé>` même quand la clé ne venait que de `LM_RESIZER_API_KEY` : `/proc/<pid>/cmdline` est lisible par tous les comptes locaux. Le proxy reçoit désormais la clé par son environnement ; `--api-key-file` (ou `LM_RESIZER_API_KEY_FILE`) la lit dans un fichier refusé s'il n'est pas en 0600 ; `--api-key` reste accepté mais avertit que sa valeur est visible.
+- Le proxy ne suit plus aucune redirection de l'amont (`x-api-key` était renvoyé à l'hôte choisi par un 302), refuse toute requête dont `Host` n'est pas local (rebinding DNS) et refuse une écoute hors boucle locale sans `--allow-non-loopback`.
+- `sanitize-provider-fixture` masque aussi `x-api-key`, `x-goog-api-key` et les noms composés (`*_api_key`, `*secret*`, `*password*`, `*token`), sans toucher aux compteurs `max_tokens`, `input_tokens`.
+- Le dossier d'état est créé en 0700 et ses fichiers (archives tee, historique des commandes, base CCR) en 0600 quel que soit le umask. Les fichiers déjà présents gardent leur mode : `chmod -R go-rwx ~/lm-resizer` une fois.
+- Non traité : le proxy n'authentifie pas ses clients (tout compte local qui atteint le port dépense la clé amont), l'installateur ne vérifie qu'une somme SHA-256 servie avec l'archive (pas de signature), le hook demande `permissionDecision: allow` pour Codex. Voir [`SECURITY.md`](SECURITY.md).
+
+### Vues pytest
+- Chaque échec n'est listé qu'une fois : le bloc de `FAILURES` et la ligne de synthèse `FAILED chemin::test - raison` produisaient deux entrées (6 pour 3 échecs).
+- `python -m pytest`, `python3 -m pytest`, `uv run pytest` et `uv run python -m pytest` utilisent la vue pytest ; ils étaient rendus bruts.
+
+### Distribution
+- Le binaire Linux ne contient plus de chemin du constructeur : le C compilé par les dépendances (tree-sitter) inscrivait `/home/<utilisateur>/.cargo/registry/...` que `--remap-path-prefix` n'atteint pas. Les mêmes préfixes sont passés au compilateur C, et `scripts/check-binary-paths.cjs` contrôle le binaire et l'archive dans `check-release.sh`. Windows n'est pas couvert par ce contrôle.
+- Le nom de l'outil de comparaison n'apparaît plus hors de `bench/` : README, CHANGELOG et notices le désignent comme « outil de comparaison épinglé ». Son attribution complète est dans [`bench/NOTICES.md`](bench/NOTICES.md).
 
 ### `smart --ast`
 - `lm-resizer smart <fichier> --ast` résume localement (tree-sitter, sans modèle ni réseau) la structure de fichiers Rust, Python, JavaScript et TypeScript : imports, types, signatures et numéro de ligne réel de chaque déclaration, corps omis. Une source invalide ou une extension inconnue donne un repli annoncé en tête (`[smart AST: repli …]`) et la sortie historique de `smart`. Sans `--ast`, la sortie de `smart` reste identique octet pour octet à celle de la 0.2.5 (fixtures `tests/fixtures/smart/`).
@@ -16,7 +32,8 @@ La 0.2.5 est publiée. Cette version ajoute le résumé syntaxique local de `sma
 
 ### Banc
 - [`bench/real/rejouer.sh`](bench/real/rejouer.sh) rejoue les 61 captures en une étape : Python isolé avec tiktoken, oracle construit depuis l'archive épinglée, binaire du checkout, dossier de rejeu neuf, synthèse (médiane, moyenne, bruts récupérés, codes du producteur). Le README ne renvoie plus au seul script Python du banc, qui exige ses arguments.
-- Banc rejoué avec ce script sur le code de cette préparation (corpus de 61 captures, `o200k_base`) : médiane **25,18 %**, moyenne **34,68 %**, brut récupéré 61/61, code du producteur conservé 61/61, vues strictement égales à l'oracle 41/61 — chiffres identiques à ceux de la 0.2.5, vue par vue (aucun des 61 cas n'a changé). Le même script, lancé sur une copie neuve de l'arbre, redonne ces chiffres.
+- Le verdict du script contrôle maintenant les 61 captures et les seuils de la 0.2.5 (médiane ≥ 25,18 %, moyenne ≥ 34,68 %, médiane de l'oracle, 61 bruts récupérés, 61 codes conservés) : un résultat d'une seule capture était auparavant déclaré « tenu ». Les caches de `uv`, `pip` et `tiktoken` restent sous `target/rejeu`.
+- Banc rejoué avec ce script sur le code de cette préparation (corpus de 61 captures, `o200k_base`) : médiane **30,43 %** (0.2.5 : 25,18 %), moyenne **35,14 %** (0.2.5 : 34,68 %), brut récupéré 61/61, code du producteur conservé 61/61, vues strictement égales à l'oracle 39/61 (0.2.5 : 41/61). Seules deux captures changent, `visible-pytest` et `fresh-pytest` : la vue pytest ne liste plus deux fois le même échec, alors que l'oracle le fait ; les 59 autres vues sont identiques à celles de la 0.2.5.
 
 ## [0.2.5] - publication prévue le 2026-10-08
 
@@ -25,19 +42,19 @@ La version 0.2.4 n'a jamais été étiquetée ni publiée : son contenu (section
 ### Vues génériques et statistiques
 - `lm-resizer err|test|summary -- <commande>` garde, pour n'importe quel producteur, les diagnostics ou les bilans de tests avec le contexte voisin, conserve le code de sortie et archive la sortie complète (`tee read`). `exec` et `tool-output` résument aussi les commandes sans filtre dédié ; l'outil MCP `lm_resizer_tool_output` marque un statut non nul `isError: true` ([`docs/CLI-REFERENCE.md`](docs/CLI-REFERENCE.md)).
 - `gain` compte toutes les commandes passées par `exec`/`tool-output` (jetons mesurés `o200k_base`, `--json`, `--history`, `--project`).
-- Mesure rejouée sur le corpus de 61 captures : médiane **25,18 %** (RTK 0.50.0 : 15,81 %), moyenne **34,68 %** (RTK : 32,61 %), brut et code du producteur conservés 61/61, vues strictement égales à RTK 41/61 après correction du découpage du banc. Les bilans de test en échec n'ajoutent plus d'en-tête redondant ; les assertions pytest, les messages TypeScript et les blocs d'échec Cargo restent entiers. Les sorties vers un tube fermé se terminent silencieusement avec le code 141 sous Unix. Détail : [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md).
+- Mesure rejouée sur le corpus de 61 captures : médiane **25,18 %** (outil de comparaison épinglé, voir `bench/` : 15,81 %), moyenne **34,68 %** (outil de comparaison : 32,61 %), brut et code du producteur conservés 61/61, vues strictement égales à l'outil de comparaison 41/61 après correction du découpage du banc. Les bilans de test en échec n'ajoutent plus d'en-tête redondant ; les assertions pytest, les messages TypeScript et les blocs d'échec Cargo restent entiers. Les sorties vers un tube fermé se terminent silencieusement avec le code 141 sous Unix. Détail : [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md).
 
 ### Hooks et agents
 - `install-hooks` et `init` sont idempotents : un contenu identique réussit sans réécriture, un contenu divergent est refusé sans `--force`. `uninstall-hooks` retire aussi les helpers générés et ne retire une configuration native que si elle est encore exactement le JSON généré. Réserve : les helpers sont supprimés sans comparer leur contenu ([`tests/hooks_idempotence.rs`](tests/hooks_idempotence.rs)).
 - `rewrite-shell` partage le refus du hook PreToolUse : redirection, tube, substitution, here-doc et commande interactive restent la ligne d'origine ; `&&`, `||` et `;` sont toujours réécrits segment par segment.
 
 ### Documentation
-- README FR/EN réécrits (accroche, installation en tête, comparaison sourcée avec RTK 0.50.0 et Headroom 0.39.1, commande de rejeu), référence CLI complète ([`docs/CLI-REFERENCE.md`](docs/CLI-REFERENCE.md)) et contrôles de cohérence ([`scripts/check-cli-reference.sh`](scripts/check-cli-reference.sh), [`scripts/check-readme-parity.cjs`](scripts/check-readme-parity.cjs), [`tests/cli_doc_alignment.rs`](tests/cli_doc_alignment.rs)).
+- README FR/EN réécrits (accroche, installation en tête, comparaison sourcée avec un filtre de référence épinglé et Headroom 0.39.1, commande de rejeu), référence CLI complète ([`docs/CLI-REFERENCE.md`](docs/CLI-REFERENCE.md)) et contrôles de cohérence ([`scripts/check-cli-reference.sh`](scripts/check-cli-reference.sh), [`scripts/check-readme-parity.cjs`](scripts/check-readme-parity.cjs), [`tests/cli_doc_alignment.rs`](tests/cli_doc_alignment.rs)).
 - Précisions : `cargo install` refuse si `~/.local/bin/lm-resizer` existe déjà ; message exact de `exec` pour une commande absente ; les médianes sont celles du corpus de 61 captures, pas une promesse sur des dépôts arbitraires ; `install --client all` écrit toujours la configuration Codex de l'utilisateur.
 
 ### Distribution
 - Les archives de release incluent désormais `docs/CLI-REFERENCE.md`, `docs/AGENT_HOOKS.md` et `docs/WINDOWS.md`, liés depuis le README ([`scripts/package-release.sh`](scripts/package-release.sh), [`scripts/package-release.ps1`](scripts/package-release.ps1)). Les liens vers `docs/RELEASE.md` et `bench/` restent des liens du dépôt, absents de l'archive.
-- La garde de release télécharge désormais l'archive source RTK épinglée sur un clone neuf et refuse un SHA-256 différent ; l'absence de réseau produit une erreur explicite.
+- La garde de release télécharge désormais l'archive source de l'outil de comparaison épinglé sur un clone neuf et refuse un SHA-256 différent ; l'absence de réseau produit une erreur explicite.
 
 ### Limites connues
 - `exec` conserve son état dans `~/lm-resizer` (archives de rappel, base CCR, historique) : ne clonez pas le dépôt directement dans votre dossier personnel.
