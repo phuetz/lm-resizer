@@ -235,6 +235,28 @@ Windows (PowerShell) :
 cargo uninstall --root "$installRoot" lm-resizer
 ~~~
 
+## Désinstaller
+
+Défaites ce que vous avez installé, dans cet ordre.
+
+1. Les crochets, projet par projet :
+
+~~~bash
+lm-resizer uninstall-hooks --client all --project-dir .
+~~~
+
+   Cette commande retire les blocs de consignes, les scripts générés et les fichiers de crochets natifs s'ils sont encore exactement ceux qui ont été générés ; un fichier modifié à la main est laissé en place.
+
+2. Les serveurs MCP. Il n'y a pas de commande : supprimez à la main l'entrée `lm-resizer` de `.mcp.json` et `.cursor/mcp.json` (clé `mcpServers`), de `.vscode/mcp.json` (clé `servers`) et la table `[mcp_servers.lm_resizer]` de `~/.codex/config.toml`.
+
+3. Les données enregistrées. Les archives de sortie brute, l'historique des commandes et la base CCR sont dans le dossier d'état : `~/lm-resizer` par défaut, ou `XDG_STATE_HOME`, `LOCALAPPDATA` ou `LM_RESIZER_STATE_DIR` s'ils sont définis. Supprimez les archives, puis le dossier :
+
+~~~bash
+lm-resizer tee purge --all
+~~~
+
+4. Le binaire : `cargo uninstall` comme indiqué dans « Compiler depuis les sources », ou supprimez `~/.local/bin/lm-resizer`.
+
 ## Quand ne pas l'utiliser
 
 - Ne prenez pas une vue raccourcie pour une piste d'audit complète : inspectez l'original conservé pour la sécurité, la conformité ou les échecs subtils.
