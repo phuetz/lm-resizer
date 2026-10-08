@@ -169,10 +169,10 @@ fn run_with_stream(command: &[String], stream: bool, live_stderr: bool) -> anyho
         .stdin(Stdio::inherit())
         .stdout(Stdio::from(writer.try_clone()?))
         .stderr(Stdio::from(writer));
-    crate::capture_interrupt::configure_process_group(&mut producer);
+    let grouped = crate::capture_interrupt::configure_process_group(&mut producer);
     // Install before spawn so a signal cannot terminate lm-resizer in the
     // interval between creating the producer and registering the relay.
-    let interrupt_guard = crate::capture_interrupt::relay_interruptions()
+    let interrupt_guard = crate::capture_interrupt::relay_interruptions(grouped)
         .map_err(|error| anyhow::anyhow!("cannot install producer interruption relay: {error}"))?;
     let result = producer.spawn();
     // `Command` retains its configured Stdio handles after spawn. Close those

@@ -1,6 +1,7 @@
 //! Process-group interruption relay and incremental recovery for command capture.
 //!
-//! A wrapped producer belongs to its own process group. While it runs,
+//! Noninteractive producers belong to their own process group. Unix producers
+//! inheriting terminal input keep its foreground group. While a producer runs,
 //! catchable console/process signals received by lm-resizer are forwarded to
 //! that group, leaving the parent alive long enough to drain the shared pipe
 //! and finish the partial view. Capture bytes are also appended to a visible
@@ -124,15 +125,15 @@ impl DurableTee {
 
 /// Configure a producer before spawn so its descendants share a process
 /// group that can be interrupted without signalling unrelated processes.
-pub fn configure_process_group(command: &mut Command) {
-    platform::configure_process_group(command);
+pub fn configure_process_group(command: &mut Command) -> bool {
+    platform::configure_process_group(command)
 }
 
 /// Install the relay before spawning the producer, closing the race where an
 /// interruption could otherwise terminate lm-resizer between spawn and handler
 /// installation. Call [`InterruptionGuard::set_child`] immediately after spawn.
-pub fn relay_interruptions() -> std::io::Result<InterruptionGuard> {
-    platform::install().map(InterruptionGuard)
+pub fn relay_interruptions(grouped: bool) -> std::io::Result<InterruptionGuard> {
+    platform::install(grouped).map(InterruptionGuard)
 }
 
 pub struct InterruptionGuard(platform::Guard);
@@ -145,7 +146,7 @@ impl InterruptionGuard {
 
 #[cfg(unix)]
 mod platform {
-    use std::io;
+    use std::io::{self, IsTerminal};
     use std::os::raw::c_int;
     use std::os::unix::process::CommandExt;
     use std::process::Command;
@@ -157,7 +158,8 @@ mod platform {
     const SIGQUIT: c_int = 3;
     const SIGTERM: c_int = 15;
     const SIG_ERR: usize = usize::MAX;
-    static CHILD_GROUP: AtomicI32 = AtomicI32::new(0);
+    // Negative: producer group; positive: foreground child only.
+    static CHILD_TARGET: AtomicI32 = AtomicI32::new(0);
     static PENDING_SIGNAL: AtomicI32 = AtomicI32::new(0);
     static SIGNAL_LOCK: Mutex<()> = Mutex::new(());
 
@@ -170,13 +172,12 @@ mod platform {
         // Publish first so `set_child` can observe a signal delivered in the
         // small window between handler installation and process-id handoff.
         PENDING_SIGNAL.store(signal_number, Ordering::Release);
-        let group = CHILD_GROUP.load(Ordering::Acquire);
-        if group > 0 {
+        let target = CHILD_TARGET.load(Ordering::Acquire);
+        if target != 0 {
             let pending = PENDING_SIGNAL.swap(0, Ordering::AcqRel);
-            // Negative pid addresses the whole producer process group.
             if pending > 0 {
                 unsafe {
-                    kill(-group, pending);
+                    kill(target, pending);
                 }
             }
         }
@@ -184,28 +185,36 @@ mod platform {
 
     pub struct Guard {
         previous: [(c_int, usize); 4],
+        grouped: bool,
         _lock: MutexGuard<'static, ()>,
     }
 
-    pub fn configure_process_group(command: &mut Command) {
+    pub fn configure_process_group(command: &mut Command) -> bool {
+        // A new group would be behind the controlling terminal: reading
+        // inherited stdin would stop the producer with SIGTTIN. Keep Unix
+        // terminal and job-control behavior in the caller's foreground group.
+        if std::io::stdin().is_terminal() {
+            return false;
+        }
         // Preserve Rust's posix_spawn path and its ENOEXEC launch error.
         // A pre_exec callback forces execvp, which executes invalid images
         // through /bin/sh instead of reporting the failed launch.
         command.process_group(0);
+        true
     }
 
-    pub fn install() -> io::Result<Guard> {
+    pub fn install(grouped: bool) -> io::Result<Guard> {
         let lock = SIGNAL_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        CHILD_GROUP.store(0, Ordering::SeqCst);
+        CHILD_TARGET.store(0, Ordering::SeqCst);
         PENDING_SIGNAL.store(0, Ordering::SeqCst);
         let mut previous = [(0, 0); 4];
         for index in 0..previous.len() {
             let signal_number = [SIGHUP, SIGINT, SIGQUIT, SIGTERM][index];
-            let old = unsafe { signal(signal_number, forward as usize) };
+            let old = unsafe { signal(signal_number, forward as *const () as usize) };
             if old == SIG_ERR {
-                CHILD_GROUP.store(0, Ordering::SeqCst);
+                CHILD_TARGET.store(0, Ordering::SeqCst);
                 for &(installed_signal, installed_handler) in &previous[..index] {
                     unsafe {
                         signal(installed_signal, installed_handler);
@@ -217,6 +226,7 @@ mod platform {
         }
         Ok(Guard {
             previous,
+            grouped,
             _lock: lock,
         })
     }
@@ -226,11 +236,16 @@ mod platform {
             let child_group = i32::try_from(child_id).map_err(|_| {
                 io::Error::new(io::ErrorKind::InvalidInput, "child pid exceeds i32")
             })?;
-            CHILD_GROUP.store(child_group, Ordering::Release);
+            let target = if self.grouped {
+                -child_group
+            } else {
+                child_group
+            };
+            CHILD_TARGET.store(target, Ordering::Release);
             let pending = PENDING_SIGNAL.swap(0, Ordering::AcqRel);
             if pending > 0 {
                 unsafe {
-                    kill(-child_group, pending);
+                    kill(target, pending);
                 }
             }
             Ok(())
@@ -239,7 +254,7 @@ mod platform {
 
     impl Drop for Guard {
         fn drop(&mut self) {
-            CHILD_GROUP.store(0, Ordering::SeqCst);
+            CHILD_TARGET.store(0, Ordering::SeqCst);
             PENDING_SIGNAL.store(0, Ordering::SeqCst);
             for &(signal_number, previous) in &self.previous {
                 unsafe {
@@ -293,11 +308,12 @@ mod platform {
         relay: Option<JoinHandle<()>>,
     }
 
-    pub fn configure_process_group(command: &mut Command) {
+    pub fn configure_process_group(command: &mut Command) -> bool {
         command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        true
     }
 
-    pub fn install() -> io::Result<Guard> {
+    pub fn install(_grouped: bool) -> io::Result<Guard> {
         let lock = SIGNAL_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
@@ -372,8 +388,10 @@ mod platform {
     use std::process::Command;
 
     pub struct Guard;
-    pub fn configure_process_group(_command: &mut Command) {}
-    pub fn install() -> io::Result<Guard> {
+    pub fn configure_process_group(_command: &mut Command) -> bool {
+        false
+    }
+    pub fn install(_grouped: bool) -> io::Result<Guard> {
         Ok(Guard)
     }
     impl Guard {

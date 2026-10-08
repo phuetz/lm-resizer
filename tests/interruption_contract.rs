@@ -66,6 +66,7 @@ fn tee_bytes(state: &Path) -> Vec<u8> {
     bytes
 }
 
+#[cfg(windows)]
 fn wait_for_partial_tee(state: &Path, marker: &[u8]) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
