@@ -1,6 +1,29 @@
 & {
 $ErrorActionPreference = "Stop"
 
+# LM_RESIZER_PATH_HELPER_START
+function Add-LmResizerInstallPath {
+  param(
+    [Parameter(Mandatory = $true)][string]$Directory,
+    [scriptblock]$GetUserPath = { [Environment]::GetEnvironmentVariable("Path", "User") },
+    [scriptblock]$SetUserPath = { param($value) [Environment]::SetEnvironmentVariable("Path", $value, "User") }
+  )
+
+  # The process PATH can already contain the install directory even when the
+  # persistent user PATH does not. Check and update the two scopes separately.
+  $userPath = & $GetUserPath
+  $userParts = @($userPath -split ';' | Where-Object { $_ })
+  if ($userParts -notcontains $Directory) {
+    & $SetUserPath "$userPath;$Directory".TrimStart(';')
+  }
+
+  $sessionParts = @($env:PATH -split ';' | Where-Object { $_ })
+  if ($sessionParts -notcontains $Directory) {
+    $env:PATH = "$Directory;$env:PATH"
+  }
+}
+# LM_RESIZER_PATH_HELPER_END
+
 $version = if ($env:LM_RESIZER_VERSION) { $env:LM_RESIZER_VERSION } else { "0.2.6" }
 if ($version -notmatch '^[0-9A-Za-z.+-]+$') { throw "Invalid version: $version" }
 if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.InteropServices.Architecture]::X64) {
@@ -95,15 +118,7 @@ get(url, 5);
   Write-Host "Installed $(Join-Path $destDir 'lm-resizer.exe')"
 
   if ($env:LM_RESIZER_SKIP_PATH_UPDATE -ne "1") {
-    $parts = @($env:PATH -split ';' | Where-Object { $_ })
-    if ($parts -notcontains $destDir) {
-      $env:PATH = "$destDir;$env:PATH"
-      $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-      $userParts = @($userPath -split ';' | Where-Object { $_ })
-      if ($userParts -notcontains $destDir) {
-        [Environment]::SetEnvironmentVariable("Path", "$userPath;$destDir".TrimStart(';'), "User")
-      }
-    }
+    Add-LmResizerInstallPath -Directory $destDir
   }
 } finally {
   Remove-Item -LiteralPath $tmp -Recurse -Force
