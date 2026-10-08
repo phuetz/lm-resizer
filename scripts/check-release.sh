@@ -39,8 +39,12 @@ python3 bench/real/test_large_capture.py
 "$root/scripts/publish-wasm.sh" --dry-run
 "$root/scripts/package-release.sh"
 # The shipped archive, not only the build output: nothing of the builder may travel in it.
+# (`a && b` ne ferait pas échouer `set -e` quand `a` échoue : un `if` le fait.)
 for archive in dist/lm-resizer-*.tar.gz dist/lm-resizer-*.zip; do
-  [ -f "$archive" ] && node scripts/check-binary-paths.cjs "$archive" && node bench/real/check-comparison-name.cjs "$archive"
+  if [ -f "$archive" ]; then
+    node scripts/check-binary-paths.cjs "$archive"
+    node bench/real/check-comparison-name.cjs "$archive"
+  fi
 done
 "$root/scripts/check-publish-readiness.sh" >/dev/null
 "$root/scripts/test-install-grok-skill.sh"

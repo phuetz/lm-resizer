@@ -17,7 +17,7 @@ La 0.2.5 est publiée. Cette version corrige deux failles de sécurité relevée
 - `python -m pytest`, `python3 -m pytest`, `uv run pytest` et `uv run python -m pytest` utilisent la vue pytest ; ils étaient rendus bruts.
 
 ### Distribution
-- Le binaire Linux ne contient plus de chemin du constructeur : le C compilé par les dépendances (tree-sitter) inscrivait `/home/<utilisateur>/.cargo/registry/...` que `--remap-path-prefix` n'atteint pas. Les mêmes préfixes sont passés au compilateur C, et `scripts/check-binary-paths.cjs` contrôle le binaire et l'archive dans `check-release.sh`. Windows n'est pas couvert par ce contrôle.
+- Le binaire Linux ne contient plus de chemin du constructeur : le C compilé par les dépendances (tree-sitter) inscrivait des chemins sous le dossier personnel du constructeur, que `--remap-path-prefix` n'atteint pas. Les mêmes préfixes sont passés au compilateur C, et `scripts/check-binary-paths.cjs` contrôle le binaire et l'archive dans `check-release.sh`. Windows n'est pas couvert par ce contrôle.
 - Le nom de l'outil de comparaison n'apparaît plus hors de `bench/` : README, CHANGELOG et notices le désignent comme « outil de comparaison épinglé ». Son attribution complète est dans [`bench/NOTICES.md`](bench/NOTICES.md).
 
 ### `smart --ast`
