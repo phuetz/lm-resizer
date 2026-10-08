@@ -35,7 +35,7 @@ fn generic_compression_keeps_real_diagnostic_forms_in_the_middle() {
 #[test]
 fn git_log_shown_authors_are_correct_and_all_commits_recoverable() {
     let dir = tempfile::tempdir().unwrap();
-    let raw = (0..80).map(|n| format!("commit {n:040x}\nAuthor: {} <bench@example.invalid>\nDate: 2026-10-02\n\n    Same complete body, commit {n}\n\n", ["Alice", "Bob", "Carol"][n % 3])).collect::<String>();
+    let raw = (0..80).map(|n| format!("commit {n:040x}\nAuthor: {} <bench@example.invalid>\nDate: 2026-10-02\n\n    Same complete body, commit {n}\n{}\n", ["Alice", "Bob", "Carol"][n % 3], "    ligne de corps supplémentaire\n".repeat(8))).collect::<String>();
     let input = dir.path().join("log");
     std::fs::write(&input, &raw).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
@@ -58,6 +58,11 @@ fn git_log_shown_authors_are_correct_and_all_commits_recoverable() {
         }
     }
     assert!(commit.is_some());
+    assert_eq!(
+        view.lines().filter(|l| l.starts_with("commit ")).count(),
+        80,
+        "chaque commit reste visible"
+    );
     assert_recovered(&report, dir.path(), &raw);
 }
 
