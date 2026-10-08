@@ -3417,6 +3417,25 @@ fn combine_command_bytes(stdout: &[u8], stderr: &[u8]) -> Vec<u8> {
 }
 
 fn display_captured_bytes(bytes: &[u8]) -> String {
+    // Decode only a complete, valid BOM-tagged UTF-16 capture. The tee always
+    // retains the original bytes, including the BOM and Windows line endings.
+    let utf16_le = bytes.starts_with(&[0xff, 0xfe]);
+    let utf16_be = bytes.starts_with(&[0xfe, 0xff]);
+    if (utf16_le || utf16_be) && bytes.len().is_multiple_of(2) {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|pair| {
+                if utf16_le {
+                    u16::from_le_bytes([pair[0], pair[1]])
+                } else {
+                    u16::from_be_bytes([pair[0], pair[1]])
+                }
+            })
+            .collect();
+        if let Ok(text) = String::from_utf16(&units) {
+            return text;
+        }
+    }
     if let Ok(text) = std::str::from_utf8(bytes) {
         return text.to_string();
     }
