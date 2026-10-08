@@ -17,7 +17,6 @@ const versions = {
   wasm: cargoVersion('crates/lm-resizer-wasm/Cargo.toml'),
   npm: JSON.parse(read('packages/wasm/package.json')).version,
   plugin: JSON.parse(read('.claude-plugin/plugin.json')).version,
-  claudeCodePlugin: JSON.parse(read('plugins/claude-code/.claude-plugin/plugin.json')).version,
   marketplace: JSON.parse(read('.claude-plugin/marketplace.json')).plugins.find(
     (plugin) => plugin.name === 'lm-resizer',
   )?.version,
