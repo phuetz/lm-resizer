@@ -3071,6 +3071,11 @@ fn run_inspected_command(
         }
     }
     if !matches!(mode, Some(inspection_views::Mode::Raw)) {
+        // Une vue raccourcie finit par un retour à la ligne (l'invite ne se colle pas à sa dernière
+        // ligne) ; une sortie rendue à l'identique garde ses octets.
+        if output != raw && !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
         prepend_failure_status(&mut output, captured.code);
     }
     let tee_hint = archive_raw_bytes(&captured.raw)?;
@@ -3320,6 +3325,11 @@ fn process_captured_output(
             output = output.replace(&format!("hash={intermediate}]"), &format!("hash={key}]"));
         }
         keys = vec![key];
+    }
+    // Une vue raccourcie finit par un retour à la ligne (l'invite ne se colle pas à sa dernière
+    // ligne) ; une sortie rendue à l'identique garde ses octets.
+    if output != raw && !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
     }
     prepend_failure_status(&mut output, exit_code);
     Ok(ExecReport {
