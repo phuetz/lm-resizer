@@ -216,9 +216,49 @@ pub fn pytest(raw: &str) -> String {
         }
         out = out.trim_end().into();
     }
+    // Le bloc « ___ Classe.test ___ » de FAILURES et la ligne « FAILED chemin::Classe::test - raison »
+    // de la synthèse décrivent le même échec : le second est fondu dans le premier, dont la raison
+    // reste visible. Une ligne de synthèse sans bloc (`--tb=no`, autre test) est conservée.
+    let block_headers: Vec<Option<String>> = details
+        .iter()
+        .map(|block| {
+            block[0]
+                .starts_with("___")
+                .then(|| block[0].trim_matches('_').trim().to_string())
+        })
+        .collect();
+    let mut reasons: Vec<Option<&str>> = vec![None; details.len()];
+    let mut merged = vec![false; details.len()];
+    for (index, block) in details.iter().enumerate() {
+        let first = block[0];
+        if first.starts_with("___") {
+            continue;
+        }
+        let (name, reason) = first.split_once(" - ").unwrap_or((first, ""));
+        let node = name.split_once(' ').map_or(name, |(_, node)| node);
+        // `dir/test_x.py::Classe::test[param]` devient `Classe.test[param]`.
+        let Some((_, tail)) = node.split_once("::") else {
+            continue;
+        };
+        let wanted = tail.replace("::", ".");
+        if let Some(target) = block_headers
+            .iter()
+            .position(|header| header.as_deref() == Some(wanted.as_str()))
+        {
+            merged[index] = true;
+            if !reason.is_empty() {
+                reasons[target] = Some(reason);
+            }
+        }
+    }
+    let details: Vec<(usize, &Vec<&str>)> = details
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !merged[*index])
+        .collect();
     if !details.is_empty() {
         out.push_str("\n\nFailures:\n");
-        for (i, block) in details.iter().take(10).enumerate() {
+        for (i, (original, block)) in details.iter().take(10).enumerate() {
             let first = block[0];
             if first.starts_with("___") {
                 out.push_str(&format!(
@@ -226,18 +266,27 @@ pub fn pytest(raw: &str) -> String {
                     i + 1,
                     first.trim_matches('_').trim()
                 ));
+                let mut shown = Vec::new();
                 for line in block
                     .iter()
                     .skip(1)
                     .filter(|l| {
-                        l.starts_with(['>', 'E'])
-                            || l.to_lowercase().contains("assert")
-                            || l.to_lowercase().contains("error")
-                            || l.contains(".py:")
+                        // Un « E » seul est la ligne vide d'un diff, sans information.
+                        **l != "E"
+                            && (l.starts_with(['>', 'E'])
+                                || l.to_lowercase().contains("assert")
+                                || l.to_lowercase().contains("error")
+                                || l.contains(".py:"))
                     })
                     .take(3)
                 {
                     out.push_str(&format!("     {line}\n"));
+                    shown.push(*line);
+                }
+                if let Some(reason) = reasons[*original] {
+                    if !shown.iter().any(|line| line.contains(reason)) {
+                        out.push_str(&format!("     {reason}\n"));
+                    }
                 }
                 if i + 1 < details.len() {
                     out.push('\n');
@@ -396,6 +445,86 @@ pub fn go(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Sortie réelle de `pytest -q` (pytest 9) pour trois tests en échec : une fonction, une
+    /// méthode de classe et un cas paramétré.
+    const PYTEST_THREE_FAILURES: &str = "\
+.FF.F                                                                    [100%]
+=================================== FAILURES ===================================
+________________________________ test_fails_one ________________________________
+
+    def test_fails_one():
+>       assert 1 + 1 == 3
+E       assert (1 + 1) == 3
+
+test_demo.py:7: AssertionError
+_____________________________ TestBox.test_method ______________________________
+
+self = <test_demo.TestBox object at 0x700056d8f710>
+
+    def test_method(self):
+>       assert \"a\" == \"b\"
+E       AssertionError: assert 'a' == 'b'
+E         
+E         - b
+E         + a
+
+test_demo.py:11: AssertionError
+________________________________ test_param[2] _________________________________
+
+n = 2
+
+    @pytest.mark.parametrize(\"n\", [1, 2])
+    def test_param(n):
+>       assert n == 1
+E       assert 2 == 1
+
+test_demo.py:15: AssertionError
+=========================== short test summary info ============================
+FAILED test_demo.py::test_fails_one - assert (1 + 1) == 3
+FAILED test_demo.py::TestBox::test_method - AssertionError: assert 'a' == 'b'
+FAILED test_demo.py::test_param[2] - assert 2 == 1
+3 failed, 2 passed in 0.04s
+";
+
+    #[test]
+    fn a_failure_is_listed_once_not_once_per_section() {
+        // Le bloc « ___ test ___ » de FAILURES et la ligne « FAILED chemin::test - raison » de
+        // la synthèse décrivent le même échec : en 0.2.5 les trois étaient listés deux fois.
+        let view = pytest(PYTEST_THREE_FAILURES);
+        for name in ["test_fails_one", "TestBox.test_method", "test_param[2]"] {
+            assert_eq!(
+                view.matches(name).count(),
+                1,
+                "{name} listé plusieurs fois :\n{view}"
+            );
+        }
+        assert!(!view.contains("test_demo.py::"), "{view}");
+        assert!(view.contains("Pytest: 2 passed, 3 failed"), "{view}");
+        let listed = view.lines().filter(|l| l.contains("[FAIL]")).count();
+        assert_eq!(listed, 3, "{view}");
+        // La raison de chaque échec reste visible.
+        assert!(view.contains("assert (1 + 1) == 3"), "{view}");
+        assert!(view.contains("AssertionError: assert 'a' == 'b'"), "{view}");
+        assert!(view.contains("assert 2 == 1"), "{view}");
+    }
+
+    #[test]
+    fn summary_only_failures_are_still_listed() {
+        // Sans bloc FAILURES (`--tb=no`), la ligne de synthèse est la seule trace : elle reste.
+        let raw = "=== short test summary info ===\nFAILED tests/a.py::test_x - boom\nFAILED tests/a.py::test_y\n2 failed, 1 passed in 0.01s\n";
+        let view = pytest(raw);
+        assert!(view.contains("1. [FAIL] tests/a.py::test_x"), "{view}");
+        assert!(view.contains("boom"), "{view}");
+        assert!(view.contains("2. [FAIL] tests/a.py::test_y"), "{view}");
+    }
+
+    #[test]
+    fn a_summary_line_of_another_test_is_not_swallowed() {
+        let raw = "=== FAILURES ===\n___ test_a ___\nE   assert 0\n=== short test summary info ===\nFAILED t.py::test_a - assert 0\nFAILED t.py::test_other - x\n2 failed in 0.01s\n";
+        let view = pytest(raw);
+        assert_eq!(view.matches("test_a").count(), 1, "{view}");
+        assert!(view.contains("test_other"), "{view}");
+    }
     #[test]
     fn successful_test_views_state_zero_failures_and_retain_unknown_diagnostics() {
         let cargo = include_str!("../bench/corpus/cargo_ok.txt");

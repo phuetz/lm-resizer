@@ -40,7 +40,25 @@ pub fn pipe_command(name: &str) -> Option<Vec<String>> {
     Some(words.iter().map(|s| s.to_string()).collect())
 }
 
+/// `python -m pytest …`, `uv run pytest …` et `uv run python -m pytest …` produisent la sortie
+/// de `pytest …` : rend la commande réduite à `pytest …`, ou `None` pour tout autre module ou script.
+fn pytest_through_runner(command: &[String]) -> Option<&[String]> {
+    let mut rest = command;
+    if super::command_basename(rest.first()?) == "uv" && rest.get(1).is_some_and(|a| a == "run") {
+        rest = &rest[2..];
+    }
+    let program = super::command_basename(rest.first()?);
+    if matches!(program.as_str(), "python" | "python3" | "py")
+        && rest.get(1).is_some_and(|a| a == "-m")
+        && rest.get(2).is_some_and(|a| a == "pytest")
+    {
+        return Some(&rest[2..]);
+    }
+    (program == "pytest" && rest.len() != command.len()).then_some(rest)
+}
+
 pub fn filter(command: &[String], raw: &str) -> Option<(String, String)> {
+    let command = pytest_through_runner(command).unwrap_or(command);
     let name = super::command_basename(command.first()?);
     let sub = command.get(1).map(String::as_str).unwrap_or("");
     let (kind, candidate) = match (name.as_str(), sub) {
@@ -435,6 +453,32 @@ mod tests {
         // dans le décompte « omitted » (le brut reste dans tee).
         let raw = "commit aaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n\ncommit bbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n";
         assert_eq!(git_log(raw), "commit aaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n  [+4 lines omitted]");
+    }
+    #[test]
+    fn python_module_and_uv_runners_use_the_pytest_view() {
+        let raw = "..F\n=== FAILURES ===\n___ test_a ___\nE   assert 0\n=== short test summary info ===\nFAILED t.py::test_a - assert 0\n1 failed, 2 passed in 0.01s\n";
+        let expected = crate::test_views::pytest(raw);
+        assert!(expected.starts_with("Pytest: 2 passed"), "{expected}");
+        for command in [
+            "pytest -q",
+            "python3 -m pytest -q",
+            "python -m pytest tests/",
+            "/tmp/venv/bin/python -m pytest -x",
+            "uv run pytest",
+            "uv run python -m pytest -q",
+        ] {
+            let command: Vec<String> = command.split_whitespace().map(str::to_string).collect();
+            let (kind, view) = filter(&command, raw)
+                .unwrap_or_else(|| panic!("{command:?} n'a pas de vue native"));
+            assert_eq!(kind, "native:pytest", "{command:?}");
+            assert_eq!(view, expected, "{command:?}");
+        }
+        // Un autre module, ou un script, ne devient pas pytest.
+        for command in ["python3 -m http.server", "python3 script.py", "uv run ruff"] {
+            let command: Vec<String> = command.split_whitespace().map(str::to_string).collect();
+            let routed = filter(&command, raw).map(|(kind, _)| kind);
+            assert_ne!(routed.as_deref(), Some("native:pytest"), "{command:?}");
+        }
     }
     #[test]
     fn unicode_truncation_never_splits_a_character() {
