@@ -378,16 +378,25 @@ fn run_script(script: &str, work: &Path, args: &[&str]) -> Vec<String> {
     let file = work.join("script.sh");
     fs::write(&file, script).unwrap();
     fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
-    Process::new("/bin/sh")
-        .arg(&file)
-        .args(args)
-        .current_dir(work)
-        .env("LMR_MARK", work.join("mark"))
-        .env_remove("LM_RESIZER_BIN")
-        .output()
-        .unwrap();
-    let mut names = list(work);
-    names.retain(|name| name != "script.sh");
+    // Un stub écrit à l'instant peut échouer à démarrer (« text file busy ») quand un test
+    // parallèle fait un fork : rien n'a alors tourné (aucun fichier), ce qui ne dit rien du shim.
+    // Seul ce cas est rejoué ; un shim qui exécute le chemin laisse des fichiers et n'est pas rejoué.
+    let mut names = Vec::new();
+    for _ in 0..3 {
+        Process::new("/bin/sh")
+            .arg(&file)
+            .args(args)
+            .current_dir(work)
+            .env("LMR_MARK", work.join("mark"))
+            .env_remove("LM_RESIZER_BIN")
+            .output()
+            .unwrap();
+        names = list(work);
+        names.retain(|name| name != "script.sh");
+        if !names.is_empty() {
+            break;
+        }
+    }
     names
 }
 
@@ -398,7 +407,7 @@ fn generated_hook_helper_does_not_execute_a_hostile_install_path() {
     assert_eq!(
         files,
         ["mark"],
-        "le script a exécuté une partie du chemin : {files:?}"
+        "fichiers créés : {files:?} (vide : le stub n'a pas tourné du tout ; un autre nom : une partie du chemin a été exécutée)"
     );
 }
 
@@ -410,7 +419,7 @@ fn generated_command_shim_does_not_execute_a_hostile_install_path() {
     assert_eq!(
         files,
         ["mark"],
-        "le shim a exécuté une partie du chemin : {files:?}"
+        "fichiers créés : {files:?} (vide : le stub n'a pas tourné du tout ; un autre nom : une partie du chemin a été exécutée)"
     );
 }
 
