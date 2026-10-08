@@ -193,7 +193,7 @@ fn git_log_stat(raw: &str) -> Option<String> {
     let mut out: Vec<String> = Vec::new();
     let mut message_rows = 0usize;
     let mut hidden = 0usize;
-    let mut flush = |out: &mut Vec<String>, hidden: &mut usize| {
+    let flush = |out: &mut Vec<String>, hidden: &mut usize| {
         if *hidden != 0 {
             out.push(format!("  [+{hidden} message lines omitted]"));
             *hidden = 0;
