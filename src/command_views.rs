@@ -256,7 +256,9 @@ fn git_log_records(raw: &str) -> Option<String> {
     let view = out.join("\n");
     // Une vue ne perd jamais un commit et ne dépasse jamais le brut.
     let commits = |text: &str| text.lines().filter(|row| is_commit_header(row)).count();
-    (commits(&view) == commits(raw) && view.len() < raw.len()).then_some(view)
+    (commits(&view) == commits(raw)
+        && crate::token_metrics::TokenCounts::measure(raw, &view).tokens_saved > 0)
+        .then_some(view)
 }
 
 fn git_log(raw: &str) -> String {
