@@ -7661,8 +7661,16 @@ fn upsert_marked_block(path: &Path, block: &str) -> Result<()> {
     } else {
         String::new()
     };
-    let stripped = strip_marked_block(&existing);
-    let mut next = stripped.trim_end().to_string();
+    let mut next = existing.clone();
+    if let Some(start) = existing.find(HOOK_BLOCK_START) {
+        if let Some(end) = existing[start..].find(HOOK_BLOCK_END) {
+            let end = start + end + HOOK_BLOCK_END.len();
+            next.replace_range(start..end, block.trim());
+            std::fs::write(path, next)?;
+            return Ok(());
+        }
+    }
+    next = next.trim_end().to_string();
     if !next.is_empty() {
         next.push_str("\n\n");
     }
