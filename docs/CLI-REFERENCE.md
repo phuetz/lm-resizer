@@ -82,12 +82,29 @@ Détail des commandes qui n'ont pas d'autre page de documentation :
 
 | Commande | Précisions rejouées |
 | --- | --- |
-| `smart <fichier> [-q <requête>] [--json] [--store <chemin>]` | Résume un fichier source avec les symboles Code Explorer indexés quand ils existent ; sans index, compression ordinaire. |
+| `smart <fichier> [--ast] [-q <requête>] [--json] [--store <chemin>]` | Sans `--ast`, compression existante avec conseil Code Explorer quand disponible. Avec `--ast`, résumé syntaxique local Rust, Python, TypeScript ou JavaScript, signatures et numéros de ligne, corps omis. |
 | `share <nom> [-i <fichier>] [-q <requête>] [--json] [--store <chemin>]` | Enregistre une passation nommée, compressée. Lit stdin sans `-i`. Affiche le nom (ou, avec `--json`, `key`, `original_bytes`, `shared_bytes`). |
 | `shared-get <nom> [--full] [--store <chemin>]` | Compressée par défaut ; texte d'origine, octets identiques, avec `--full`. |
 | `shared-list [--store <chemin>]` | Liste les noms des passations du store. |
 | `list-trusted-filters [--json]` | Liste les fichiers de filtres approuvés par `trust-filters`. |
 | `untrust-filters [--path <fichier>] [--json]` | Retire un fichier du registre de confiance (défaut : `.lm-resizer/filters.toml`) ; `removed: false` s'il n'y était pas. |
+
+`smart --ast` conserve l'ordre des déclarations, les imports, les types et leurs
+membres, les fonctions/méthodes avec leur signature et la première ligne de
+documentation. Les constantes visibles sont listées sans leur valeur : visibilité
+explicite en Rust, exports en JS/TS, noms en majuscules en Python. Les déclarations
+contenues dans un corps de fonction ne sont pas parcourues. Les macros Rust ne
+sont pas développées. L'analyse est syntaxique et ne résout pas les imports ni les
+types.
+
+Le mode AST réussi n'utilise ni modèle, ni réseau, ni index Code Explorer, ni
+store. `--query` et `--store` restent acceptés et s'appliquent seulement au repli.
+Une extension inconnue ou une erreur syntaxique revient au traitement existant,
+avec une ligne `[smart AST: repli …]` en tête de la sortie. En JSON, cette ligne
+figure dans `output`. Le JSON AST réussi mesure les octets et annonce
+`token_count_method: "approximate"`, `tokenizer: "bytes/4"` : **octets ÷ 4 est une
+approximation de jetons**, pas une tokenisation. Les petits fichiers déjà limités
+à des signatures peuvent produire un résumé plus long que l'entrée.
 
 ## Options
 
