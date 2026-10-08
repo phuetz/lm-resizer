@@ -4,7 +4,7 @@
 Le verdict est « tenu » seulement si tout ceci est vrai :
 - le fichier couvre exactement le nombre de captures attendu (61 par défaut) ;
 - la médiane et la moyenne de jetons économisés, rappel du brut compris, atteignent les seuils
-  (ceux publiés pour la 0.2.5 par défaut : 25,18 % et 34,68 %) ;
+  (ceux de la 0.2.6 par défaut : 21,32 % et 28,97 %, voir ci-dessous) ;
 - la médiane atteint celle de l'oracle de comparaison ;
 - chaque brut est récupérable et chaque code de sortie du producteur est conservé.
 L'égalité stricte des vues n'est pas une condition : elle est affichée.
@@ -14,8 +14,11 @@ import json
 import sys
 
 CAPTURES = 61
-MEDIANE_MIN = 25.18
-MOYENNE_MIN = 34.68
+# Seuils de la 0.2.6 (rejeu du 8 octobre 2026). Ceux de la 0.2.5 (25,18 % et 34,68 %) comptaient cinq
+# captures `git log` à 91-97 % obtenues en ne montrant que le premier commit ; depuis que la vue montre
+# chaque commit (ou le brut), elles valent 0-38 % et ces seuils ne sont plus tenables honnêtement.
+MEDIANE_MIN = 21.32
+MOYENNE_MIN = 28.97
 
 
 def verdict(results, captures=CAPTURES, mediane_min=MEDIANE_MIN, moyenne_min=MOYENNE_MIN):

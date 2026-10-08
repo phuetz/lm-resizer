@@ -2,7 +2,7 @@
 
 **Shorten noisy command output before it reaches your coding agent — and never lose a failure.** LM Resizer is a fast, local Rust CLI for developers who drive tests, builds, Git, containers and other tools through an AI coding agent such as Claude Code, Codex, Cursor, Gemini CLI, an MCP client or a custom pipeline. It runs a command, keeps a compact result for the agent, and stores the byte-exact original for instant recall.
 
-On a benchmark of 61 command captures it saves a median **30.43%** of tokens with the raw recovery included, keeps the producer's exit code in **61/61** cases and starts in about **8 ms**. Zero telemetry, 100% local, deterministic.
+On a benchmark of 61 command captures it saves a median **21.32%** of tokens with the raw recovery included, keeps the producer's exit code in **61/61** cases and starts in about **8 ms**. Zero telemetry, 100% local, deterministic.
 
 ![Example of LM Resizer processing command output](docs/lm-resizer-hero.png)
 
@@ -49,9 +49,9 @@ The same command run on the 78-line file reports **792** original tokens and **6
 | `cargo_ok.txt` | `cargo test` | 837 | 24 |
 | `cargo_fail.txt` | `cargo test` | 792 | 65 |
 | `pytest_ok.txt` | `pytest` | 937 | 17 |
-| `git_log.txt` | `git log` | 2320 | 60 |
+| `git_log.txt` | `git log` | 2320 | 2320 |
 
-Reproduce any row with `lm-resizer tool-output --command '<command>' --input <file> --json`: the JSON reports `original_tokens`, `compressed_tokens` and `tokens_saved` with `token_count_method: "exact"`.
+Reproduce any row with `lm-resizer tool-output --command '<command>' --input <file> --json`: the JSON reports `original_tokens`, `compressed_tokens` and `tokens_saved` with `token_count_method: "exact"`. `git_log.txt` comes back unchanged: the `git log` view shows every commit, and on this history that saves no token, so the raw text is kept.
 
 ## Why LM Resizer? (compared with a reference CLI filter and Headroom)
 
@@ -59,12 +59,12 @@ Two other tools are commonly used to shrink command output: a command-output fil
 
 | 61 command captures, `o200k_base` | LM Resizer 0.2.6 | Reference CLI filter, pinned | Headroom 0.39.1, general API |
 |---|---:|---:|---:|
-| Median tokens saved, raw recovery included | 30.43% | 15.81% | 0.00% |
-| Mean tokens saved, raw recovery included | 35.14% | 32.61% | 1.91% |
+| Median tokens saved, raw recovery included | 21.32% | 15.81% | 0.00% |
+| Mean tokens saved, raw recovery included | 28.97% | 32.61% | 1.91% |
 | Producer exit code preserved | 61/61 | 52/61 | not measured |
 | Byte-exact raw recoverable | 61/61 | partial or none | no |
 
-LM Resizer's replayed median and mean both exceed the reference filter's on this corpus. Long patches retain the opening diagnostic window and keep the complete original in tee; test assertions and compiler diagnostics stay intact. The reference filter returns exit code 0 in **9** of the 61 captures where the producer failed; LM Resizer keeps the producer's code. On one capture LM Resizer returns 251 tokens against the reference filter's 40 because it states the **457** collection errors and lists the first ten failing files, which it omits. Headroom compresses LLM API context semantically and has no dedicated CLI tool filters, so its median saving on this command corpus is 0.00%. Strict view equality is 39/61; the twenty-two differences and their reasons are listed in the benchmark file, and the benchmark's strict checker exits 1 by design. The numbers are replayed in one step with `bench/real/rejouer.sh` (isolated Python with tiktoken, comparison executable built from the pinned archive, replay in a fresh directory, summary of medians, recoveries and exit codes; network needed the first time, `--sans-headroom` skips the Headroom column); the benchmark's Python script alone needs its arguments, see [the benchmark](bench/native/README.md).
+LM Resizer's replayed median (21.32%) exceeds the reference filter's (15.81%) on this corpus, but its mean (28.97%) is below the reference filter's (32.61%): since 0.2.6 the `git log` view shows every commit, where the reference filter still shows only the first (five captures that counted 91-97% saved now count 0-38%). Long patches retain the opening diagnostic window and keep the complete original in tee; test assertions and compiler diagnostics stay intact. The reference filter returns exit code 0 in **9** of the 61 captures where the producer failed; LM Resizer keeps the producer's code. On one capture LM Resizer returns 251 tokens against the reference filter's 40 because it states the **457** collection errors and lists the first ten failing files, which it omits. Headroom compresses LLM API context semantically and has no dedicated CLI tool filters, so its median saving on this command corpus is 0.00%. Strict view equality is 38/61; the twenty-three differences and their reasons are listed in the benchmark file, and the benchmark's strict checker exits 1 by design. The numbers are replayed in one step with `bench/real/rejouer.sh` (isolated Python with tiktoken, comparison executable built from the pinned archive, replay in a fresh directory, summary of medians, recoveries and exit codes; network needed the first time, `--sans-headroom` skips the Headroom column); the benchmark's Python script alone needs its arguments, see [the benchmark](bench/native/README.md).
 
 ## Try it on your project
 
@@ -146,7 +146,7 @@ New execution history records persist both counts. Stats keep existing byte coun
 
 The product uses its own Rust and TOML filters. Explicit inspection commands include `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` and `dedup`. File reads remain literal. Reversible path/match folds, JSON tables and identical-line runs supplement command filters; syntax outlines and exact repeated-message folding are opt-in.
 
-**Median saving including tee: 30.43%.** Mean saving is 35.14%; all 61 raw recoveries and producer exit codes pass, and interleaved startup measurements give about 8 ms. These corpus medians are not a claim about arbitrary live repositories. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
+**Median saving including tee: 21.32%.** Mean saving is 28.97%; all 61 raw recoveries and producer exit codes pass, and interleaved startup measurements give about 8 ms. These corpus medians are not a claim about arbitrary live repositories. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
 
 `env` masks names containing `PASSPHRASE` (including `PASSPHRASE_FILE`) and a `PASS` name component. This deliberately also masks benign names such as `PASS_COUNT`; filtering is conservative, based on names and credential URL shapes.
 
