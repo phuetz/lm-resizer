@@ -107,22 +107,14 @@ LM Resizer shortens, it does not hide. Command views keep literal numbers, paths
 
 `exec` drains a shared stdout/stderr pipe through EOF, without a 10 MiB ceiling. A sufficiently reduced view may display `[tee:<id>]`; read it with `lm-resizer tee read <id>`; otherwise `tee list` and the JSON `tee_hint` field provide recovery without adding tokens to the view.
 
-From Bash, retrieve a listed original when one exists:
+`tee list` is ordered by file name, which is a hash of the content, not by date: its first entry is not "the last output". Take the identifier from the view (`[tee:<id>]`), from the `tee_hint` field of a `--json` report, or from the `[raw: …]` marker, then read it:
 
 ~~~bash
-tee_listing=$(lm-resizer tee list)
-tee_file=${tee_listing%% *}
-if [ -n "$tee_file" ]; then lm-resizer tee read "$tee_file"; fi
+lm-resizer tee list
+lm-resizer tee read <id>
 ~~~
 
-In PowerShell, select the file from the JSON list:
-
-~~~powershell
-$teeFiles = lm-resizer tee list --json | ConvertFrom-Json
-if ($teeFiles.files.Count -gt 0) { lm-resizer tee read $teeFiles.files[0].name }
-~~~
-
-If several files are listed, use the filename or `[raw: …]` identifier for the command you need. `lm-resizer --version` reports `lm-resizer 0.2.6`. JSON recovery metadata uses a marker such as `[raw: e3b0c44298fc]`; the archives have a `.log` extension.
+`lm-resizer --version` reports `lm-resizer 0.2.6`. JSON recovery metadata uses a marker such as `[raw: e3b0c44298fc]`; the archives have a `.log` extension.
 
 ## Agent integrations
 

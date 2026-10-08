@@ -107,22 +107,14 @@ LM Resizer raccourcit, il ne cache pas. Les vues de commandes conservent littér
 
 `exec` archive stdout et stderr entrelacés jusqu'à EOF, sans plafond de 10 Mio. Une vue suffisamment réduite peut afficher `[tee:<id>]` ; le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.
 
-Depuis Bash, récupérer un original listé lorsqu'il en existe un :
+`tee list` est trié par nom de fichier, qui est une empreinte du contenu, pas par date : sa première entrée n'est pas « la dernière sortie ». Prenez l'identifiant dans la vue (`[tee:<id>]`), dans le champ `tee_hint` d'un rapport `--json` ou dans le marqueur `[raw: …]`, puis lisez-le :
 
 ~~~bash
-tee_listing=$(lm-resizer tee list)
-tee_file=${tee_listing%% *}
-if [ -n "$tee_file" ]; then lm-resizer tee read "$tee_file"; fi
+lm-resizer tee list
+lm-resizer tee read <id>
 ~~~
 
-Sous PowerShell, choisir le fichier dans la liste JSON :
-
-~~~powershell
-$teeFiles = lm-resizer tee list --json | ConvertFrom-Json
-if ($teeFiles.files.Count -gt 0) { lm-resizer tee read $teeFiles.files[0].name }
-~~~
-
-Si plusieurs fichiers sont listés, utilisez le nom ou l'identifiant `[raw: …]` correspondant à la commande recherchée. `lm-resizer --version` affiche `lm-resizer 0.2.6`. Le rappel JSON porte un identifiant tel que `[raw: e3b0c44298fc]` ; les archives ont l'extension `.log`.
+`lm-resizer --version` affiche `lm-resizer 0.2.6`. Le rappel JSON porte un identifiant tel que `[raw: e3b0c44298fc]` ; les archives ont l'extension `.log`.
 
 ## Intégrations agents
 

@@ -169,10 +169,11 @@ without executing anything.
 ```bash
 lm-resizer stats --markdown
 lm-resizer tee list --json
-tee_listing=$(lm-resizer tee list)
-tee_file=${tee_listing%% *}
-lm-resizer tee read "$tee_file"
+lm-resizer tee read <id>
 ```
+
+`tee list` is ordered by file name (a hash of the content), not by date: take `<id>` from the
+`[tee:<id>]` line of the view or from the `tee_hint` field of a `--json` report.
 
 Use `tee` only when you need the original raw output that was compressed out of
 the agent-facing response.
