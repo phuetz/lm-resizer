@@ -111,3 +111,31 @@ fn typescript_keeps_block_docs_and_source_order() {
     }
     assert!(!out.contains("return a + b"));
 }
+
+#[test]
+fn rust_attributes_are_not_presented_as_documentation() {
+    let out = ast(
+        "rs",
+        "#[derive(Debug, Clone)]\npub struct S { pub x: u8 }\n\n// Compte les accès.\n#[inline]\n#[cfg(\n    unix\n)]\npub fn compte() {}\n\n#[test]\nfn nue() {}\n",
+    );
+    assert!(out.contains("L2 struct pub struct S\n"), "{out}");
+    assert!(
+        out.contains("L9 fn pub fn compte() // Compte les accès."),
+        "{out}"
+    );
+    assert!(out.contains("L12 fn fn nue()\n"), "{out}");
+    assert!(!out.contains("#["), "{out}");
+    assert!(!out.contains("[derive"), "{out}");
+    assert!(!out.contains("unix"), "{out}");
+}
+
+#[test]
+fn javascript_private_fields_are_not_presented_as_comments() {
+    let out = ast(
+        "js",
+        "export class Box {\n  #secret = 1;\n  open() { return this.#secret; }\n}\n",
+    );
+    assert!(out.contains("open()"), "{out}");
+    assert!(!out.contains("// #secret"), "{out}");
+    assert!(!out.contains("// secret"), "{out}");
+}

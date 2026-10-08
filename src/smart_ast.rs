@@ -99,7 +99,9 @@ impl Rows {
 
 // Les commentaires contigus précédant la déclaration sont de la documentation
 // de présentation. Ils n'autorisent jamais l'extraction d'un symbole.
-fn preceding_comment(source: &str, start: usize) -> Option<String> {
+// `#` n'ouvre un commentaire qu'en Python : en Rust c'est un attribut, en
+// JavaScript et TypeScript un champ privé.
+fn preceding_comment(source: &str, start: usize, hash: bool) -> Option<String> {
     let before = source.get(..start)?;
     let line_start = before.rfind('\n').map_or(0, |n| n + 1);
     if !matches!(
@@ -111,7 +113,7 @@ fn preceding_comment(source: &str, start: usize) -> Option<String> {
     let mut comments = Vec::new();
     for line in before[..line_start].lines().rev() {
         let line = line.trim();
-        if line.starts_with(['/', '*', '#']) {
+        if line.starts_with(['/', '*']) || (hash && line.starts_with('#')) {
             comments.push(line);
         } else {
             break;
@@ -193,8 +195,15 @@ fn rust_row(
     body: Option<usize>,
 ) {
     let start = rust_start(source, span, attrs);
+    // Les commentaires se lisent au-dessus des attributs, pas entre eux et
+    // la déclaration.
+    let first = attrs
+        .iter()
+        .map(|a| a.span().byte_range().start)
+        .min()
+        .unwrap_or(start);
     let doc = rust_doc(attrs)
-        .or_else(|| preceding_comment(source, start))
+        .or_else(|| preceding_comment(source, first, false))
         .or_else(|| {
             let text = source.get(body?..)?.trim_start();
             text.starts_with("//").then(|| clean_comment(text))
@@ -541,7 +550,7 @@ fn tree_row(
         rows.line(start),
         kind,
         &source[start..end],
-        doc.or_else(|| preceding_comment(source, start)),
+        doc.or_else(|| preceding_comment(source, start, python)),
     );
 }
 
@@ -700,7 +709,7 @@ fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: b
                         child.start_position().row + 1,
                         if callable { "fn" } else { "const" },
                         &format!("{prefix} {signature}"),
-                        preceding_comment(source, start),
+                        preceding_comment(source, start, python),
                     );
                 }
             }
@@ -726,7 +735,7 @@ fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: b
                 node.start_position().row + 1,
                 if callable { "method" } else { "field" },
                 signature,
-                preceding_comment(source, start),
+                preceding_comment(source, start, python),
             );
         }
         "property_identifier" if node.parent().is_some_and(|n| n.kind() == "enum_body") => {
@@ -753,7 +762,7 @@ fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: b
                             node.start_position().row + 1,
                             if field { "field" } else { "const" },
                             signature,
-                            preceding_comment(source, start),
+                            preceding_comment(source, start, python),
                         );
                     }
                 }
