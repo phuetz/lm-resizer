@@ -186,31 +186,27 @@ fn stat_row(row: &str) -> Option<String> {
         .then(|| format!("  {path} | {count}"))
 }
 
+/// `commit <hash>` : 40 chiffres, ou une abréviation (`--abbrev-commit`, quatre au minimum pour git).
 fn is_commit_header(row: &str) -> bool {
     row.strip_prefix("commit ").is_some_and(|rest| {
         rest.split_whitespace()
             .next()
-            .is_some_and(|hash| hash.len() >= 7 && hash.chars().all(|c| c.is_ascii_hexdigit()))
+            .is_some_and(|hash| hash.len() >= 4 && hash.chars().all(|c| c.is_ascii_hexdigit()))
     })
 }
 
-/// `git log --stat` sans sentinelle : un enregistrement par commit, aucun commit perdu.
-/// Les barres de proportion `+++---` disparaissent (le nombre de lignes reste), ainsi que
+/// `git log` sans sentinelle (avec ou sans `--stat`) : un enregistrement par commit, aucun commit
+/// perdu. Les barres de proportion `+++---` disparaissent (le nombre de lignes reste), ainsi que
 /// les lignes vides et les pieds `Signed-off-by` / `Co-authored-by`. Les trois premières
 /// lignes de corps suivent le titre ; le reste est compté et récupérable dans tee.
-fn git_log_stat(raw: &str) -> Option<String> {
-    // Le bilan commence par exactement une espace ; le corps d'un message est
-    // indenté de quatre et ne doit pas suffire à déclencher cette vue.
-    let has_summary = raw.lines().any(|row| {
-        if !row.starts_with(' ') || row.starts_with("  ") {
-            return false;
-        }
-        let row = row.trim_start();
-        row.split_once(" file").is_some_and(|(n, rest)| {
-            !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) && rest.contains("changed")
-        })
-    });
-    if !has_summary || !raw.lines().any(is_commit_header) {
+/// `None` quand la sortie ne commence pas par un en-tête `commit <hash>` (`--oneline`, `--format`,
+/// `--graph`, `--pretty=email`…) : aucune compaction n'y est sûre, le brut est rendu.
+fn git_log_records(raw: &str) -> Option<String> {
+    if !raw
+        .lines()
+        .find(|row| !row.trim().is_empty())
+        .is_some_and(is_commit_header)
+    {
         return None;
     }
     let mut out: Vec<String> = Vec::new();
@@ -257,7 +253,10 @@ fn git_log_stat(raw: &str) -> Option<String> {
         }
     }
     flush(&mut out, &mut hidden);
-    Some(out.join("\n"))
+    let view = out.join("\n");
+    // Une vue ne perd jamais un commit et ne dépasse jamais le brut.
+    let commits = |text: &str| text.lines().filter(|row| is_commit_header(row)).count();
+    (commits(&view) == commits(raw) && view.len() < raw.len()).then_some(view)
 }
 
 fn git_log(raw: &str) -> String {
@@ -266,16 +265,15 @@ fn git_log(raw: &str) -> String {
         return git_diff(raw);
     }
     if !raw.contains("---END---") {
-        if let Some(view) = git_log_stat(raw) {
-            return view;
-        }
+        // Une forme sans vue sûre (`--oneline`, `--format`, `--graph`) reste brute.
+        return git_log_records(raw).unwrap_or_else(|| raw.to_owned());
     }
     struct Excerpt {
         rows: Vec<String>,
         hidden: usize,
     }
     let mut excerpts = Vec::new();
-    for record in raw.split("---END---").take(50) {
+    for record in raw.split("---END---") {
         let mut excerpt = Excerpt {
             rows: Vec::new(),
             hidden: 0,
@@ -442,17 +440,70 @@ mod tests {
         assert!(view.len() < raw.len());
     }
     #[test]
-    fn body_line_resembling_a_stat_summary_does_not_switch_views() {
+    fn body_line_resembling_a_stat_summary_stays_message_text() {
         let raw = "commit aaaaaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    refactor\n\n    5 files changed in this refactor\n\ncommit bbbbbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n";
-        assert!(git_log_stat(raw).is_none());
-        assert!(git_log(raw).contains("lines omitted"));
+        let view = git_log(raw);
+        for fact in [
+            "commit aaaaaaa",
+            "refactor",
+            "5 files changed in this refactor",
+            "commit bbbbbbb",
+            "autre",
+        ] {
+            assert!(view.contains(fact), "manque {fact:?} dans\n{view}");
+        }
+        assert!(!view.contains("omitted"));
     }
     #[test]
-    fn plain_log_without_stat_keeps_the_historical_view() {
-        // Comportement historique conservé tel quel : le second commit est replié
-        // dans le décompte « omitted » (le brut reste dans tee).
-        let raw = "commit aaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n\ncommit bbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n";
-        assert_eq!(git_log(raw), "commit aaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n  [+4 lines omitted]");
+    fn plain_log_shows_every_commit() {
+        let raw = "commit aaaaaaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n\n    ligne 1\n    ligne 2\n    ligne 3\n    ligne 4\n    ligne 5\n\n    Signed-off-by: A <a@example.test>\n\ncommit bbbbbbbb (HEAD -> main)\nMerge: aaaaaaa ccccccc\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    fusion\n\ncommit cccccccc\nAuthor: Zoé <z@example.test>\nDate: before\n\n";
+        assert_eq!(
+            git_log(raw),
+            "commit aaaaaaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n  ligne 1\n  ligne 2\n  ligne 3\n  [+2 message lines omitted]\ncommit bbbbbbbb (HEAD -> main)\n  Merge: aaaaaaa ccccccc\n  Author: Bob <b@example.test>\n  Date: yesterday\n  fusion\ncommit cccccccc\n  Author: Zoé <z@example.test>\n  Date: before"
+        );
+    }
+    #[test]
+    fn forms_without_a_commit_header_are_returned_raw() {
+        for raw in [
+            "aac6d62 sujet cinq\n956d045\n6ecefbf fusion\n7af913f trois\nad9434e côté\n",
+            "* aac6d62 sujet cinq\n*   6ecefbf fusion\n|\\\n| * ad9434e côté\n",
+            "sujet cinq\nfusion\ntrois\n",
+            "From aac6d6244a36c451c1361bc2e13918afadc3308a Mon Sep 17 00:00:00 2001\nSubject: x\n",
+        ] {
+            assert_eq!(git_log(raw), raw);
+        }
+    }
+    #[test]
+    fn abbreviated_commit_headers_are_recognised() {
+        let raw = format!("commit abcd\nAuthor: A <a@example.test>\nDate: d\n\n    t\n{}\ncommit ef01\nAuthor: B <b@example.test>\nDate: d\n\n    u\n", "\n    corps".repeat(40));
+        let view = git_log(&raw);
+        assert!(
+            view.contains("commit abcd") && view.contains("commit ef01"),
+            "{view}"
+        );
+        assert!(view.len() < raw.len());
+    }
+    #[test]
+    fn a_view_that_would_grow_the_log_is_returned_raw() {
+        let raw = "commit aaaaaaa\nAuthor: A <a@example.test>\nDate: d\n\n    t\n";
+        assert_eq!(git_log(raw), raw);
+    }
+    #[test]
+    fn sentinel_log_keeps_every_record_past_fifty() {
+        let raw: String = (0..80)
+            .map(|n| {
+                format!(
+                    "commit {n:040x}\nAuthor: A <a@example.test>\nDate: d\n\n  t{n}\n---END---\n"
+                )
+            })
+            .collect();
+        let view = git_log(&raw);
+        assert_eq!(
+            view.lines()
+                .filter(|row| row.starts_with("commit "))
+                .count(),
+            80
+        );
     }
     #[test]
     fn python_module_and_uv_runners_use_the_pytest_view() {
