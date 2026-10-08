@@ -57,6 +57,8 @@ mod patch_view;
 mod provider_usage;
 mod reversible_views;
 mod shared_context;
+#[cfg(test)]
+mod shell_rewrite_tests;
 mod smart_ast;
 mod structured_views;
 mod test_views;
@@ -3474,9 +3476,11 @@ fn rewrite_shell_segment(segment: &str) -> Option<(String, String)> {
     if segment_must_not_be_rewritten(segment) {
         return None;
     }
-    let args = split_shell_words(segment.trim())?;
-    // `shell_join` ne sait pas rendre des apostrophes. Un mot `$(...)` ou `` `...` ``
-    // qui était littéral le redeviendrait une substitution entre guillemets doubles.
+    let segment = segment.trim();
+    // Découpage POSIX strict : s'il refuse la ligne (citation non fermée, opérateur non cité,
+    // commentaire, nouvelle ligne), la ligne d'origine reste telle quelle.
+    let args = posix_split(segment)?;
+    // Un mot `$(...)` ou `` `...` `` qui était littéral ne doit jamais devenir une substitution.
     if args
         .iter()
         .any(|word| word.contains("$(") || word.contains('`'))
@@ -3484,8 +3488,140 @@ fn rewrite_shell_segment(segment: &str) -> Option<(String, String)> {
         return None;
     }
     let report = rewrite_command_report(&args);
-    let rewritten = report.rewritten?;
+    let rewritten_args = report.rewritten.as_ref()?;
+    let rewritten = if report.argv.first().map(String::as_str) == Some("lm-resizer")
+        && report.argv.get(1).map(String::as_str) == Some("exec")
+    {
+        // Enveloppe d'une commande inchangée : les octets d'origine sont recollés tels
+        // quels, comme le fait le hook. Aucun mot n'est re-cité, donc aucune citation
+        // ne peut être cassée ni une expansion (`$HOME`, `*.rs`) figée.
+        let wrapped = format!("lm-resizer exec -- {segment}");
+        let mut expected = vec![
+            "lm-resizer".to_string(),
+            "exec".to_string(),
+            "--".to_string(),
+        ];
+        expected.extend(args.iter().cloned());
+        if posix_split(&wrapped).as_ref() != Some(&expected) {
+            return None;
+        }
+        wrapped
+    } else {
+        // Commande construite à partir de données (`head -n 1 FICHIER` devient
+        // `lm-resizer read FICHIER --head-lines 1`) : les arguments sont re-cités en
+        // apostrophes POSIX, seulement s'ils sont des littéraux, et la chaîne produite doit
+        // se redécouper en exactement ces arguments.
+        if segment_has_expansion(segment) {
+            return None;
+        }
+        if posix_split(rewritten_args).as_ref() != Some(&report.argv) {
+            return None;
+        }
+        rewritten_args.clone()
+    };
     Some((rewritten, report.filter))
+}
+
+/// Vrai si le shell interpréterait quelque chose dans ce segment (variable, substitution,
+/// globbing, tilde, accolades) : ses mots ne sont alors pas des littéraux.
+fn segment_has_expansion(segment: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for ch in segment.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '$' | '`' if !in_single => return true,
+            '*' | '?' | '[' | '{' | '~' if !in_single && !in_double => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Découpage POSIX strict d'une ligne de commande simple, sans aucune expansion : les
+/// mots rendus sont les octets que verrait le programme si le texte ne contenait ni `$` ni
+/// glob. Refuse (`None`) tout ce qui n'est pas un mot ordinaire : citation non fermée,
+/// nouvelle ligne ou opérateur non cité, commentaire, parenthèse, barre oblique inverse
+/// finale.
+fn posix_split(text: &str) -> Option<Vec<String>> {
+    #[derive(PartialEq)]
+    enum State {
+        Plain,
+        Single,
+        Double,
+    }
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut state = State::Plain;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match state {
+            State::Single => {
+                if ch == '\'' {
+                    state = State::Plain;
+                } else {
+                    current.push(ch);
+                }
+            }
+            State::Double => match ch {
+                '"' => state = State::Plain,
+                '\\' => match chars.next()? {
+                    '\n' => return None,
+                    next @ ('$' | '`' | '"' | '\\') => current.push(next),
+                    next => {
+                        current.push('\\');
+                        current.push(next);
+                    }
+                },
+                _ => current.push(ch),
+            },
+            State::Plain => match ch {
+                ' ' | '\t' => {
+                    if in_word {
+                        words.push(std::mem::take(&mut current));
+                        in_word = false;
+                    }
+                }
+                '\n' | '\r' | ';' | '&' | '|' | '<' | '>' | '(' | ')' => return None,
+                '#' if !in_word => return None,
+                '\'' => {
+                    state = State::Single;
+                    in_word = true;
+                }
+                '"' => {
+                    state = State::Double;
+                    in_word = true;
+                }
+                '\\' => {
+                    let next = chars.next()?;
+                    if next == '\n' {
+                        return None;
+                    }
+                    current.push(next);
+                    in_word = true;
+                }
+                _ => {
+                    current.push(ch);
+                    in_word = true;
+                }
+            },
+        }
+    }
+    if state != State::Plain {
+        return None;
+    }
+    if in_word {
+        words.push(current);
+    }
+    Some(words)
 }
 
 fn split_trailing_redirects(segment: &str) -> (&str, &str) {
@@ -3669,19 +3805,25 @@ fn split_shell_words(segment: &str) -> Option<Vec<String>> {
     Some(words)
 }
 
+/// Cite un argument pour un shell POSIX : tel quel s'il ne contient que des caractères
+/// sans signification pour le shell, sinon entre apostrophes (`'` devient `'\''`). Rien
+/// n'est interprété entre apostrophes, ni `\`, ni `"`, ni `$`.
+fn shell_quote(arg: &str) -> String {
+    if !arg.is_empty()
+        && arg.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '-' | '_' | '.' | '/' | ':' | ',' | '+' | '@' | '%' | '=')
+        })
+    {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\\''"))
+    }
+}
+
 fn shell_join(args: &[String]) -> String {
     args.iter()
-        .map(|arg| {
-            if arg.is_empty() {
-                String::from("\"\"")
-            } else if arg.chars().all(|c| {
-                c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '\\' | ':')
-            }) {
-                arg.clone()
-            } else {
-                format!("\"{}\"", arg.replace('"', "\\\""))
-            }
-        })
+        .map(|arg| shell_quote(arg))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -5711,7 +5853,8 @@ fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
     if segment_must_not_be_rewritten(seg) {
         return None;
     }
-    let words = split_shell_words(seg)?;
+    // Découpage POSIX strict : refuse citation non fermée, commentaire, nouvelle ligne.
+    let words = posix_split(seg)?;
     // empty, or our own exec invocation (anti-recursion) → leave raw
     if words.is_empty() || command_basename(&words[0]) == "lm-resizer" {
         return None;
@@ -5719,7 +5862,7 @@ fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
     if !rewrite_command_report(&words).supported {
         return None;
     }
-    Some(format!("\"{exe}\" exec -- {seg}"))
+    Some(format!("{} exec -- {seg}", agent_hooks::quote_program(exe)))
 }
 
 /// Build the PreToolUse `hookSpecificOutput` that rewrites a supported Bash command to run
@@ -6976,7 +7119,10 @@ fn native_hooks_json(
 ) -> Result<String> {
     let mut hooks = serde_json::Map::new();
     for event in events {
-        let command = format!("\"{exe_path}\" hook --client {client} --event {event}");
+        let command = format!(
+            "{} hook --client {client} --event {event}",
+            agent_hooks::quote_program(exe_path)
+        );
         let mut hook = json!({
             "type": "command",
             "command": command,
@@ -11075,10 +11221,8 @@ command = "node"
 
         // psql scripté et commande simple : toujours réécrits. Le hook enveloppe tel quel.
         let scripted = rewrite_shell_report("psql -c 'select 1'");
-        assert_eq!(
-            scripted.rewritten,
-            "lm-resizer exec -- psql -c \"select 1\""
-        );
+        // Les octets d'origine sont recollés : plus de re-citation en guillemets doubles.
+        assert_eq!(scripted.rewritten, "lm-resizer exec -- psql -c 'select 1'");
         assert_eq!(
             rewrite_command_for_hook("psql -c 'select 1'", "/opt/lm").as_deref(),
             Some("\"/opt/lm\" exec -- psql -c 'select 1'")

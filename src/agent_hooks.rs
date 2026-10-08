@@ -31,7 +31,12 @@ pub fn rewrite(value: &Value, exe: &str, event: &str, client: &str) -> Option<Va
 }
 
 pub fn config(exe: &str, client: &str) -> Option<Value> {
-    let command = |event: &str| format!("\"{exe}\" hook --client {client} --event {event}");
+    let command = |event: &str| {
+        format!(
+            "{} hook --client {client} --event {event}",
+            quote_program(exe)
+        )
+    };
     // Only pre-execution rewriting is installed: the wrapped exec already
     // records measured savings, so a post hook would count the same run twice.
     Some(match client {
@@ -95,5 +100,41 @@ mod tests {
             config("lm-resizer", "cursor").unwrap()["hooks"]["preToolUse"][0]["matcher"],
             "^Shell$"
         );
+    }
+}
+
+/// Chemin du programme tel qu'il est écrit dans une ligne de commande de hook. Entre guillemets
+/// doubles (format historique, seul accepté par `cmd.exe`) ; sous Unix, un chemin qui contient
+/// `"`, `$`, un accent grave, `\` ou `!` serait réinterprété par le shell : il est alors cité en
+/// apostrophes.
+pub fn quote_program(exe: &str) -> String {
+    if cfg!(unix) && exe.contains(['"', '$', '`', '\\', '!', '\n']) {
+        format!("'{}'", exe.replace('\'', "'\\''"))
+    } else {
+        format!("\"{exe}\"")
+    }
+}
+
+#[cfg(all(test, unix))]
+mod quote_program_tests {
+    use super::quote_program;
+
+    #[test]
+    fn ordinary_paths_keep_the_historical_double_quotes() {
+        assert_eq!(
+            quote_program("/opt/lm/bin/lm-resizer"),
+            "\"/opt/lm/bin/lm-resizer\""
+        );
+        assert_eq!(quote_program("/opt/my tools/lm"), "\"/opt/my tools/lm\"");
+    }
+
+    #[test]
+    fn paths_the_shell_would_reinterpret_are_single_quoted() {
+        assert_eq!(
+            quote_program("/tmp/a\"b;touch pwned;#"),
+            "'/tmp/a\"b;touch pwned;#'"
+        );
+        assert_eq!(quote_program("/tmp/$(id)/lm"), "'/tmp/$(id)/lm'");
+        assert_eq!(quote_program("/tmp/it's$x"), "'/tmp/it'\\''s$x'");
     }
 }
