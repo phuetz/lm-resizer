@@ -99,7 +99,17 @@ fn list(dir: &Path) -> Vec<String> {
 /// Citation de référence, écrite ici et non importée : le test ne doit pas dépendre du code
 /// qu'il juge.
 fn apostrophes(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "'\\''"))
+    let mut quoted = String::from("'");
+    for ch in text.chars() {
+        if ch == '\'' {
+            // Ferme la citation, ajoute une apostrophe entre guillemets doubles, rouvre.
+            quoted.push_str("'\"'\"'");
+        } else {
+            quoted.push(ch);
+        }
+    }
+    quoted.push('\'');
+    quoted
 }
 
 /// La ligne réécrite fait, dans le shell, exactement ce que faisait la ligne d'origine.
