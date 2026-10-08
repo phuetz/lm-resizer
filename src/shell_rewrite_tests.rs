@@ -317,3 +317,60 @@ fn argument_vectors_are_rendered_without_double_quotes() {
         ]]
     );
 }
+
+/// Un chemin d'installation peut contenir `"`, `$(...)` ou un accent grave (le système de fichiers
+/// l'accepte) : les scripts générés ne doivent jamais l'exécuter comme du shell.
+fn executable_stub_in_hostile_dir() -> (tempfile::TempDir, String, std::path::PathBuf) {
+    let root = tempfile::tempdir().unwrap();
+    let work = root.path().join("work");
+    fs::create_dir(&work).unwrap();
+    let hostile = root
+        .path()
+        .join("we\"ird $(touch pwned-by-path) `touch pwned-by-tick` ';touch pwned-by-semicolon;'");
+    fs::create_dir(&hostile).unwrap();
+    let stub = hostile.join("lm-resizer");
+    fs::write(&stub, "#!/bin/sh\nprintf 'stub-ran' > \"$LMR_MARK\"\n").unwrap();
+    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = stub.to_str().unwrap().to_string();
+    (root, path, work)
+}
+
+fn run_script(script: &str, work: &Path, args: &[&str]) -> Vec<String> {
+    let file = work.join("script.sh");
+    fs::write(&file, script).unwrap();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+    Process::new("/bin/sh")
+        .arg(&file)
+        .args(args)
+        .current_dir(work)
+        .env("LMR_MARK", work.join("mark"))
+        .env_remove("LM_RESIZER_BIN")
+        .output()
+        .unwrap();
+    let mut names = list(work);
+    names.retain(|name| name != "script.sh");
+    names
+}
+
+#[test]
+fn generated_hook_helper_does_not_execute_a_hostile_install_path() {
+    let (_root, exe, work) = executable_stub_in_hostile_dir();
+    let files = run_script(&hook_rewrite_sh(&exe), &work, &["git status"]);
+    assert_eq!(
+        files,
+        ["mark"],
+        "le script a exécuté une partie du chemin : {files:?}"
+    );
+}
+
+#[test]
+fn generated_command_shim_does_not_execute_a_hostile_install_path() {
+    let (_root, exe, work) = executable_stub_in_hostile_dir();
+    // Le programme d'origine est lui aussi un chemin trouvé sur le disque.
+    let files = run_script(&command_shim_sh(&exe, Path::new(&exe)), &work, &[]);
+    assert_eq!(
+        files,
+        ["mark"],
+        "le shim a exécuté une partie du chemin : {files:?}"
+    );
+}

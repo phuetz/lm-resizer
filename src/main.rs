@@ -7318,9 +7318,10 @@ exit /b %ERRORLEVEL%
 fn command_shim_sh(exe_path: &str, original: &Path) -> String {
     format!(
         r#"#!/usr/bin/env sh
-exec "{exe_path}" exec -- "{original}" "$@"
+exec {exe} exec -- {original} "$@"
 "#,
-        original = original.display()
+        exe = agent_hooks::quote_program(exe_path),
+        original = agent_hooks::quote_program(&original.display().to_string())
     )
 }
 
@@ -7336,11 +7337,14 @@ fn shim_path_hint(shim_dir: &Path) -> String {
 }
 
 fn hook_rewrite_sh(exe_path: &str) -> String {
+    // Chemin cité par `quote_program` : un `$(...)` ou un guillemet dans un nom de dossier
+    // ne doit pas être exécuté par le script.
+    let exe_word = agent_hooks::quote_program(exe_path);
     format!(
         r#"#!/usr/bin/env sh
 set -eu
 
-LM_RESIZER_BIN="${{LM_RESIZER_BIN:-{exe_path}}}"
+[ -n "${{LM_RESIZER_BIN:-}}" ] || LM_RESIZER_BIN={exe_word}
 if [ "$#" -eq 1 ]; then
   exec "$LM_RESIZER_BIN" rewrite-shell "$1"
 fi
