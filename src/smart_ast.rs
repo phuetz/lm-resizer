@@ -20,6 +20,9 @@ impl Fallback {
 }
 
 pub fn summarize(path: &Path, source: &str) -> Result<String, Fallback> {
+    // syn retire le BOM avant de calculer les spans : utiliser la même vue
+    // pour extraire les signatures, sans modifier les numéros de ligne.
+    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
     let (language, rows) = match extension.to_ascii_lowercase().as_str() {
         "rs" => ("rust", rust(source)?),
@@ -84,10 +87,8 @@ impl Rows {
     }
 
     fn push(&mut self, line: usize, kind: &str, text: &str, doc: Option<String>) {
-        self.output.push_str(&format!(
-            "L{line} {kind} {}",
-            compact(text)
-        ));
+        self.output
+            .push_str(&format!("L{line} {kind} {}", compact(text)));
         if let Some(doc) = doc.filter(|s| !s.is_empty()) {
             self.output.push_str(" // ");
             self.output.push_str(&doc);
@@ -116,26 +117,63 @@ fn preceding_comment(source: &str, start: usize) -> Option<String> {
             break;
         }
     }
-    comments.last().map(|s| clean_comment(s))
+    comments
+        .iter()
+        .rev()
+        .map(|s| clean_comment(s))
+        .find(|s| !s.is_empty())
 }
 
 fn clean_comment(text: &str) -> String {
     text.lines()
-        .next()
+        .map(|line| {
+            line.trim()
+                .trim_start_matches(['/', '*', '#', '!'])
+                .trim()
+                .trim_end_matches("*/")
+                .trim()
+        })
+        .find(|line| !line.is_empty())
         .unwrap_or("")
-        .trim()
-        .trim_start_matches(['/', '*', '#', '!'])
-        .trim()
-        .trim_end_matches("*/")
-        .trim()
         .to_string()
 }
 
 fn rust(source: &str) -> Result<Rows, Fallback> {
-    let file = syn::parse_file(source).map_err(|_| Fallback::InvalidSyntax)?;
+    let mut file = syn::parse_file(source).map_err(|_| Fallback::InvalidSyntax)?;
+    if let Some(shebang) = &file.shebang {
+        // syn retire également le shebang. Le remplacer par autant d'octets
+        // d'espaces préserve les spans absolus dans le fichier d'origine.
+        let padded = " ".repeat(shebang.len()) + &source[shebang.len()..];
+        file = syn::parse_file(&padded).map_err(|_| Fallback::InvalidSyntax)?;
+    }
     let mut rows = Rows::new(source);
+    if let Some(attr) = file.attrs.iter().find(|a| a.path().is_ident("doc")) {
+        if let Some(doc) = rust_doc(std::slice::from_ref(attr)) {
+            rows.push(rows.line(attr.span().byte_range().start), "doc", &doc, None);
+        }
+    }
     rust_items(source, &file.items, &mut rows);
     Ok(rows)
+}
+
+fn rust_doc(attrs: &[syn::Attribute]) -> Option<String> {
+    attrs.iter().find_map(|a| {
+        if !a.path().is_ident("doc") {
+            return None;
+        }
+        if let syn::Meta::NameValue(meta) = &a.meta {
+            if let syn::Expr::Lit(value) = &meta.value {
+                if let syn::Lit::Str(value) = &value.lit {
+                    return value
+                        .value()
+                        .lines()
+                        .find(|line| !line.trim().is_empty())
+                        .map(|line| line.trim().to_string());
+                }
+            }
+        }
+        None
+    })
 }
 
 fn rust_start(source: &str, span: proc_macro2::Span, attrs: &[syn::Attribute]) -> usize {
@@ -155,29 +193,7 @@ fn rust_row(
     body: Option<usize>,
 ) {
     let start = rust_start(source, span, attrs);
-    let doc = attrs
-        .iter()
-        .find_map(|a| {
-            if !a.path().is_ident("doc") {
-                return None;
-            }
-            if let syn::Meta::NameValue(meta) = &a.meta {
-                if let syn::Expr::Lit(value) = &meta.value {
-                    if let syn::Lit::Str(value) = &value.lit {
-                        return Some(
-                            value
-                                .value()
-                                .lines()
-                                .next()
-                                .unwrap_or("")
-                                .trim()
-                                .to_string(),
-                        );
-                    }
-                }
-            }
-            None
-        })
+    let doc = rust_doc(attrs)
         .or_else(|| preceding_comment(source, start))
         .or_else(|| {
             let text = source.get(body?..)?.trim_start();
@@ -221,6 +237,53 @@ fn rust_items(source: &str, items: &[syn::Item], rows: &mut Rows) {
                 i.span().byte_range().end,
                 None,
             ),
+            syn::Item::ForeignMod(i) => {
+                rust_row(
+                    source,
+                    rows,
+                    "extern",
+                    i.span(),
+                    &i.attrs,
+                    i.brace_token.span.open().byte_range().start,
+                    None,
+                );
+                for member in &i.items {
+                    match member {
+                        syn::ForeignItem::Fn(f) => rust_row(
+                            source,
+                            rows,
+                            "fn",
+                            f.span(),
+                            &f.attrs,
+                            f.span().byte_range().end,
+                            None,
+                        ),
+                        syn::ForeignItem::Static(s)
+                            if !matches!(s.vis, syn::Visibility::Inherited) =>
+                        {
+                            rust_row(
+                                source,
+                                rows,
+                                "static",
+                                s.span(),
+                                &s.attrs,
+                                s.span().byte_range().end,
+                                None,
+                            )
+                        }
+                        syn::ForeignItem::Type(t) => rust_row(
+                            source,
+                            rows,
+                            "type",
+                            t.span(),
+                            &t.attrs,
+                            t.span().byte_range().end,
+                            None,
+                        ),
+                        _ => {}
+                    }
+                }
+            }
             syn::Item::Fn(i) => rust_row(
                 source,
                 rows,
@@ -432,7 +495,7 @@ fn text<'a>(source: &'a str, node: Node<'_>) -> &'a str {
     &source[node.byte_range()]
 }
 
-fn docstring(source: &str, body: Node<'_>) -> Option<String> {
+fn docstring(source: &str, body: Node<'_>) -> Option<(usize, String)> {
     let mut cursor = body.walk();
     let first = body
         .named_children(&mut cursor)
@@ -448,13 +511,14 @@ fn docstring(source: &str, body: Node<'_>) -> Option<String> {
     let content = string
         .named_children(&mut cursor)
         .find(|n| n.kind() == "string_content")?;
-    Some(
-        text(source, content)
-            .lines()
-            .find(|s| !s.trim().is_empty())?
-            .trim()
-            .to_string(),
-    )
+    let (offset, line) = text(source, content)
+        .lines()
+        .enumerate()
+        .find(|(_, line)| !line.trim().is_empty())?;
+    Some((
+        content.start_position().row + offset + 1,
+        line.trim().to_string(),
+    ))
 }
 
 fn tree_row(
@@ -469,6 +533,7 @@ fn tree_row(
     let doc = if python {
         node.child_by_field_name("body")
             .and_then(|b| docstring(source, b))
+            .map(|(_, doc)| doc)
     } else {
         None
     };
@@ -480,6 +545,29 @@ fn tree_row(
     );
 }
 
+fn python_class_member(node: Node<'_>) -> bool {
+    let outer = if node
+        .parent()
+        .is_some_and(|p| p.kind() == "decorated_definition")
+    {
+        node.parent().unwrap()
+    } else {
+        node
+    };
+    outer
+        .parent()
+        .filter(|p| p.kind() == "block")
+        .and_then(|p| p.parent())
+        .is_some_and(|p| p.kind() == "class_definition")
+}
+
+fn callable(value: Node<'_>) -> bool {
+    matches!(
+        value.kind(),
+        "arrow_function" | "function_expression" | "generator_function"
+    )
+}
+
 fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: bool) {
     let start = node.start_byte();
     let end = node.end_byte();
@@ -487,8 +575,8 @@ fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: b
         "module" | "program" | "block" | "class_body" | "interface_body" | "object_type"
         | "enum_body" | "statement_block" => {
             if python && node.kind() == "module" {
-                if let Some(doc) = docstring(source, node) {
-                    rows.push(1, "doc", &doc, None);
+                if let Some((line, doc)) = docstring(source, node) {
+                    rows.push(line, "doc", &doc, None);
                 }
             }
             let mut cursor = node.walk();
@@ -536,7 +624,7 @@ fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: b
         | "abstract_method_signature" => {
             let body = node.child_by_field_name("body");
             let end = body.map_or(end, |b| b.start_byte());
-            let kind = if node.kind().contains("method") {
+            let kind = if node.kind().contains("method") || (python && python_class_member(node)) {
                 "method"
             } else {
                 "fn"
@@ -580,6 +668,9 @@ fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: b
                 tree_row(source, node, rows, "type", start, end, python);
             }
         }
+        "type_alias_statement" if python => {
+            tree_row(source, node, rows, "type", start, end, python)
+        }
         "lexical_declaration" | "variable_declaration" => {
             let mut cursor = node.walk();
             for child in node
@@ -587,12 +678,7 @@ fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: b
                 .filter(|n| n.kind() == "variable_declarator")
             {
                 let value = child.child_by_field_name("value");
-                let callable = value.is_some_and(|n| {
-                    matches!(
-                        n.kind(),
-                        "arrow_function" | "function_expression" | "generator_function"
-                    )
-                });
+                let callable = value.is_some_and(callable);
                 if callable || exported {
                     let prefix = source[start
                         ..node
@@ -624,14 +710,21 @@ fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: b
         | "property_signature"
         | "enum_assignment" => {
             let value = node.child_by_field_name("value");
-            let end = value.map_or(end, |n| n.start_byte());
+            let callable = value.is_some_and(callable);
+            let end = if callable {
+                value
+                    .and_then(|n| n.child_by_field_name("body"))
+                    .map_or(end, |n| n.start_byte())
+            } else {
+                value.map_or(end, |n| n.start_byte())
+            };
             let signature = source[start..end]
                 .trim_end()
                 .trim_end_matches('=')
                 .trim_end();
             rows.push(
                 node.start_position().row + 1,
-                "field",
+                if callable { "method" } else { "field" },
                 signature,
                 preceding_comment(source, start),
             );
@@ -643,8 +736,11 @@ fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: b
             if let Some(assignment) = node.named_child(0).filter(|n| n.kind() == "assignment") {
                 if let Some(left) = assignment.child_by_field_name("left") {
                     let name = text(source, left);
-                    if name.chars().all(|c| !c.is_ascii_lowercase())
-                        && name.chars().any(|c| c.is_ascii_uppercase())
+                    let field = python_class_member(node)
+                        && assignment.child_by_field_name("type").is_some();
+                    if field
+                        || (name.chars().all(|c| !c.is_ascii_lowercase())
+                            && name.chars().any(|c| c.is_ascii_uppercase()))
                     {
                         let end = assignment
                             .child_by_field_name("right")
@@ -655,7 +751,7 @@ fn walk(source: &str, node: Node<'_>, rows: &mut Rows, python: bool, exported: b
                             .trim_end();
                         rows.push(
                             node.start_position().row + 1,
-                            "const",
+                            if field { "field" } else { "const" },
                             signature,
                             preceding_comment(source, start),
                         );
