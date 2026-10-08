@@ -152,10 +152,100 @@ fn clipped(s: &str, width: usize) -> String {
     }
 }
 
+/// Une ligne `git log --stat` : ` chemin | 12 ++++---` ou ` image.png | Bin 0 -> 512 bytes`.
+fn stat_row(row: &str) -> Option<String> {
+    let (path, rest) = row.split_once(" | ")?;
+    let path = path.trim();
+    // Une ligne de statistique commence par exactement une espace ; le corps du
+    // message est indenté de quatre.
+    if path.is_empty() || !row.starts_with(' ') || row.starts_with("  ") {
+        return None;
+    }
+    let rest = rest.trim();
+    let count = rest.trim_end_matches(['+', '-']).trim_end();
+    let digits = count.split_whitespace().next()?;
+    (rest.starts_with("Bin ") || digits.chars().all(|c| c.is_ascii_digit()))
+        .then(|| format!("  {path} | {count}"))
+}
+
+fn is_commit_header(row: &str) -> bool {
+    row.strip_prefix("commit ").is_some_and(|rest| {
+        rest.split_whitespace()
+            .next()
+            .is_some_and(|hash| hash.len() >= 7 && hash.chars().all(|c| c.is_ascii_hexdigit()))
+    })
+}
+
+/// `git log --stat` sans sentinelle : un enregistrement par commit, aucun commit perdu.
+/// Les barres de proportion `+++---` disparaissent (le nombre de lignes reste), ainsi que
+/// les lignes vides et les pieds `Signed-off-by` / `Co-authored-by`. Les trois premières
+/// lignes de corps suivent le titre ; le reste est compté et récupérable dans tee.
+fn git_log_stat(raw: &str) -> Option<String> {
+    let has_summary = raw.lines().any(|row| {
+        let row = row.trim_start();
+        row.split_once(" file").is_some_and(|(n, rest)| {
+            !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) && rest.contains("changed")
+        })
+    });
+    if !has_summary || !raw.lines().any(is_commit_header) {
+        return None;
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut message_rows = 0usize;
+    let mut hidden = 0usize;
+    let mut flush = |out: &mut Vec<String>, hidden: &mut usize| {
+        if *hidden != 0 {
+            out.push(format!("  [+{hidden} message lines omitted]"));
+            *hidden = 0;
+        }
+    };
+    for row in raw.lines() {
+        if is_commit_header(row) {
+            flush(&mut out, &mut hidden);
+            message_rows = 0;
+            out.push(clipped(row, 120));
+            continue;
+        }
+        let text = row.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if let Some(stat) = stat_row(row) {
+            flush(&mut out, &mut hidden);
+            out.push(stat);
+        } else if row.starts_with("    ") {
+            if ["Signed-off-by:", "Co-authored-by:", "Co-Authored-By:"]
+                .iter()
+                .any(|prefix| text.starts_with(prefix))
+            {
+                continue;
+            }
+            // Titre + trois lignes de corps au plus.
+            if message_rows < 4 {
+                out.push(format!("  {}", clipped(text, 100)));
+                message_rows += 1;
+            } else {
+                hidden += 1;
+            }
+        } else {
+            // Author:, Date:, Merge:, bilan « N files changed » : conservés tels quels.
+            flush(&mut out, &mut hidden);
+            out.push(format!("  {}", clipped(text, 120)));
+        }
+    }
+    flush(&mut out, &mut hidden);
+    Some(out.join("\n"))
+}
+
 fn git_log(raw: &str) -> String {
     // A patch is a distinct record type, never message prose.
     if raw.lines().any(|s| s.starts_with("diff --")) {
         return git_diff(raw);
+    }
+    if !raw.contains("---END---") {
+        if let Some(view) = git_log_stat(raw) {
+            return view;
+        }
     }
     struct Excerpt {
         rows: Vec<String>,
@@ -253,6 +343,87 @@ mod tests {
         let view = git_diff(raw);
         assert!(view.contains("@@ -179,1 +181,1 @@ fn total"));
         assert!(view.contains("---source\n+++source"));
+    }
+    fn stat_log() -> String {
+        let mut raw = String::new();
+        for (hash, who, title, files) in [
+            (
+                "a".repeat(40),
+                "Alice",
+                "Premier titre",
+                vec![
+                    ("src/lib.rs", 12, "++++++-----"),
+                    ("docs/guide.md", 3, "+++"),
+                ],
+            ),
+            (
+                "b".repeat(40),
+                "Bob",
+                "Second titre",
+                vec![(
+                    "src/main.rs",
+                    40,
+                    "++++++++++++++++++++----------------------",
+                )],
+            ),
+            (
+                "c".repeat(40),
+                "Carol",
+                "Troisième titre",
+                vec![("img/logo.png", 0, "")],
+            ),
+        ] {
+            raw.push_str(&format!("commit {hash}\nAuthor: {who} <{who}@example.test>\nDate:   Mon Oct 5 12:00:00 2026 +0200\n\n    {title}\n\n    Corps de {who} : tableau a | 5 colonnes.\n\n    Co-Authored-By: Autre <autre@example.test>\n\n"));
+            for (path, n, bars) in &files {
+                if *n == 0 {
+                    raw.push_str(&format!(" {path} | Bin 0 -> 512 bytes\n"));
+                } else {
+                    raw.push_str(&format!(" {path} | {n} {bars}\n"));
+                }
+            }
+            raw.push_str(&format!(
+                " {} files changed, 5 insertions(+), 2 deletions(-)\n\n",
+                files.len()
+            ));
+        }
+        raw
+    }
+    #[test]
+    fn stat_log_keeps_every_commit_title_and_file() {
+        let raw = stat_log();
+        let view = git_log(&raw);
+        for fact in [
+            "commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "commit cccccccccccccccccccccccccccccccccccccccc",
+            "Author: Bob <Bob@example.test>",
+            "Troisième titre",
+            "Corps de Alice : tableau a | 5 colonnes.",
+            "src/lib.rs | 12",
+            "docs/guide.md | 3",
+            "src/main.rs | 40",
+            "img/logo.png | Bin 0 -> 512 bytes",
+            "2 files changed, 5 insertions(+), 2 deletions(-)",
+        ] {
+            assert!(view.contains(fact), "manque {fact:?} dans\n{view}");
+        }
+        assert!(
+            !view.contains("  tableau a | 5"),
+            "une ligne de corps n'est pas un fichier\n{view}"
+        );
+        assert!(
+            !view.contains("+++"),
+            "les barres de proportion sont retirées\n{view}"
+        );
+        assert!(!view.contains("Co-Authored-By"));
+        assert!(view.len() < raw.len());
+    }
+    #[test]
+    fn plain_log_without_stat_keeps_the_historical_view() {
+        // Comportement historique conservé tel quel : le second commit est replié
+        // dans le décompte « omitted » (le brut reste dans tee).
+        let raw = "commit aaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n\ncommit bbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n";
+        assert_eq!(git_log(raw), "commit aaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n  [+4 lines omitted]");
     }
     #[test]
     fn unicode_truncation_never_splits_a_character() {
