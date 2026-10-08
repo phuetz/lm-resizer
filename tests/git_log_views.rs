@@ -39,7 +39,7 @@ fn commit_file(dir: &Path, file: &str, line: &str, message: &[&str]) {
 
 /// Dépôt de sept commits : corps vide, corps de plusieurs lignes avec pied `Signed-off-by`,
 /// message vide, fusion, auteur accentué.
-fn repository() -> tempfile::TempDir {
+fn repository(with_sentinel: bool) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path();
     git(path, &["init", "-q", "-b", "main"]);
@@ -65,6 +65,16 @@ fn repository() -> tempfile::TempDir {
     );
     commit_file(path, "a.txt", "quatre", &[]);
     commit_file(path, "a.txt", "cinq", &["sujet cinq"]);
+    if with_sentinel {
+        // L'ancienne sentinelle de découpage, légitime dans un message.
+        commit_file(
+            path,
+            "a.txt",
+            "six",
+            &["sujet six", "avant\n---END---\napres\nl1\nl2\nl3\nl4"],
+        );
+        commit_file(path, "a.txt", "sept", &["sujet ---END--- avec suffixe"]);
+    }
     dir
 }
 
@@ -83,23 +93,31 @@ fn lm_resizer(dir: &Path, state: &Path, args: &[&str]) -> std::process::Output {
 
 #[test]
 fn every_git_log_form_keeps_each_commit_visible_or_raw() {
-    let repo = repository();
+    check_every_form(&repository(false), 7);
+}
+
+#[test]
+fn a_sentinel_inside_a_message_never_hides_a_commit() {
+    check_every_form(&repository(true), 9);
+}
+
+fn check_every_form(repo: &tempfile::TempDir, total: usize) {
     let state = tempfile::tempdir().unwrap();
     // (arguments, nombre de commits attendus, la forme montre-t-elle le hash court ?)
     let forms: &[(&[&str], usize, bool)] = &[
-        (&["log"], 7, true),
+        (&["log"], total, true),
         (&["log", "-n", "3"], 3, true),
-        (&["log", "--oneline"], 7, true),
+        (&["log", "--oneline"], total, true),
         (&["log", "-p", "-n", "2"], 2, true),
-        (&["log", "-p"], 7, true),
-        (&["log", "--stat"], 7, true),
+        (&["log", "-p"], total, true),
+        (&["log", "--stat"], total, true),
         (&["log", "--stat", "-n", "3"], 3, true),
-        (&["log", "--pretty=fuller"], 7, true),
-        (&["log", "--pretty=short"], 7, true),
+        (&["log", "--pretty=fuller"], total, true),
+        (&["log", "--pretty=short"], total, true),
         (&["log", "--decorate", "-n", "4"], 4, true),
-        (&["log", "--graph", "--oneline"], 7, true),
-        (&["log", "--format=%h %s"], 7, true),
-        (&["log", "--format=%s"], 7, false),
+        (&["log", "--graph", "--oneline"], total, true),
+        (&["log", "--format=%h %s"], total, true),
+        (&["log", "--format=%s"], total, false),
     ];
     let mut failures = Vec::new();
     for (args, count, has_hash) in forms {

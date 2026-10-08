@@ -266,46 +266,9 @@ fn git_log(raw: &str) -> String {
     if raw.lines().any(|s| s.starts_with("diff --")) {
         return git_diff(raw);
     }
-    if !raw.contains("---END---") {
-        // Une forme sans vue sûre (`--oneline`, `--format`, `--graph`) reste brute.
-        return git_log_records(raw).unwrap_or_else(|| raw.to_owned());
-    }
-    struct Excerpt {
-        rows: Vec<String>,
-        hidden: usize,
-    }
-    let mut excerpts = Vec::new();
-    for record in raw.split("---END---") {
-        let mut excerpt = Excerpt {
-            rows: Vec::new(),
-            hidden: 0,
-        };
-        for row in record.trim().lines() {
-            if excerpt.rows.is_empty() {
-                excerpt.rows.push(clipped(row, 80));
-                continue;
-            }
-            let text = row.trim();
-            if text.is_empty()
-                || ["Signed-off-by:", "Co-authored-by:"]
-                    .iter()
-                    .any(|prefix| text.starts_with(prefix))
-            {
-                continue;
-            }
-            match excerpt.rows.len() {
-                0..=3 => excerpt.rows.push(format!("  {}", clipped(text, 80))),
-                _ => excerpt.hidden += 1,
-            }
-        }
-        if excerpt.hidden != 0 {
-            excerpt
-                .rows
-                .push(format!("  [+{} lines omitted]", excerpt.hidden));
-        }
-        excerpts.extend(excerpt.rows);
-    }
-    excerpts.join("\n")
+    // Aucun séparateur n'est déduit du texte d'un message : seuls les en-têtes `commit <hash>`
+    // découpent, et toute forme sans en-tête (`--oneline`, `--format`, `--graph`) reste brute.
+    git_log_records(raw).unwrap_or_else(|| raw.to_owned())
 }
 
 fn git_status(raw: &str) -> String {
@@ -357,8 +320,14 @@ mod tests {
     }
     #[test]
     fn git_author_stays_with_its_commit() {
-        let raw = "commit aaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n  title\n---END---\ncommit bbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n  autre\n";
-        assert_eq!(git_log(raw), "commit aaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\ncommit bbbb\n  Author: Bob <b@example.test>\n  Date: yesterday\n  autre");
+        let body = "\n    ligne de corps".repeat(12);
+        let raw = format!("commit aaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n{body}\n\ncommit bbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n{body}\n");
+        let view = git_log(&raw);
+        assert!(view.starts_with(
+            "commit aaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n"
+        ));
+        assert!(view
+            .contains("commit bbbb\n  Author: Bob <b@example.test>\n  Date: yesterday\n  autre\n"));
     }
     #[test]
     fn all_git_patch_rows_remain_recoverable() {
@@ -491,11 +460,11 @@ mod tests {
         assert_eq!(git_log(raw), raw);
     }
     #[test]
-    fn sentinel_log_keeps_every_record_past_fifty() {
+    fn old_sentinel_text_in_a_message_is_just_text() {
         let raw: String = (0..80)
             .map(|n| {
                 format!(
-                    "commit {n:040x}\nAuthor: A <a@example.test>\nDate: d\n\n  t{n}\n---END---\n"
+                    "commit {n:040x}\nAuthor: A <a@example.test>\nDate: d\n\n    sujet ---END--- {n}\n\n    avant\n    ---END---\n    apres\n    l1\n    l2\n    l3\n\n"
                 )
             })
             .collect();
@@ -506,6 +475,9 @@ mod tests {
                 .count(),
             80
         );
+        // Une forme sans en-tête avec la même chaîne reste brute.
+        let oneline = "abc1234 sujet ---END--- un\ndef5678 deux\n";
+        assert_eq!(git_log(oneline), oneline);
     }
     #[test]
     fn python_module_and_uv_runners_use_the_pytest_view() {
