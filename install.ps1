@@ -1,7 +1,7 @@
 & {
 $ErrorActionPreference = "Stop"
 
-$version = if ($env:LM_RESIZER_VERSION) { $env:LM_RESIZER_VERSION } else { "0.2.5" }
+$version = if ($env:LM_RESIZER_VERSION) { $env:LM_RESIZER_VERSION } else { "0.2.6" }
 if ($version -notmatch '^[0-9A-Za-z.+-]+$') { throw "Invalid version: $version" }
 if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.InteropServices.Architecture]::X64) {
   throw "Only Windows x86_64 is supported"

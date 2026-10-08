@@ -1,6 +1,6 @@
 # Windows : installation et récupération
 
-Ces commandes de release s’appliquent après publication de la version 0.2.5.
+Ces commandes de release s’appliquent après publication de la version 0.2.6.
 Depuis un checkout, le script local `install.ps1` est utilisable dès que
 l’archive et son fichier `.sha256` sont disponibles.
 
@@ -10,8 +10,8 @@ Si le téléchargement PowerShell échoue avec une erreur Schannel, Node.js peut
 télécharger le script avec son propre moteur TLS. Dans PowerShell ou cmd.exe :
 
 ```text
-node -e "require('https').get('https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.5/install.ps1',{rejectUnauthorized:true},r=>{if(r.statusCode!==200)throw Error('HTTP '+r.statusCode);r.pipe(require('fs').createWriteStream('lm-install-0.2.5.ps1',{flags:'wx'}));}).on('error',e=>{throw e;})"
-powershell -NoProfile -ExecutionPolicy Bypass -File .\lm-install-0.2.5.ps1
+node -e "require('https').get('https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.6/install.ps1',{rejectUnauthorized:true},r=>{if(r.statusCode!==200)throw Error('HTTP '+r.statusCode);r.pipe(require('fs').createWriteStream('lm-install-0.2.6.ps1',{flags:'wx'}));}).on('error',e=>{throw e;})"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\lm-install-0.2.6.ps1
 ```
 
 Le fichier doit être nouveau. Le script essaie HTTPS PowerShell avec TLS 1.2,

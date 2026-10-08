@@ -1431,7 +1431,7 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "lm-resizer"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -1477,7 +1477,7 @@ dependencies = [
 
 [[package]]
 name = "lm-resizer-core"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "aho-corasick",
  "blake3",
@@ -1511,7 +1511,7 @@ dependencies = [
 
 [[package]]
 name = "lm-resizer-wasm"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "lm-resizer-core",
  "serde_json",

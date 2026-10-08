@@ -30,7 +30,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 
 [package]
 name = "lm-resizer"
-version = "0.2.5"
+version = "0.2.6"
 edition.workspace = true
 rust-version = "1.91"
 license.workspace = true

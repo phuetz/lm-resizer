@@ -13,7 +13,7 @@ On a benchmark of 61 command captures it saves a median **25.18%** of tokens wit
 Prebuilt binary for Linux and macOS:
 
 ~~~sh
-curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.5/install.sh -o install.sh && sh install.sh
+curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.6/install.sh -o install.sh && sh install.sh
 export PATH="$HOME/.local/bin:$PATH"
 lm-resizer --version
 ~~~
@@ -21,7 +21,7 @@ lm-resizer --version
 Windows PowerShell:
 
 ~~~powershell
-irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.5/install.ps1 | iex
+irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.6/install.ps1 | iex
 ~~~
 
 The installer verifies the archive's SHA-256 checksum and binary version before placing `lm-resizer` in `~/.local/bin` by default. Prepared platforms are Linux x86_64, macOS x86_64/arm64 and Windows x86_64. The existing v0.2.2 release has no prebuilt archives.
@@ -57,14 +57,14 @@ Reproduce any row with `lm-resizer tool-output --command '<command>' --input <fi
 
 Two other tools are commonly used to shrink command output. Their own published numbers are reproduced in [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md) on the same 61 captures, tokenized with `o200k_base`, raw recovery included:
 
-| 61 command captures, `o200k_base` | LM Resizer 0.2.5 | RTK 0.50.0 | Headroom 0.39.1, general API |
+| 61 command captures, `o200k_base` | LM Resizer 0.2.6 | RTK 0.50.0 | Headroom 0.39.1, general API |
 |---|---:|---:|---:|
 | Median tokens saved, raw recovery included | 25.18% | 15.81% | 0.00% |
 | Mean tokens saved, raw recovery included | 34.68% | 32.61% | 1.91% |
 | Producer exit code preserved | 61/61 | 52/61 | not measured |
 | Byte-exact raw recoverable | 61/61 | partial or none | no |
 
-LM Resizer's replayed median and mean both exceed RTK's on this corpus. Long patches retain the opening diagnostic window and keep the complete original in tee; test assertions and compiler diagnostics stay intact. RTK returns exit code 0 in **9** of the 61 captures where the producer failed; LM Resizer keeps the producer's code. On one capture LM Resizer returns 251 tokens against RTK's 40 because it states the **457** collection errors and lists the first ten failing files, which RTK omits. Headroom compresses LLM API context semantically and has no dedicated CLI tool filters, so its median saving on this command corpus is 0.00%. Strict view equality is 41/61; the twenty differences and their reasons are listed in the benchmark file, and the benchmark's strict checker exits 1 by design. The numbers are replayed with `python3 bench/real/parity_rtk.py`; see [the benchmark](bench/native/README.md).
+LM Resizer's replayed median and mean both exceed RTK's on this corpus. Long patches retain the opening diagnostic window and keep the complete original in tee; test assertions and compiler diagnostics stay intact. RTK returns exit code 0 in **9** of the 61 captures where the producer failed; LM Resizer keeps the producer's code. On one capture LM Resizer returns 251 tokens against RTK's 40 because it states the **457** collection errors and lists the first ten failing files, which RTK omits. Headroom compresses LLM API context semantically and has no dedicated CLI tool filters, so its median saving on this command corpus is 0.00%. Strict view equality is 41/61; the twenty differences and their reasons are listed in the benchmark file, and the benchmark's strict checker exits 1 by design. The numbers are replayed in one step with `bench/real/rejouer.sh` (isolated Python with tiktoken, comparison executable built from the pinned archive, replay in a fresh directory, summary of medians, recoveries and exit codes; network needed the first time, `--sans-headroom` skips the Headroom column); `parity_rtk.py` alone needs its arguments, see [the benchmark](bench/native/README.md).
 
 ## Try it on your project
 
@@ -111,7 +111,7 @@ $teeFiles = lm-resizer tee list --json | ConvertFrom-Json
 if ($teeFiles.files.Count -gt 0) { lm-resizer tee read $teeFiles.files[0].name }
 ~~~
 
-If several files are listed, use the filename or `[raw: …]` identifier for the command you need. `lm-resizer --version` reports `lm-resizer 0.2.5`. JSON recovery metadata uses a marker such as `[raw: e3b0c44298fc]`; the archives have a `.log` extension.
+If several files are listed, use the filename or `[raw: …]` identifier for the command you need. `lm-resizer --version` reports `lm-resizer 0.2.6`. JSON recovery metadata uses a marker such as `[raw: e3b0c44298fc]`; the archives have a `.log` extension.
 
 ## Agent integrations
 
@@ -171,7 +171,7 @@ The build was checked on Linux x86_64 with Rust 1.95.0. Other platforms have not
 Download the public tagged sources (Bash or PowerShell). `lm-resizer` keeps its state in `~/lm-resizer`, so clone from another directory (for example `mkdir -p ~/src && cd ~/src` in Bash, or `New-Item -ItemType Directory -Force "$HOME\src" | Set-Location` in PowerShell) rather than from your home folder:
 
 ~~~sh
-git clone --branch v0.2.5 https://github.com/phuetz/lm-resizer.git
+git clone --branch v0.2.6 https://github.com/phuetz/lm-resizer.git
 cd lm-resizer
 ~~~
 
