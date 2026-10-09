@@ -30,6 +30,8 @@ Lanceurs sans capture, toujours bruts : `rspec`, minitest (`ruby …_test.rb`, `
 | vrai `cargo test` sans drapeau, test en échec qui imprime puis échoue | `native:cargo-test`, 595 → 526 octets | 22/22, la ligne vide du commit sans message est retirée (`%s %H` : tout est gardé) |
 | `npx jest`, `yarn jest`, `vitest run`, `npx vitest run`, `yarn vitest run`, `go test` en texte, mêmes situations | vue brute ou diagnostic gardé | 22/22 |
 
+Ces pertes ne touchent que les formats sans hash (`%s`, `%B`) : dès qu'un hash figure dans les lignes (`%s %H`, hash indenté, hash suivi d'un NUL), la garde de contenu rend la sortie brute (mesuré sur les mêmes transcriptions pytest et jest en échec : 23/23 hashes, `native:git-identity-guard` par `exec`).
+
 Proposition, non appliquée : garder tels quels les blocs `Captured …` de pytest et `console.*` de jest dans leurs vues (aucune capture du banc n'en contient). C'est un changement de vue, pas de règle.
 
 **Visionneuses de journaux, limite documentée** : `docker logs`, `kubectl logs`, `journalctl` et `gh run view --log` affichent la sortie d'autres programmes et gardent leurs vues de journaux ; un `git log` qu'un conteneur ou un service a imprimé peut y perdre des lignes. Le brut se récupère toujours par `lm-resizer tee read <id>`. Restent aussi hors garantie les outils de build et de qualité (`cargo build`, `tsc`, `eslint`, `docker build`) et les filtres TOML d'un projet ou d'un utilisateur, qui choisissent leur commande par expression régulière.

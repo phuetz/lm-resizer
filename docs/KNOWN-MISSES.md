@@ -30,6 +30,8 @@ Runners without capture, always raw: `rspec`, minitest (`ruby …_test.rb`, `rak
 | real `cargo test` without a flag, a test that prints then fails | `native:cargo-test`, 595 → 526 bytes | 22/22, the empty line of the commit without a message is removed (`%s %H`: everything kept) |
 | `npx jest`, `yarn jest`, `vitest run`, `npx vitest run`, `yarn vitest run`, text `go test`, same situations | raw view or diagnostic kept | 22/22 |
 
+These losses only affect hash-free formats (`%s`, `%B`): as soon as a hash appears in the lines (`%s %H`, indented hash, hash followed by a NUL), the content guard returns the raw output (measured on the same failing pytest and jest transcripts: 23/23 hashes, `native:git-identity-guard` through `exec`).
+
 Proposal, not applied: keep pytest's `Captured …` blocks and jest's `console.*` blocks verbatim in their views (no benchmark capture contains them). This is a view change, not a rule change.
 
 **Log viewers, documented limit**: `docker logs`, `kubectl logs`, `journalctl` and `gh run view --log` display the output of other programs and keep their log views; a `git log` printed by a container or a service can lose lines there. The raw output can always be recovered with `lm-resizer tee read <id>`. Build and quality tools (`cargo build`, `tsc`, `eslint`, `docker build`) and project or user TOML filters, which choose their command by regular expression, also remain outside the guarantee.
