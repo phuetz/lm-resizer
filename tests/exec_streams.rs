@@ -85,15 +85,29 @@ fn legacy_filter_cannot_discard_the_stderr_boundary() {
     let npm = state.path().join("npm");
     std::fs::write(&npm, "#!/bin/sh\nprintf 'warning: preserve this diagnostic\\ncontext 1\\ncontext 2\\ncontext 3\\nstdout detail\\n'\nprintf 'separate stream detail\\n' >&2\n").unwrap();
     std::fs::set_permissions(&npm, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
-        .env("LM_RESIZER_STATE_DIR", state.path().join("state"))
-        .env("LM_RESIZER_NO_TOML_FILTERS", "1")
-        .args(["exec", "--raw-on-failure", "--json", "--"])
-        .arg(npm)
-        .args(["run", "build"])
-        .output()
-        .unwrap();
-    assert!(out.status.success());
+    // Un script écrit à l'instant peut ne pas démarrer (« text file busy », ETXTBSY) quand un test
+    // parallèle fait un fork : seul ce cas est rejoué, tout autre échec est rapporté tel quel.
+    let mut out = None;
+    for _ in 0..5 {
+        let attempt = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+            .env("LM_RESIZER_STATE_DIR", state.path().join("state"))
+            .env("LM_RESIZER_NO_TOML_FILTERS", "1")
+            .args(["exec", "--raw-on-failure", "--json", "--"])
+            .arg(&npm)
+            .args(["run", "build"])
+            .output()
+            .unwrap();
+        let busy = String::from_utf8_lossy(&attempt.stdout).contains("ext file busy")
+            || String::from_utf8_lossy(&attempt.stderr).contains("ext file busy");
+        let done = attempt.status.success() || !busy;
+        out = Some(attempt);
+        if done {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let out = out.unwrap();
+    assert!(out.status.success(), "{out:?}");
     let report: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(report["filter"], "native:packages");
     assert!(report["output"]
