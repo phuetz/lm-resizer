@@ -14,6 +14,8 @@ Filter migration is still in progress. Earlier measurements do not describe this
 
 Limits: a command outside this list that asks a question (a script, a test that reads its input, `terraform plan` or `init` missing a variable) is still wrapped and its prompt only shows at the end; so is a foreground server started by `docker run` without `-i`/`-t`. `lm-resizer exec --stream` shows the output live.
 
+**`exec` killed abruptly**: on Linux the child started by `exec` receives SIGKILL when `lm-resizer` dies, even through `kill -9` (`PR_SET_PDEATHSIG`). Its own children are not covered: after `kill -9` of `exec -- sh -c 'sleep 40'`, `sh` dies and `sleep` remains (measured on 9 October). Nothing equivalent on macOS or Windows: the child survives an abrupt stop there.
+
 ## `git log`: what stays raw
 
 **Rule, closed and read from `argv` only**: a view that removes or rewrites lines applies only to a producer named by `argv` whose output format is established. Everything else comes out **raw, byte for byte** (only the `[FAIL] Command failed (exit code: N)` header is added for a non-zero code). No rule recognises a `git log` from the content of its output.

@@ -147,8 +147,34 @@ pub fn build_command(program: &std::path::Path, args: &[String]) -> Command {
         }
     }
     command.args(args);
+    die_with_parent(&mut command);
     command
 }
+
+/// Linux : l'enfant reçoit SIGKILL quand `lm-resizer` meurt, même par `kill -9`, au lieu de lui
+/// survivre rattaché à un autre parent (`PR_SET_PDEATHSIG`). Le signal part à la mort du fil qui a
+/// lancé l'enfant : chaque appelant attend l'enfant sur ce fil. Les petits-enfants ne sont pas
+/// couverts (`sh -c 'sleep 40'` : `sh` meurt, `sleep` reste).
+#[cfg(target_os = "linux")]
+fn die_with_parent(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    let parent = rustix::process::getpid();
+    // SAFETY: entre fork et exec, l'enfant n'appelle que prctl et getppid, deux appels système
+    // sans allocation ni verrou ; l'erreur est un code brut (`ESRCH`), sans allocation non plus.
+    unsafe {
+        command.pre_exec(move || {
+            rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::KILL))?;
+            // Le parent est mort entre fork et prctl : le signal ne viendra plus.
+            if rustix::process::getppid() != Some(parent) {
+                return Err(rustix::io::Errno::SRCH.into());
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn die_with_parent(_command: &mut Command) {}
 
 pub fn run(command: &[String]) -> anyhow::Result<Capture> {
     let (program, args) = command

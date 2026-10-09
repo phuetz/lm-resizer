@@ -14,6 +14,8 @@ La migration des filtres est en cours. Les mesures antérieures ne décrivent pa
 
 Limites : une commande hors de cette liste qui pose une question (un script, un test qui lit l'entrée, `terraform plan` ou `init` à qui il manque une variable) reste enveloppée et son invite n'apparaît qu'à la fin ; `docker run` sans `-i`/`-t` d'un serveur au premier plan aussi. `lm-resizer exec --stream` montre la sortie en direct.
 
+**Arrêt brutal d'`exec`** : sous Linux, l'enfant lancé par `exec` reçoit SIGKILL quand `lm-resizer` meurt, même par `kill -9` (`PR_SET_PDEATHSIG`). Ses propres enfants ne sont pas couverts : après `kill -9` d'`exec -- sh -c 'sleep 40'`, `sh` meurt et `sleep` reste (mesuré le 9 octobre). Rien de tel sous macOS ni Windows : l'enfant y survit à un arrêt brutal.
+
 ## `git log` : ce qui reste brut
 
 **Règle, fermée et lue dans l'`argv` seulement** : une vue qui retire ou réécrit des lignes ne s'applique qu'à un producteur que l'`argv` nomme et dont le format de sortie est établi. Tout le reste sort **brut, octet pour octet** (seul l'en-tête `[FAIL] Command failed (exit code: N)` s'ajoute quand le code est non nul). Aucune règle ne reconnaît un `git log` par le contenu de la sortie.
