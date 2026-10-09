@@ -524,3 +524,33 @@ fn mcp_tool_output_keeps_a_successful_launcher_form_raw() {
         assert_eq!(report["output"], raw.as_str(), "{id}");
     }
 }
+
+/// Contre-audit Grok du 9 octobre : en échec, la vue `cargo test` ne gardait que les blocs
+/// `---- … stdout ----` et le bilan ; le CVE, le `Permission denied`, un `warning:` et un `error:`
+/// écrits hors des blocs disparaissaient. La vue ne retire plus que les lignes de grammaire connue
+/// sans information (tests réussis, `running N tests`, lignes d'état de cargo, listes `failures:`).
+#[test]
+fn a_failed_cargo_test_keeps_every_line_outside_the_known_grammar() {
+    let dir = tempfile::tempdir().unwrap();
+    let raw = "   Compiling leak v0.1.0 (/tmp/leak)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s\n     Running unittests src/main.rs (target/debug/deps/leak-1)\n\nrunning 2 tests\ntest ok ... ok\ntest leak ... FAILED\nPermission denied: cannot read /home/alice/.ssh/id_rsa\nCVE-2024-99999: token sk-live-SECRET left in target/debug\nwarning: something\nerror: boom outside the block\n\nfailures:\n\n---- leak stdout ----\nassertion left == right failed\n\nfailures:\n    leak\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\nerror: test failed, to rerun pass `--bin leak`\n";
+    fake(dir.path(), "cargo", raw, 101);
+    let (out, report) = exec_json(dir.path(), &["cargo", "test"]);
+    assert_eq!(out.status.code(), Some(101));
+    assert_eq!(report["filter"], "native:cargo-test");
+    let view = report["output"].as_str().unwrap();
+    for kept in [
+        "Permission denied: cannot read /home/alice/.ssh/id_rsa",
+        "CVE-2024-99999: token sk-live-SECRET left in target/debug",
+        "warning: something",
+        "error: boom outside the block",
+        "1. ---- leak stdout ----",
+        "assertion left == right failed",
+        "test result: FAILED. 1 passed; 1 failed",
+        "error: test failed, to rerun pass `--bin leak`",
+    ] {
+        assert!(view.contains(kept), "{kept} absent :\n{view}");
+    }
+    for dropped in ["Compiling leak", "test ok ... ok", "running 2 tests"] {
+        assert!(!view.contains(dropped), "{dropped} gardé :\n{view}");
+    }
+}

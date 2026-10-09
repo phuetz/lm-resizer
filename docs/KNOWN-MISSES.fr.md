@@ -54,12 +54,19 @@ Une option d'enveloppe inconnue (`npx -c '<ligne>'`, `uv run --nouvelle-option p
 
 | Vue | Gardé | Perdu |
 |---|---|---|
-| `native:cargo-test` | blocs `---- nom stdout ----` sans leurs lignes vides, noms de la liste `failures:` qu'aucun bloc ne couvre, lignes `test result:` et `error: test failed…` | toute autre ligne, dont les quatre ajoutées et les `test … FAILED` |
+| `native:cargo-test` (depuis le 10 octobre) | blocs `---- nom stdout ----` sans leurs lignes vides, noms de la liste `failures:` qu'aucun bloc ne couvre, `test result:`, `error: test failed…`, et **toute ligne hors des blocs qui n'est pas de grammaire connue**, dans l'ordre, en tête (les quatre ajoutées) | seulement la grammaire connue : lignes vides, `running N tests`, `test … ok|ignored|FAILED`, lignes d'état de cargo (`Compiling`, `Finished`, `Running`, `Doc-tests`…), en-têtes `failures:` et leur liste, séparateur `[stderr]` |
 | `native:pytest` | bilan ; par échec, l'en-tête du bloc de la section `FAILURES`, trois lignes au plus (`>`, `E`, `assert`, `error`, `.py:`) et la raison de `FAILED … - raison` | toute ligne hors de la section `FAILURES`, dont les quatre ajoutées, et le reste de chaque bloc |
 | `native:js-test` (jest en texte) | ligne `Tests:`, lignes `●`, `Expected`, `Received` | le reste, dont les quatre ajoutées et `FAIL  fichier` |
 | `cargo-nextest`, `vitest run`, `dotnet test`, `gradle test` (garde de diagnostic), `go test -json` (brut) | les quatre ajoutées | rien de ce qui a été ajouté |
 
-Le brut reste dans tee (`lm-resizer tee read <id>`) ; `exec --raw-on-failure` rend tout échec brut.
+Les pertes de `native:pytest` et `native:js-test` ne sont pas corrigées : leurs vues découpent la sortie par sections et par blocs, et garder les lignes inconnues demande une autre vue (la section `Captured stdout call` d'un test en échec, par exemple, est dans le bloc et coupée à trois lignes). Commandes exactes qui reproduisent la perte :
+
+```sh
+printf '%s\n' '=== test session starts ===' 'collected 2 items' 'CVE-2024-99999: token sk-live-SECRET' '' 'tests/test_a.py .F [100%]' '' '=== FAILURES ===' '___ test_b ___' 'E   assert 1 == 2' '=== short test summary info ===' 'FAILED tests/test_a.py::test_b - assert 1 == 2' '=== 1 failed, 1 passed in 0.01s ===' | lm-resizer tool-output --command 'pytest' --exit-code 1
+printf '%s\n' ' FAIL  src/a.test.js' 'CVE-2024-99999: token sk-live-SECRET' '  ● sums › adds' '    Expected: 3' '    Received: 4' 'Tests:       1 failed, 1 total' | lm-resizer tool-output --command 'jest' --exit-code 1
+```
+
+La ligne CVE n'est pas dans la vue. Le brut reste dans tee (`lm-resizer tee read <id>`) ; `exec --raw-on-failure` rend tout échec brut.
 
 **Hors de la règle, mesuré** (sortie qu'un test **en échec** fait afficher sans aucun drapeau ; transcriptions passées par `tool-output`, dépôt de 23 commits, `git log --format=%s` imprimé par le test) :
 

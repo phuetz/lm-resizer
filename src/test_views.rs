@@ -682,8 +682,11 @@ pub fn cargo(raw: &str) -> String {
         return raw.into();
     }
     // Un échec = un bloc `---- nom stdout ----` (message, valeurs, position, rien n'est retouché) ;
-    // les noms de la liste finale `failures:` qu'aucun bloc ne couvre sont listés tels quels.
-    let (details, names) = cargo_failures(raw);
+    // les noms de la liste finale `failures:` qu'aucun bloc ne couvre sont listés tels quels. Toute
+    // ligne hors des blocs qui n'est pas de grammaire connue (avertissement, sortie d'un processus
+    // enfant) est gardée, dans l'ordre, en tête de la vue.
+    let (details, names, others) = cargo_failures(raw);
+    let others: String = others.iter().map(|line| format!("{line}\n")).collect();
     let mut blocks: Vec<String> = details.iter().map(|block| block.join("\n")).collect();
     for name in &names {
         let covered = details.iter().any(|block| {
@@ -728,7 +731,7 @@ pub fn cargo(raw: &str) -> String {
         } else {
             String::new()
         };
-        return format!("{passed} passed, 0 failed{extra}{suites} ({duration:.2}s)");
+        return format!("{others}{passed} passed, 0 failed{extra}{suites} ({duration:.2}s)");
     }
     let (visible, overflow) = blocks.split_at(blocks.len().min(10));
     let numbered: String = visible
@@ -740,7 +743,10 @@ pub fn cargo(raw: &str) -> String {
         0 => String::new(),
         n => format!("\n… +{n} more failures\n"),
     };
-    let mut out = format!("FAILURES ({}):\n{numbered}{trailer}\n", blocks.len());
+    let mut out = format!(
+        "{others}FAILURES ({}):\n{numbered}{trailer}\n",
+        blocks.len()
+    );
     // Chaque bilan de suite une seule fois, puis l'indication de relance de cargo, dans l'ordre.
     for line in raw.lines() {
         if line.starts_with("test result:") || line.starts_with("error: test failed") {
@@ -751,41 +757,89 @@ pub fn cargo(raw: &str) -> String {
     out.trim_end().into()
 }
 
-/// Blocs `---- nom stdout ----` (sans lignes vides) et noms de la liste `failures:` d'une sortie
-/// `cargo test`, toutes suites confondues.
-fn cargo_failures(raw: &str) -> (Vec<Vec<&str>>, Vec<&str>) {
+/// Blocs `---- nom stdout ----` (sans lignes vides), noms de la liste `failures:`, et lignes hors
+/// des blocs qui ne sont pas de grammaire connue, d'une sortie `cargo test`, toutes suites
+/// confondues. Grammaire connue, retirée : lignes vides, séparateur `[stderr]` de la capture,
+/// `running N tests`, `test … ok|ignored|FAILED`, lignes d'état de cargo (`Compiling`, `Finished`,
+/// `Running`, `Doc-tests`…), en-têtes `failures:` et leur liste, `test result:` et
+/// `error: test failed` (repris à la fin de la vue).
+fn cargo_failures(raw: &str) -> (Vec<Vec<&str>>, Vec<&str>, Vec<&str>) {
     #[derive(PartialEq)]
     enum Zone {
         Outside,
         Detail,
         List,
     }
+    const STATUS: [&str; 12] = [
+        "Compiling ",
+        "Finished ",
+        "Running ",
+        "Doc-tests ",
+        "Blocking ",
+        "Downloaded ",
+        "Downloading ",
+        "Updating ",
+        "Locking ",
+        "Adding ",
+        "Fresh ",
+        "Checking ",
+    ];
+    let known = |line: &str| {
+        let row = line.trim_start();
+        line.trim().is_empty()
+            // Séparateur des deux flux inséré par la capture de `lm-resizer`.
+            || line == "[stderr]"
+            || line.starts_with("test result:")
+            || line.starts_with("error: test failed")
+            || (line.starts_with("running ")
+                && (line.ends_with(" test") || line.ends_with(" tests")))
+            || (line.starts_with("test ")
+                && (line.contains(" ... ")
+                    || [" ok", " ignored", " FAILED"]
+                        .iter()
+                        .any(|end| line.ends_with(end))))
+            || (line.starts_with(' ') && STATUS.iter().any(|verb| row.starts_with(verb)))
+    };
     let mut details: Vec<Vec<&str>> = Vec::new();
     let mut names = Vec::new();
+    let mut others = Vec::new();
     let mut zone = Zone::Outside;
     for line in raw.lines() {
         if line.starts_with("test result:") {
             zone = Zone::Outside;
-        } else if line == "failures:" {
+            continue;
+        }
+        if line == "failures:" {
             zone = Zone::List;
-        } else if line.starts_with("---- ") && line.ends_with(" ----") {
+            continue;
+        }
+        if line.starts_with("---- ") && line.ends_with(" ----") {
             details.push(vec![line]);
             zone = Zone::Detail;
-        } else if line.trim().is_empty() {
             continue;
-        } else if zone == Zone::Detail {
-            if let Some(block) = details.last_mut() {
-                block.push(line);
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        match zone {
+            Zone::Detail => {
+                if let Some(block) = details.last_mut() {
+                    block.push(line);
+                }
+                continue;
             }
-        } else if zone == Zone::List {
-            if line.starts_with("    ") {
+            Zone::List if line.starts_with("    ") => {
                 names.push(line);
-            } else {
-                zone = Zone::Outside;
+                continue;
             }
+            Zone::List => zone = Zone::Outside,
+            Zone::Outside => {}
+        }
+        if !known(line) {
+            others.push(line);
         }
     }
-    (details, names)
+    (details, names, others)
 }
 
 pub fn pytest(raw: &str) -> String {
@@ -1076,6 +1130,20 @@ pub fn go(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_failed_cargo_view_keeps_unknown_lines_but_not_the_capture_separator() {
+        let raw = "running 1 test\ntest b ... FAILED\nCVE-2024-99999: secret\n\nfailures:\n\n---- b stdout ----\nboom\n\nfailures:\n    b\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\n[stderr]\nerror: test failed, to rerun pass `--lib`\n";
+        let view = cargo(raw);
+        assert!(
+            view.starts_with("CVE-2024-99999: secret\nFAILURES (1):\n"),
+            "{view}"
+        );
+        assert!(!view.contains("[stderr]"), "{view}");
+        assert!(
+            view.ends_with("error: test failed, to rerun pass `--lib`"),
+            "{view}"
+        );
+    }
     #[test]
     fn explicit_test_output_requests_are_read_from_argv_only() {
         let words =

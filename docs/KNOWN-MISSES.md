@@ -54,12 +54,19 @@ An unknown wrapper option (`npx -c '<line>'`, `uv run --new-option pytest`) make
 
 | View | Kept | Lost |
 |---|---|---|
-| `native:cargo-test` | `---- name stdout ----` blocks without their blank lines, names of the `failures:` list that no block covers, `test result:` and `error: test failed…` lines | any other line, including the four added ones and `test … FAILED` |
+| `native:cargo-test` (since 10 October) | `---- name stdout ----` blocks without their blank lines, names of the `failures:` list that no block covers, `test result:`, `error: test failed…`, and **every line outside the blocks that is not of known grammar**, in order, at the top (the four added ones) | only the known grammar: blank lines, `running N tests`, `test … ok|ignored|FAILED`, cargo status lines (`Compiling`, `Finished`, `Running`, `Doc-tests`…), `failures:` headers and their list, the `[stderr]` separator |
 | `native:pytest` | summary; per failure, the block header of the `FAILURES` section, at most three lines (`>`, `E`, `assert`, `error`, `.py:`) and the reason of `FAILED … - reason` | any line outside the `FAILURES` section, including the four added ones, and the rest of each block |
 | `native:js-test` (jest text) | `Tests:` line, `●`, `Expected`, `Received` lines | the rest, including the four added ones and `FAIL  file` |
 | `cargo-nextest`, `vitest run`, `dotnet test`, `gradle test` (diagnostic guard), `go test -json` (raw) | the four added lines | nothing that was added |
 
-The raw output stays in tee (`lm-resizer tee read <id>`); `exec --raw-on-failure` returns every failure raw.
+The `native:pytest` and `native:js-test` losses are not fixed: those views split the output by sections and blocks, and keeping unknown lines needs another view (the `Captured stdout call` section of a failing test, for instance, is inside the block and cut at three lines). Exact commands reproducing the loss:
+
+```sh
+printf '%s\n' '=== test session starts ===' 'collected 2 items' 'CVE-2024-99999: token sk-live-SECRET' '' 'tests/test_a.py .F [100%]' '' '=== FAILURES ===' '___ test_b ___' 'E   assert 1 == 2' '=== short test summary info ===' 'FAILED tests/test_a.py::test_b - assert 1 == 2' '=== 1 failed, 1 passed in 0.01s ===' | lm-resizer tool-output --command 'pytest' --exit-code 1
+printf '%s\n' ' FAIL  src/a.test.js' 'CVE-2024-99999: token sk-live-SECRET' '  ● sums › adds' '    Expected: 3' '    Received: 4' 'Tests:       1 failed, 1 total' | lm-resizer tool-output --command 'jest' --exit-code 1
+```
+
+The CVE line is not in the view. The raw output stays in tee (`lm-resizer tee read <id>`); `exec --raw-on-failure` returns every failure raw.
 
 **Outside the rule, measured** (output that a **failing** test causes to be displayed without any flag; transcripts passed through `tool-output`, 23-commit repository, `git log --format=%s` printed by the test):
 
