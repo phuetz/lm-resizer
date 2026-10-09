@@ -100,10 +100,7 @@ pub fn filter(command: &[String], raw: &str) -> Option<(String, String)> {
     let sub = command.get(1).map(String::as_str).unwrap_or("");
     let (kind, candidate) = match (name.as_str(), sub) {
         // Appelant sans lecture de la configuration (tube, test) : jamais de vue compressée.
-        ("git", "log") => (
-            "git-log",
-            git_log(raw, log_requests_patch(&command[2..]), false),
-        ),
+        ("git", "log") => ("git-log", git_log(raw, false)),
         ("git", "diff") => ("git-diff", git_diff(raw)),
         ("git", "status") => ("git-status", git_status(raw)),
         ("git", "show") => (
@@ -306,7 +303,7 @@ pub fn lost_git_identity(raw: &str, output: &str) -> bool {
 /// connu par la commande : chaque en-tête `commit <hash>` est suivi de la disposition par défaut, des
 /// lignes `Merge:`, `Author:` et `Date:` seules jusqu'à la ligne vide. Un format qui imite un en-tête
 /// (`commit %T%n    …`) ne l'a pas. Ce contrôle ne remplace pas le contrat de la commande (voir
-/// [`git_log_default_format`]) : il en réduit seulement les trous.
+/// [`git_log_compact_allowed`]) : il en réduit seulement les trous.
 fn has_default_layout(raw: &str) -> bool {
     let rows: Vec<&str> = raw.lines().collect();
     let mut headers = 0usize;
@@ -352,6 +349,8 @@ fn git_log_records(raw: &str) -> Option<String> {
         .find(|row| !row.trim().is_empty())
         .is_some_and(is_commit_header)
         || !has_default_layout(raw)
+        // Un patch en colonne 0 a des lignes de contexte indentées comme un message : brut.
+        || raw.lines().any(|row| row.starts_with("diff --"))
     {
         return None;
     }
@@ -405,94 +404,77 @@ fn git_log_records(raw: &str) -> Option<String> {
     }
     flush(&mut out, &mut hidden);
     let view = out.join("\n");
-    // Une vue ne perd jamais un commit et ne dépasse jamais le brut.
-    let commits = |text: &str| text.lines().filter(|row| is_commit_header(row)).count();
-    (commits(&view) == commits(raw)
+    // Une vue ne perd jamais un commit et ne dépasse jamais le brut : chaque en-tête du brut se
+    // retrouve, dans le même ordre et avec le même hash, dans la vue.
+    let hashes = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter(|row| is_commit_header(row))
+            .filter_map(|row| row.split_whitespace().nth(1).map(str::to_owned))
+            .collect()
+    };
+    (hashes(&view) == hashes(raw)
         && crate::token_metrics::TokenCounts::measure(raw, &view).tokens_saved > 0)
         .then_some(view)
 }
 
-/// Les options de `git log` qui produisent un patch (`-p`, `-u`, `-U<n>`, `--patch…`, `--cc`, `-c`,
-/// `-L`, `--word-diff…`), sauf annulation par `--no-patch` / `-s` ensuite. `args` suit `log`.
-fn log_requests_patch(args: &[String]) -> bool {
-    let mut patch = false;
-    for arg in args {
-        let arg = arg.as_str();
-        if arg == "--" {
-            break;
-        }
-        if matches!(arg, "-s" | "--no-patch") {
-            patch = false;
-        } else if matches!(arg, "-p" | "-u" | "-c" | "--cc" | "--combined")
-            || arg.starts_with("-U")
-            || arg.starts_with("-L")
-            || arg.starts_with("--unified")
-            || arg.starts_with("--word-diff")
-            || arg.starts_with("--color-words")
-            || (arg.len() >= 5 && arg.starts_with("--") && "--patch-with-stat".starts_with(arg))
-            || arg.starts_with("--patch")
-        {
-            patch = true;
-        }
-    }
-    patch
-}
-
-/// Vue d'un `git log` dont la sortie contient des patchs : jamais tronquée, et rendue brute si le
-/// codec ne se déplie pas en l'original exact.
-fn git_log_patch(raw: &str) -> String {
-    let view = git_diff_view(raw, false);
-    if view.starts_with("Patch v") && patch_view::expand(&view).ok().as_deref() != Some(raw) {
-        return raw.to_owned();
-    }
-    view
-}
-
 /// Vue d'un `git log` exécuté : `command` est la ligne complète, options globales comprises.
-/// La vue compressée par commit ne s'applique qu'au format par défaut (voir
-/// [`git_log_default_format`]) ; toute autre sortie est rendue brute, sauf un patch demandé, dont
-/// le codec se déplie en l'original exact.
+/// La vue compacte par commit ne s'applique qu'à un appel direct simple (voir
+/// [`git_log_compact_allowed`]) dont la sortie a le format par défaut ; toute autre forme est rendue
+/// brute, octet pour octet.
 ///
 /// `executed` : la commande est lancée par `lm-resizer` lui-même (`exec`, `lm-resizer git log`). Un
 /// texte déjà produit (`pipe`, `tool-output`) n'a pas de ligne de commande fiable : jamais de vue
-/// compressée, quel que soit son contenu.
+/// compacte, quel que soit son contenu.
 pub fn git_log_filter(command: &[String], raw: &str, executed: bool) -> (String, String) {
-    let patch = git_without_globals(command)
-        .is_some_and(|plain| log_requests_patch(plain.get(2..).unwrap_or_default()));
     (
         "native:git-log".to_string(),
-        git_log(raw, patch, executed && git_log_default_format(command)),
+        git_log(raw, executed && git_log_compact_allowed(command)),
     )
 }
 
-/// `true` seulement si la sortie de `git log` a le format par défaut, que rien ne peut changer :
-/// ni `--format`/`--pretty`/`--oneline`/`-z` dans la commande, ni option globale `-c` ou
-/// `--config-env`, ni aucune clé `format.*` ou `log.*` dans la configuration de Git. La
-/// configuration se lit avec `git config --get-regexp`, jamais en analysant le texte de la sortie.
-/// Dans le doute (git absent, configuration illisible) : `false`, donc le brut.
-pub fn git_log_default_format(command: &[String]) -> bool {
-    let Some((globals, rest)) = git_split_globals(command) else {
-        return false;
-    };
-    if rest.first().map(String::as_str) != Some("log") {
-        return false;
-    }
-    if globals
-        .iter()
-        .any(|g| g == "-c" || g == "--config-env" || g.starts_with("--config-env="))
+/// Liste blanche fermée. `true` seulement pour `git [-C <dossier>]… log` suivi exclusivement de
+/// `--decorate`, `--all`, `-n <N>`, `-<N>`, `--oneline`, `--graph`, de révisions ou plages (mots
+/// sans `-` initial) et, après `--`, de chemins ; et seulement si la configuration de Git ne contient
+/// aucune clé `format.*` ou `log.*`. Toute autre option (`--format`, `--pretty`, `--stat`, `-p`,
+/// `--author`, `--no-pager`, `-c`…) ou tout autre programme devant `git` (`env`, `timeout`, shell,
+/// script) : `false`, donc le brut. La configuration se lit avec `git config --get-regexp`, jamais
+/// en analysant le texte de la sortie. Dans le doute (git absent, configuration illisible) : `false`.
+///
+/// `--oneline` et `--graph` sont admis mais ne produisent pas la disposition par défaut : la vue les
+/// rend bruts (voir [`git_log_records`]).
+pub fn git_log_compact_allowed(command: &[String]) -> bool {
+    if command
+        .first()
+        .is_none_or(|program| super::command_basename(program) != "git")
     {
         return false;
     }
-    let chooses_a_layout = rest[1..]
-        .iter()
-        .take_while(|arg| arg.as_str() != "--")
-        .any(|arg| {
-            matches!(arg.as_str(), "--oneline" | "-z" | "--graph")
-                || arg.starts_with("--format")
-                || arg.starts_with("--pretty")
-        });
-    if chooses_a_layout {
+    let mut rest = &command[1..];
+    let mut globals: Vec<String> = Vec::new();
+    while rest.first().map(String::as_str) == Some("-C") {
+        let Some(dir) = rest.get(1) else {
+            return false;
+        };
+        globals.extend(["-C".to_string(), dir.clone()]);
+        rest = &rest[2..];
+    }
+    if rest.first().map(String::as_str) != Some("log") {
         return false;
+    }
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    let mut args = rest[1..].iter();
+    while let Some(arg) = args.next() {
+        let arg = arg.as_str();
+        let allowed = match arg {
+            "--" => break,
+            "--decorate" | "--all" | "--oneline" | "--graph" => true,
+            "-n" => args.next().is_some_and(|n| digits(n)),
+            _ if arg.starts_with('-') => digits(&arg[1..]),
+            _ => true,
+        };
+        if !allowed {
+            return false;
+        }
     }
     // Code 1 = aucune clé ne correspond ; 0 = au moins une ; tout autre résultat = inconnu.
     std::process::Command::new(&command[0])
@@ -507,28 +489,13 @@ pub fn git_log_default_format(command: &[String]) -> bool {
         == Some(1)
 }
 
-fn git_log(raw: &str, patch_requested: bool, compact: bool) -> String {
+fn git_log(raw: &str, compact: bool) -> String {
     // Un séparateur NUL (`-z`) commence les en-têtes suivants par `\0` : aucun découpage sûr.
-    if raw.contains('\0') {
-        return raw.to_owned();
-    }
-    // Un patch est un type d'enregistrement distinct, jamais de la prose de message. Le texte d'un
-    // message ne le décide pas : un message `diff --git …` dans `--format=%B` est de la prose.
-    // Il faut que la commande demande un patch, ou que la sortie ait le format ordinaire (message
-    // indenté, donc un `diff --` en colonne 0 est un vrai patch).
-    let has_patch_row = raw.lines().any(|s| s.starts_with("diff --"));
-    let headered = raw
-        .lines()
-        .find(|row| !row.trim().is_empty())
-        .is_some_and(is_commit_header);
-    if has_patch_row && (patch_requested || (compact && headered)) {
-        return git_log_patch(raw);
-    }
-    if !compact {
+    if !compact || raw.contains('\0') {
         return raw.to_owned();
     }
     // Aucun séparateur n'est déduit du texte d'un message : seuls les en-têtes `commit <hash>`
-    // découpent, et toute forme sans en-tête (`--oneline`, `--format`, `--graph`) reste brute.
+    // découpent, et toute forme sans en-tête (`--oneline`, `--graph`) reste brute.
     git_log_records(raw).unwrap_or_else(|| raw.to_owned())
 }
 
@@ -583,7 +550,7 @@ mod tests {
     fn git_author_stays_with_its_commit() {
         let body = "\n    ligne de corps".repeat(12);
         let raw = format!("commit aaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n{body}\n\ncommit bbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n{body}\n");
-        let view = git_log(&raw, false, true);
+        let view = git_log(&raw, true);
         assert!(view.starts_with(
             "commit aaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n"
         ));
@@ -644,7 +611,7 @@ mod tests {
     #[test]
     fn stat_log_keeps_every_commit_title_and_file() {
         let raw = stat_log();
-        let view = git_log(&raw, false, true);
+        let view = git_log(&raw, true);
         for fact in [
             "commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -674,7 +641,7 @@ mod tests {
     #[test]
     fn body_line_resembling_a_stat_summary_stays_message_text() {
         let raw = "commit aaaaaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    refactor\n\n    5 files changed in this refactor\n\ncommit bbbbbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n";
-        let view = git_log(raw, false, true);
+        let view = git_log(raw, true);
         for fact in [
             "commit aaaaaaa",
             "refactor",
@@ -690,7 +657,7 @@ mod tests {
     fn plain_log_shows_every_commit() {
         let raw = "commit aaaaaaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n\n    ligne 1\n    ligne 2\n    ligne 3\n    ligne 4\n    ligne 5\n\n    Signed-off-by: A <a@example.test>\n\ncommit bbbbbbbb (HEAD -> main)\nMerge: aaaaaaa ccccccc\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    fusion\n\ncommit cccccccc\nAuthor: Zoé <z@example.test>\nDate: before\n\n";
         assert_eq!(
-            git_log(raw, false, true),
+            git_log(raw, true),
             "commit aaaaaaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n  ligne 1\n  ligne 2\n  ligne 3\n  [+2 message lines omitted]\ncommit bbbbbbbb (HEAD -> main)\n  Merge: aaaaaaa ccccccc\n  Author: Bob <b@example.test>\n  Date: yesterday\n  fusion\ncommit cccccccc\n  Author: Zoé <z@example.test>\n  Date: before"
         );
     }
@@ -702,13 +669,13 @@ mod tests {
             "sujet cinq\nfusion\ntrois\n",
             "From aac6d6244a36c451c1361bc2e13918afadc3308a Mon Sep 17 00:00:00 2001\nSubject: x\n",
         ] {
-            assert_eq!(git_log(raw, false, true), raw);
+            assert_eq!(git_log(raw, true), raw);
         }
     }
     #[test]
     fn abbreviated_commit_headers_are_recognised() {
         let raw = format!("commit abcd\nAuthor: A <a@example.test>\nDate: d\n\n    t\n{}\ncommit ef01\nAuthor: B <b@example.test>\nDate: d\n\n    u\n", "\n    corps".repeat(40));
-        let view = git_log(&raw, false, true);
+        let view = git_log(&raw, true);
         assert!(
             view.contains("commit abcd") && view.contains("commit ef01"),
             "{view}"
@@ -718,7 +685,7 @@ mod tests {
     #[test]
     fn a_view_that_would_grow_the_log_is_returned_raw() {
         let raw = "commit aaaaaaa\nAuthor: A <a@example.test>\nDate: d\n\n    t\n";
-        assert_eq!(git_log(raw, false, true), raw);
+        assert_eq!(git_log(raw, true), raw);
     }
     #[test]
     fn old_sentinel_text_in_a_message_is_just_text() {
@@ -729,7 +696,7 @@ mod tests {
                 )
             })
             .collect();
-        let view = git_log(&raw, false, true);
+        let view = git_log(&raw, true);
         assert_eq!(
             view.lines()
                 .filter(|row| row.starts_with("commit "))
@@ -738,7 +705,7 @@ mod tests {
         );
         // Une forme sans en-tête avec la même chaîne reste brute.
         let oneline = "abc1234 sujet ---END--- un\ndef5678 deux\n";
-        assert_eq!(git_log(oneline, false, true), oneline);
+        assert_eq!(git_log(oneline, true), oneline);
     }
     fn words(line: &str) -> Vec<String> {
         line.split_whitespace().map(str::to_string).collect()
@@ -763,50 +730,32 @@ mod tests {
         }
     }
     #[test]
-    fn only_patch_options_request_a_patch() {
-        for yes in [
-            "-p",
-            "-u",
-            "-U5",
-            "--patch",
-            "--patch-with-stat",
-            "--pat",
-            "--cc",
-            "-c",
-            "-L1,5:f",
-            "--word-diff",
-            "-n 2 -p",
-        ] {
-            assert!(log_requests_patch(&words(yes)), "{yes}");
-        }
-        for no in [
-            "--oneline",
-            "--stat",
-            "--format=%B",
-            "-n 3",
-            "-p --no-patch",
-            "-p -s",
-            "--pretty=fuller",
-            "--graph",
-        ] {
-            assert!(!log_requests_patch(&words(no)), "{no}");
-        }
-    }
-    #[test]
     fn nul_separated_and_decoy_patch_text_stay_raw() {
         let nul = "commit aaaaaaa\nAuthor: A <a@example.test>\n\n    t\n\0commit bbbbbbb\nAuthor: B <b@example.test>\n\n    u\n";
-        assert_eq!(git_log(nul, false, true), nul);
+        assert_eq!(git_log(nul, true), nul);
         let decoy = format!("diff --git a/x b/x\n{}", "ligne\n".repeat(1200));
-        assert_eq!(git_log(&decoy, false, true), decoy);
-        // Même avec -p : un message n'est pas un patch, le codec se vérifie ou le brut est rendu.
-        let view = git_log(&decoy, true, true);
-        assert!(view == decoy || patch_view::expand(&view).unwrap() == decoy);
+        assert_eq!(git_log(&decoy, true), decoy);
     }
     #[test]
-    fn a_layout_chosen_in_the_command_disables_the_shortened_view_without_asking_git() {
+    fn only_a_simple_direct_call_may_use_the_compact_view() {
         for line in [
-            "git log --oneline",
             "git log -z",
+            "git log --stat",
+            "git log -p -n 3",
+            "git log --author=x",
+            "git log --date=short",
+            "git log --abbrev-commit",
+            "git log --decorate=full",
+            "git log -n x",
+            "git log -n",
+            "git log -n6",
+            "git --no-pager log",
+            "git -C",
+            "git -C . -c a.b=c log",
+            "env git log",
+            "timeout 5 git log",
+            "sh -c git log",
+            "/tmp/show-history log",
             "git log --format=%H",
             "git log --format=commit%x20%T",
             "git log --pretty=fuller",
@@ -818,7 +767,7 @@ mod tests {
             "git status",
             "git",
         ] {
-            assert!(!git_log_default_format(&words(line)), "{line}");
+            assert!(!git_log_compact_allowed(&words(line)), "{line}");
         }
     }
     #[test]

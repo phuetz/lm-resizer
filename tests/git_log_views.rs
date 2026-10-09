@@ -859,3 +859,232 @@ fn a_script_run_directly_never_loses_a_hash_line() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Revue du 9 octobre (tête 4645df3) : les 23 commits du dépôt piège ressortent tous, octet pour
+/// octet, quand `git log` n'est pas un appel direct simple. Script lancé par son chemin, ou derrière
+/// `env` / `timeout` (formats `%s`, `%s %H`, hash indenté, hash collé à un NUL, hash préfixé),
+/// commande assemblée par variables, codes 0/7/23. Le producteur n'est pas reconnu : brut.
+#[test]
+fn git_log_behind_a_script_or_an_assembled_command_comes_out_whole_and_raw() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = trap_history();
+    let state = tempfile::tempdir().unwrap();
+    // Le dépôt piège a bien 23 commits, dont un à message vide.
+    let identities = String::from_utf8(git(repo.path(), &["log", "--format=%H%x09%s"])).unwrap();
+    let subjects = identities
+        .lines()
+        .filter(|row| !row.ends_with('\t'))
+        .count();
+    assert_eq!((identities.lines().count(), subjects), (23, 22));
+    let mut failures = Vec::new();
+    for format in ["%s", "%s %H", "    %H %s", "%H%x00%s", "id:%H %s"] {
+        let direct = git(repo.path(), &["log", &format!("--format={format}")]);
+        for code in [0, 7, 23] {
+            let script = repo.path().join("show-history");
+            std::fs::write(
+                &script,
+                format!("#!/bin/sh\ngit log --format='{format}'\nexit {code}\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let path = script.to_str().unwrap().to_string();
+            let forms: [(&str, Vec<&str>); 3] = [
+                ("script", vec![&path]),
+                ("env script", vec!["env", &path]),
+                ("timeout script", vec!["timeout", "20", &path]),
+            ];
+            for (name, args) in forms {
+                let label = format!("{name} {format:?} exit {code}");
+                exec_gives_raw(
+                    &repo,
+                    state.path(),
+                    &args,
+                    code,
+                    &direct,
+                    &label,
+                    &mut failures,
+                );
+            }
+        }
+    }
+    for format in ["%s", "%s %H"] {
+        let direct = git(repo.path(), &["log", &format!("--format={format}")]);
+        for code in [0, 7, 23] {
+            let line = format!("g=git; l=log; \"$g\" \"$l\" '--format={format}'; exit {code}");
+            for (name, prefix) in [
+                ("sh -c", vec![]),
+                ("env sh -c", vec!["env"]),
+                ("timeout sh -c", vec!["timeout", "20"]),
+            ] {
+                let mut args = prefix.clone();
+                args.extend(["sh", "-c", &line]);
+                let label = format!("variables {name} {format:?} exit {code}");
+                exec_gives_raw(
+                    &repo,
+                    state.path(),
+                    &args,
+                    code,
+                    &direct,
+                    &label,
+                    &mut failures,
+                );
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Un lanceur de recette (`make`, `npm run`, `npm test`) exécute une ligne de shell choisie par
+/// l'utilisateur, `git log --format=%s` compris : brut, y compris la ligne vide du commit sans message.
+#[test]
+fn git_log_inside_a_make_recipe_or_an_npm_script_comes_out_raw() {
+    let repo = trap_history();
+    let state = tempfile::tempdir().unwrap();
+    let direct = git(repo.path(), &["log", "--format=%s"]);
+    let mut failures = Vec::new();
+    for code in [0, 7] {
+        let line = format!("git log --format=%s; exit {code}");
+        std::fs::write(
+            repo.path().join("Makefile"),
+            format!("hist:\n\t@{line}\nbuild:\n\t@{line}\n"),
+        )
+        .unwrap();
+        let make_code = if code == 0 { 0 } else { 2 };
+        for target in ["hist", "build"] {
+            let label = format!("make {target} exit {code}");
+            exec_gives_raw_within(
+                &repo,
+                state.path(),
+                &["make", "-s", target],
+                make_code,
+                &direct,
+                &label,
+                &mut failures,
+            );
+        }
+        if Command::new("npm").arg("--version").output().is_ok() {
+            let scripts = serde_json::json!({
+                "name": "piege",
+                "version": "1.0.0",
+                "scripts": {"hist": line, "test": line}
+            });
+            std::fs::write(repo.path().join("package.json"), scripts.to_string()).unwrap();
+            for args in [vec!["npm", "run", "-s", "hist"], vec!["npm", "test", "-s"]] {
+                let label = format!("{args:?} exit {code}");
+                exec_gives_raw_within(
+                    &repo,
+                    state.path(),
+                    &args,
+                    code,
+                    &direct,
+                    &label,
+                    &mut failures,
+                );
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Comme [`exec_gives_raw`], quand le lanceur ajoute ses propres lignes (`make: *** … Error 7`) : la
+/// sortie de Git doit y figurer d'un seul tenant, octet pour octet.
+fn exec_gives_raw_within(
+    repo: &tempfile::TempDir,
+    state: &Path,
+    args: &[&str],
+    code: i32,
+    direct: &[u8],
+    label: &str,
+    failures: &mut Vec<String>,
+) {
+    let mut wrapped = vec!["exec", "--"];
+    wrapped.extend(args);
+    let out = lm_resizer(repo.path(), state, &wrapped);
+    if out.status.code() != Some(code) {
+        failures.push(format!(
+            "{label}: code {:?} au lieu de {code}",
+            out.status.code()
+        ));
+    } else if !out
+        .stdout
+        .windows(direct.len())
+        .any(|window| window == direct)
+    {
+        failures.push(format!(
+            "{label}: la sortie de git n'y est pas entière ({} octets)",
+            out.stdout.len()
+        ));
+    }
+}
+
+/// Liste blanche fermée : seul `git [-C dossier] log` avec `--decorate`, `--all`, `-n N`, `-N`, une
+/// révision, une plage ou `-- chemins` garde la vue compacte, et chaque commit y garde son hash et son
+/// sujet. Toute autre option, un format, `--stat`, `-p`, une option globale autre que `-C` : brut,
+/// octet pour octet.
+#[test]
+fn the_compact_git_log_view_is_limited_to_a_closed_whitelist() {
+    let repo = long_history();
+    let state = tempfile::tempdir().unwrap();
+    let path = repo.path().display().to_string();
+    let compact: Vec<Vec<&str>> = vec![
+        vec!["log"],
+        vec!["log", "-n", "6"],
+        vec!["log", "-6"],
+        vec!["log", "--decorate"],
+        vec!["log", "--all"],
+        vec!["log", "main"],
+        vec!["log", "HEAD~8..HEAD"],
+        vec!["log", "--", "a.txt"],
+        vec!["-C", &path, "log", "-n", "8"],
+    ];
+    for args in &compact {
+        let direct = git(repo.path(), args);
+        let mut wrapped = vec!["exec", "--", "git"];
+        wrapped.extend(args);
+        let out = lm_resizer(repo.path(), state.path(), &wrapped);
+        assert!(out.status.success(), "{args:?}");
+        assert!(
+            out.stdout.len() < direct.len(),
+            "{args:?}: la vue compacte n'est plus appliquée ({} contre {} octets)",
+            out.stdout.len(),
+            direct.len()
+        );
+        // Les commits que Git affiche pour ces arguments, chacun avec son hash et son sujet.
+        let mut listed: Vec<&str> = args.to_vec();
+        let at = listed.iter().position(|a| *a == "log").unwrap() + 1;
+        listed.insert(at, "--format=%H%x09%s");
+        let expected = String::from_utf8(git(repo.path(), &listed)).unwrap();
+        let view = String::from_utf8_lossy(&out.stdout);
+        for row in expected.lines() {
+            let (hash, subject) = row.split_once('\t').unwrap();
+            assert!(view.contains(hash), "{args:?}: hash {hash} absent");
+            assert!(view.contains(subject), "{args:?}: sujet {subject:?} absent");
+        }
+    }
+    let raw_forms: Vec<Vec<&str>> = vec![
+        vec!["--no-pager", "log"],
+        vec!["-c", "color.ui=false", "log"],
+        vec!["log", "--stat"],
+        vec!["log", "-p", "-n", "3"],
+        vec!["log", "--author=Zoé"],
+        vec!["log", "--date=short"],
+        vec!["log", "--abbrev-commit"],
+        vec!["log", "--no-merges"],
+        vec!["log", "--pretty=fuller"],
+        vec!["log", "--format=%H"],
+        vec!["log", "--oneline"],
+        vec!["log", "--graph"],
+        vec!["log", "-z"],
+    ];
+    let mut failures = Vec::new();
+    for args in &raw_forms {
+        let direct = git(repo.path(), args);
+        let mut wrapped = vec!["exec", "--", "git"];
+        wrapped.extend(args);
+        let out = lm_resizer(repo.path(), state.path(), &wrapped);
+        if out.stdout != direct {
+            failures.push(format!("{args:?}: la vue n'est pas le brut"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

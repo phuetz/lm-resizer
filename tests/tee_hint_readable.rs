@@ -9,8 +9,9 @@ fn exec(dir: &std::path::Path, script: &str) -> String {
         .env("LM_RESIZER_STATE_DIR", &state)
         .env("LM_RESIZER_STORE", state.join("ccr.sqlite"))
         .env("LM_RESIZER_TRACKING", "0")
-        // `awk` : un programme inconnu (le résumé générique s'applique), pas un shell composé (brut).
-        .args(["exec", "--", "awk", script])
+        // `summary` : le résumé explicite réduit la sortie d'`awk`. `exec` la rendrait brute (programme
+        // inconnu), sans rappel à afficher.
+        .args(["summary", "--", "awk", script])
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");

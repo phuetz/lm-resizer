@@ -94,7 +94,8 @@ fn legacy_filter_cannot_discard_the_stderr_boundary() {
             .env("LM_RESIZER_NO_TOML_FILTERS", "1")
             .args(["exec", "--raw-on-failure", "--json", "--"])
             .arg(&npm)
-            .args(["run", "build"])
+            // `npm run …` lance une recette de l'utilisateur, rendue brute : `install` garde la vue.
+            .args(["install"])
             .output()
             .unwrap();
         let busy = String::from_utf8_lossy(&attempt.stdout).contains("ext file busy")

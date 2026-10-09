@@ -3034,12 +3034,7 @@ fn run_inspected_command(
                 inspection_views::summarize(mode, &raw, captured.code),
             )
         } else {
-            let (filter, view) = filter_executed_command_output(command, &raw);
-            if filter == "lossless:generic" {
-                generic_summary_or_raw(command, &raw, captured.code)
-            } else {
-                (filter, view)
-            }
+            filter_executed_command_output(command, &raw)
         }
     };
     let filter = if filter.starts_with("native:")
@@ -3272,12 +3267,7 @@ fn process_captured_output(
     let (filter, mut filtered) = if keep_raw {
         ("raw_on_failure".to_string(), raw.to_string())
     } else {
-        let (filter, view) = filter_command_output(command, raw);
-        if filter == "lossless:generic" {
-            generic_summary_or_raw(command, raw, exit_code)
-        } else {
-            (filter, view)
-        }
+        filter_command_output(command, raw)
     };
     if !raw.trim().is_empty() && filtered.trim().is_empty() {
         filtered = raw.to_string();
@@ -4019,61 +4009,42 @@ fn pipe_filter_command(name: &str) -> Option<Vec<String>> {
     command_views::pipe_command(name)
 }
 
-/// Interpréteur de shell : `sh`, `bash`, `zsh`, `dash`, `ksh`, `ash`, `fish`, `csh`, `tcsh`,
-/// `pwsh`, `powershell`, `cmd`. Quand `filter_command_output` n'a pas pu en tirer une commande simple
-/// (script composé par `;`, `&&`, `|`, fichier de script), ni le producteur ni le format de la
-/// sortie ne sont établis.
-fn is_shell_interpreter(command: &[String]) -> bool {
-    command.first().is_some_and(|program| {
-        matches!(
-            command_basename(program).as_str(),
-            "sh" | "bash"
-                | "zsh"
-                | "dash"
-                | "ksh"
-                | "ash"
-                | "fish"
-                | "csh"
-                | "tcsh"
-                | "pwsh"
-                | "powershell"
-                | "cmd"
-        )
-    })
-}
-
-/// `argv` contient le mot `git` puis, plus loin, le mot `log` : directement (`env git log`,
-/// `timeout 5 git log`, `xargs git log`), dans un script passé à un shell (`sh -c 'git log …'`) ou dans
-/// le code d'un autre langage (`awk 'BEGIN { system("git log") }'`, `python3 -c '…["git", "log"]…'`).
-/// Les mots sont lus sans reconnaître le programme appelant : il y en aurait toujours un de plus.
-fn argv_mentions_git_log(command: &[String]) -> bool {
-    let mut seen_git = false;
-    for arg in command {
-        for word in arg.split(|c: char| c.is_whitespace() || "\"'`;|&(),[]{}<>".contains(c)) {
-            if word.rsplit('/').next() == Some("git") {
-                seen_git = true;
-            } else if seen_git && word == "log" {
-                return true;
-            }
+/// Lanceur d'une recette ou d'un script choisi par l'utilisateur : `make`/`gmake` (toute cible),
+/// `npm|pnpm|yarn|bun run|test|start|stop|restart`, `cargo run`, `go run`, `uv|poetry|pipenv run`,
+/// `just`, `task`. La recette peut produire n'importe quoi, `git log` compris : aucun format n'est
+/// établi, la sortie est rendue brute. Seul un harnais nommé dans l'argv lui-même garde sa vue
+/// (`npm run vitest`, `uv run pytest`). `npm exec <programme>`, `npx`, `pnpm exec|dlx` et
+/// `bundle exec` désignent le programme qui suit : il est reconnu, ou il sort brut.
+fn runs_a_user_script(command: &[String]) -> bool {
+    let Some(program) = command.first().map(|p| command_basename(p)) else {
+        return false;
+    };
+    let sub = command.get(1).map(String::as_str).unwrap_or("");
+    let rest: Vec<&str> = command.iter().skip(2).map(String::as_str).collect();
+    match program.as_str() {
+        "make" | "gmake" | "just" | "task" => true,
+        "npm" | "pnpm" | "yarn" | "bun" => {
+            matches!(
+                sub,
+                "run"
+                    | "run-script"
+                    | "rum"
+                    | "urn"
+                    | "test"
+                    | "t"
+                    | "tst"
+                    | "start"
+                    | "stop"
+                    | "restart"
+            ) && !command_runs_js_test(command)
         }
-    }
-    false
-}
-
-/// Repli des commandes sans vue dédiée : le résumé générique (`inspection_views::summarize`) ne garde
-/// que les lignes de diagnostic et supprime les autres. Il n'est jamais appliqué à un shell
-/// composé : le producteur et le format de sa sortie ne sont pas établis, la sortie est rendue brute.
-fn generic_summary_or_raw(command: &[String], raw: &str, exit_code: i32) -> (String, String) {
-    if is_shell_interpreter(command) {
-        ("native:shell-raw".to_string(), raw.to_string())
-    } else if argv_mentions_git_log(command) {
-        // Format de la sortie inconnu (`--format=%s` n'a aucun hash que la garde puisse suivre).
-        ("native:git-log-argv-raw".to_string(), raw.to_string())
-    } else {
-        (
-            "generic:summary".to_string(),
-            inspection_views::summarize(inspection_views::Mode::Summary, raw, exit_code),
-        )
+        "cargo" | "go" => sub == "run",
+        "uv" | "poetry" | "pipenv" => {
+            let pytest = matches!(rest.as_slice(), ["pytest", ..])
+                || matches!(rest.as_slice(), ["python" | "python3", "-m", "pytest", ..]);
+            sub == "run" && !pytest
+        }
+        _ => false,
     }
 }
 
@@ -4106,6 +4077,9 @@ fn filter_command_output_as(command: &[String], raw: &str, executed: bool) -> (S
                 }
             }
         }
+    }
+    if runs_a_user_script(command) {
+        return ("lossless:script-runner".to_string(), raw.to_string());
     }
     // Git : la sous-commande se lit après les options globales (`--no-pager`, `-C`, `-c`…). Une
     // sous-commande sans vue native (liste de commits, alias, `branch`, `blame`…) reste brute :
@@ -4147,17 +4121,16 @@ fn filter_command_output_as(command: &[String], raw: &str, executed: bool) -> (S
         return ("native_owned".to_string(), raw.to_owned());
     }
     // Never post-process a command covered by native: extra views apply only
-    // to other producers, after the exact pipe dispatch above.
+    // to other producers, after the exact pipe dispatch above. Le producteur n'est pas connu (script,
+    // `env …`, `timeout …`, commande assemblée) : seule une sortie entièrement structurée (un document
+    // JSON, au moins vingt lignes toutes préfixées par un niveau de journal) prend un codec où chaque
+    // ligne distincte reste visible. Les plis de chemins, le retrait des lignes `index` d'un diff et le
+    // contour de code réécrivent ou retirent des lignes : brut.
     if command_views::direct_args(command).is_none() {
         if let Some((name, view)) = structured_views::compress(raw) {
-            let filter = if name == "diff-metadata" {
-                "summary:diff-metadata".to_string()
-            } else if name == "code-outline:rust" {
-                "code-outline:rust".to_string()
-            } else {
-                format!("lossless:{name}")
-            };
-            return (filter, view);
+            if matches!(name, "json-table" | "json-compact" | "log-runs") {
+                return (format!("lossless:{name}"), view);
+            }
         }
     }
     if command_requests_json(command) && serde_json::from_str::<Value>(raw).is_ok() {
@@ -11821,7 +11794,7 @@ command = "node"
                 .unwrap();
         assert_eq!(misleading["result"]["isError"], true);
         assert_eq!(payload["exit_code"], 7);
-        assert_eq!(payload["filter"], "generic:summary");
+        assert_eq!(payload["filter"], "lossless:generic");
         assert!(payload["output"]
             .as_str()
             .unwrap()
@@ -12643,15 +12616,31 @@ expected = "error: bad\n"
     }
 
     #[test]
-    fn exec_builtin_toml_filter_handles_make_errors() {
-        let (filter, text) = filter_command_output(
-            &["make".into()],
-            "cc main.c\nwarning: unused\nerror: failed\n",
+    fn exec_make_runs_user_recipes_and_returns_them_raw() {
+        // Une recette `make` peut lancer n'importe quoi (`git log --format=%s` compris) : brut.
+        let raw = "cc main.c\nwarning: unused\nerror: failed\n";
+        for command in [
+            vec!["make"],
+            vec!["make", "-j", "8", "build"],
+            vec!["gmake", "log"],
+            vec!["npm", "run", "hist"],
+            vec!["npm", "test"],
+            vec!["pnpm", "run", "build"],
+            vec!["yarn", "start"],
+            vec!["cargo", "run"],
+            vec!["uv", "run", "./script"],
+        ] {
+            let command: Vec<String> = command.iter().map(|s| s.to_string()).collect();
+            let (filter, text) = filter_command_output(&command, raw);
+            assert_eq!(filter, "lossless:script-runner", "{command:?}");
+            assert_eq!(text, raw, "{command:?}");
+        }
+        // Un harnais nommé dans l'argv garde sa vue.
+        let (filter, _) = filter_command_output(
+            &["uv".into(), "run".into(), "pytest".into()],
+            "1 passed in 0.01s\n",
         );
-        assert_eq!(filter, "toml:make");
-        assert!(text.contains("warning: unused"));
-        assert!(text.contains("error: failed"));
-        assert!(!text.contains("cc main.c"));
+        assert_ne!(filter, "lossless:script-runner");
     }
 
     #[test]
