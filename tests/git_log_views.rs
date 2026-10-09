@@ -580,3 +580,41 @@ fn composed_shell_commands_keep_every_commit() {
         assert_all_identities(script, &repo, &out.stdout);
     }
 }
+
+/// Un sujet long est une identité du commit : la vue le garde en entier, donc la garde finale ne la
+/// refuse pas et le format par défaut reste raccourci.
+#[test]
+fn long_subjects_do_not_disable_the_shortened_default_view() {
+    let repo = repository(false);
+    let body = (0..8)
+        .map(|n| format!("ligne de corps numéro {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let long_subject = format!("sujet très long {}", "mot ".repeat(40));
+    for n in 0..6 {
+        let subject = format!("{long_subject}{n}");
+        commit_file(
+            repo.path(),
+            "a.txt",
+            &format!("long {n}"),
+            &[&subject, &body],
+        );
+    }
+    let state = tempfile::tempdir().unwrap();
+    let direct = git(repo.path(), &["log"]);
+    let out = lm_resizer(repo.path(), state.path(), &["exec", "--", "git", "log"]);
+    assert!(out.status.success());
+    assert!(
+        out.stdout.len() < direct.len(),
+        "sujets longs : la vue n'est plus raccourcie ({} contre {} octets)",
+        out.stdout.len(),
+        direct.len()
+    );
+    let view = String::from_utf8(out.stdout).unwrap();
+    for n in 0..6 {
+        assert!(
+            view.contains(&format!("{long_subject}{n}")),
+            "sujet {n} coupé"
+        );
+    }
+}

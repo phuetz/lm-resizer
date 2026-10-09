@@ -384,9 +384,14 @@ fn git_log_records(raw: &str) -> Option<String> {
             {
                 continue;
             }
-            // Titre + trois lignes de corps au plus.
+            // Titre + trois lignes de corps au plus. Le titre est une identité du commit : jamais
+            // coupé ; les lignes de corps le sont à 100 caractères.
             if message_rows < 4 {
-                out.push(format!("  {}", clipped(text, 100)));
+                if message_rows == 0 {
+                    out.push(format!("  {text}"));
+                } else {
+                    out.push(format!("  {}", clipped(text, 100)));
+                }
                 message_rows += 1;
             } else {
                 hidden += 1;
