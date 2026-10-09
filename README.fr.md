@@ -91,7 +91,7 @@ lm-resizer gain --history --project
 
 `gain` peut commencer négatif : sur une sortie minuscule, la vue et la ligne de rappel coûtent plus de jetons que l'original. Les vraies sorties rendent le total positif.
 
-Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagnostics ou bilans de tests avec une ligne de contexte et le code d’échec en tête. `exec` et `tool-output` résument aussi les commandes sans filtre dédié, sauf les lignes de shell comme `sh -c` et les commandes dont les arguments contiennent `git` puis `log`, rendues brutes. Chaque sortie reste récupérable avec `tee read`. `gain` affiche les commandes et jetons mesurés ; `gain --json` donne les compteurs complets. Voir la [référence CLI](docs/CLI-REFERENCE.md).
+Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagnostics ou bilans de tests avec une ligne de contexte et le code d’échec en tête. `exec` et `tool-output` appliquent une vue dédiée quand elle existe ; tout autre programme, script, wrapper, ligne de shell ou lanceur de recettes sort brut, et le résumé ne s'applique que sur demande (`summary`). Chaque sortie reste récupérable avec `tee read`. `gain` affiche les commandes et jetons mesurés ; `gain --json` donne les compteurs complets. Voir la [référence CLI](docs/CLI-REFERENCE.md).
 
 Pour les scripts, utiliser `lm-resizer gain --json`.
 
@@ -99,7 +99,7 @@ Pour les scripts, utiliser `lm-resizer gain --json`.
 
 ## La garantie diagnostique
 
-LM Resizer raccourcit, il ne cache pas. Les vues de commandes conservent littéralement nombres, chemins, identifiants, auteurs de commit et diagnostics d'échec. Les réussites reconnues de Cargo/pytest peuvent être résumées par des compteurs de suite ; les échecs restent visibles. Si une étape de compression devait omettre une ligne d'échec, le corps filtré est conservé et, quand le gain le permet, une ligne `[tee:<id>]` pointe vers l'original intact. Une vue qui contient un diagnostic peut donc n'afficher presque aucun gain — c'est voulu. Les noms d'étapes internes (`diagnostic-guard`, `kept_filtered`, `diagnostic_reinjection`) et le chemin `raw_on_failure` sont listés dans [la référence de la ligne de commande](docs/CLI-REFERENCE.md).
+LM Resizer raccourcit, il ne cache pas. Les vues de commandes conservent littéralement nombres, chemins, identifiants, auteurs de commit et diagnostics d'échec. Les réussites reconnues de Cargo/pytest peuvent être résumées par des compteurs de suite ; les échecs restent visibles. Quand la commande demande d'afficher la sortie des tests (`cargo test -- --nocapture`, `pytest -s`, `go test -v`…) ou que le lanceur n'a pas de capture (`rspec`, minitest, phases de test Maven, `playwright test`), la sortie est rendue brute ([limites](docs/KNOWN-MISSES.fr.md)). Si une étape de compression devait omettre une ligne d'échec, le corps filtré est conservé et, quand le gain le permet, une ligne `[tee:<id>]` pointe vers l'original intact. Une vue qui contient un diagnostic peut donc n'afficher presque aucun gain — c'est voulu. Les noms d'étapes internes (`diagnostic-guard`, `kept_filtered`, `diagnostic_reinjection`) et le chemin `raw_on_failure` sont listés dans [la référence de la ligne de commande](docs/CLI-REFERENCE.md).
 
 `lm-resizer expand -i view.txt` reconstruit les vues réversibles, dont les historiques et diffs `Patch v1` et `Patch v2` : les en-têtes communs et répétitions sont factorisés sans retirer de ligne de source ni de contexte.
 

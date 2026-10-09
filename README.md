@@ -91,7 +91,7 @@ lm-resizer gain --history --project
 
 `gain` can start negative: on a tiny output the view and the recovery line cost more tokens than the original. Real outputs turn the total positive.
 
-For any producer, `lm-resizer err|test|summary -- <command>` keeps diagnostics or test totals with adjacent context and a failure status header. `exec` and `tool-output` also summarize commands without a dedicated filter, except shell command lines such as `sh -c` and commands whose arguments contain `git` followed by `log`, which are returned raw. Every output remains recoverable with `tee read`. `gain` shows measured command and token totals; `gain --json` returns the full counters. See the [CLI reference](docs/CLI-REFERENCE.md).
+For any producer, `lm-resizer err|test|summary -- <command>` keeps diagnostics or test totals with adjacent context and a failure status header. `exec` and `tool-output` apply a dedicated view where one exists; any other program, script, wrapper, shell line or recipe runner is returned raw, and the summary applies only on request (`summary`). Every output remains recoverable with `tee read`. `gain` shows measured command and token totals; `gain --json` returns the full counters. See the [CLI reference](docs/CLI-REFERENCE.md).
 
 For scripts, use `lm-resizer gain --json`.
 
@@ -99,7 +99,7 @@ For scripts, use `lm-resizer gain --json`.
 
 ## The diagnostic guarantee
 
-LM Resizer shortens, it does not hide. Command views keep literal numbers, paths, identifiers, commit authors and failure diagnostics. Recognized successful Cargo/pytest progress can be summarized by suite counts; failures stay visible. If a compression step would omit a failure line, the filtered body is kept and, where the saving allows it, a `[tee:<id>]` line points to the untouched original. A view that contains a diagnostic can therefore show little or no saving — that is intentional. The internal step names (`diagnostic-guard`, `kept_filtered`, `diagnostic_reinjection`) and the `raw_on_failure` path are listed in [the CLI reference](docs/CLI-REFERENCE.md).
+LM Resizer shortens, it does not hide. Command views keep literal numbers, paths, identifiers, commit authors and failure diagnostics. Recognized successful Cargo/pytest progress can be summarized by suite counts; failures stay visible. When the command asks to display test output (`cargo test -- --nocapture`, `pytest -s`, `go test -v`…) or the runner has no capture (`rspec`, minitest, Maven test phases, `playwright test`), the output is returned raw ([limits](docs/KNOWN-MISSES.md)). If a compression step would omit a failure line, the filtered body is kept and, where the saving allows it, a `[tee:<id>]` line points to the untouched original. A view that contains a diagnostic can therefore show little or no saving — that is intentional. The internal step names (`diagnostic-guard`, `kept_filtered`, `diagnostic_reinjection`) and the `raw_on_failure` path are listed in [the CLI reference](docs/CLI-REFERENCE.md).
 
 `lm-resizer expand -i view.txt` reconstructs reversible views, including `Patch v1` and `Patch v2` histories and diffs: shared file headers and identical runs are factored without dropping source or context lines.
 

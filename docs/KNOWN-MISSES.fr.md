@@ -12,8 +12,28 @@ La migration des filtres est en cours. Les mesures antérieures ne décrivent pa
 
 **Lanceurs de recettes, bruts** : `make`/`gmake` (toute cible), `npm`, `pnpm`, `yarn`, `bun` avec `run`, `test`, `start`, `stop` ou `restart`, `cargo run`, `go run`, `uv`/`poetry`/`pipenv run`, `just`, `task`. Ils exécutent une ligne choisie par l'utilisateur, `git log --format=%s` compris. Exception : un harnais nommé dans l'`argv` lui-même garde sa vue (`npm run vitest`, `npx jest`, `uv run pytest`). `npm exec <programme>`, `npx`, `pnpm exec|dlx` et `bundle exec` désignent le programme qui suit, reconnu ou brut.
 
-**Hors de cette garantie, nommément** : un `git log` imprimé à l'intérieur d'un producteur qui a sa propre vue suit la vue de ce producteur. Ce sont les harnais de test qui relaient ce qu'un test imprime (`cargo test -- --nocapture`, `pytest -s`, `jest`, `vitest`, `go test -v`, `dotnet test`), les outils de build et de qualité (`cargo build`, `tsc`, `eslint`, `docker build`, `mvn`, `gradle`), les visionneuses de journaux (`docker logs`, `kubectl logs`, `journalctl`, `gh run view --log`) et les filtres TOML d'un projet ou d'un utilisateur, qui choisissent leur commande par expression régulière. Le brut reste toujours dans tee (`lm-resizer tee read <id>`).
+**Lanceurs de tests, règle lue dans l'`argv`** : la vue d'un lanceur de tests est brute, octet pour octet (`lossless:test-output`), quand l'argv demande d'afficher la sortie des tests, ou quand le lanceur n'a pas de capture. Sans demande, la sortie qu'un test en échec fait afficher suit la vue du lanceur ; le brut est dans tee. Drapeaux reconnus, après les enveloppes `npx`, `bunx`, `npm|pnpm|yarn|bundle exec`, `uv run`, `python -m`, `pnpm|yarn|bun jest|vitest`, et derrière `sh -c` :
+- `cargo test`, `cargo nextest` : `--nocapture`, `--no-capture`, `--show-output`, `--success-output…`, avant ou après `--` ;
+- `pytest`, `py.test`, `python -m pytest` : `-s` (aussi groupé, `-vs`), `--capture=no|tee-sys`, `-p no:capture`, `-r` avec `P` ou `A`, `--log-cli-level`, `-o log_cli=true` (`-rs` demande le rapport des tests sautés, pas `-s`) ;
+- `go test` : `-v`, `-v=true`, `-test.v…`, `-json` ;
+- `jest`, `vitest` : `--silent=false`, `--no-silent`, `--disableConsoleIntercept`, `--printConsoleTrace` ;
+- `dotnet test` : `-v|--verbosity normal|detailed|diagnostic`, `--logger` de verbosité `normal`, `detailed` ou `diagnostic`.
 
-Autres limites : la configuration est lue là où `lm-resizer` s'exécute ; les lignes de corps sont coupées à 100 caractères dans la vue, le titre ne l'est jamais ; la garde de contenu (`commit <hash>` ou mot de 4 à 40 chiffres hexadécimaux en début de ligne, et son sujet) reste un dernier rempart sur les voies réduites, et un mot comme `added` ou `face` en début de ligne peut lui faire rendre le brut (moins de compression, jamais de perte).
+Lanceurs sans capture, toujours bruts : `rspec`, minitest (`ruby …_test.rb`, `rake test`, `rails test`, aussi derrière `bundle exec`), `mvn` avec une phase qui lance les tests (`test`, `verify`, `package`, `install`, `deploy`), `playwright test` ; `gradle` seulement avec `-i`, `--info`, `-d` ou `--debug` (il cache la sortie des tests par défaut). Les filtres intégrés `rspec`, `minitest`, `jvm-build` (pour ces phases) et `js-quality` (pour `playwright test`) ne sont donc plus atteints par `exec`. Une variable d'environnement exportée avant l'appel (`RUST_TEST_NOCAPTURE=1`) n'est pas dans l'argv : elle n'est pas lue.
+
+**Hors de la règle, mesuré** (sortie qu'un test **en échec** fait afficher sans aucun drapeau ; transcriptions passées par `tool-output`, dépôt de 23 commits, `git log --format=%s` imprimé par le test) :
+
+| Lanceur et situation | Vue | Sujets visibles |
+|---|---|---:|
+| `pytest` sans `-s`, test en échec, section `Captured stdout call` | `native:pytest`, 1 023 → 199 octets | **0/22** |
+| `jest` direct, une suite en échec, `console.log` d'un test réussi | `native:js-test`, 683 → 127 octets | **0/22** |
+| vrai `cargo test` sans drapeau, test en échec qui imprime puis échoue | `native:cargo-test`, 595 → 526 octets | 22/22, la ligne vide du commit sans message est retirée (`%s %H` : tout est gardé) |
+| `npx jest`, `yarn jest`, `vitest run`, `npx vitest run`, `yarn vitest run`, `go test` en texte, mêmes situations | vue brute ou diagnostic gardé | 22/22 |
+
+Proposition, non appliquée : garder tels quels les blocs `Captured …` de pytest et `console.*` de jest dans leurs vues (aucune capture du banc n'en contient). C'est un changement de vue, pas de règle.
+
+**Visionneuses de journaux, limite documentée** : `docker logs`, `kubectl logs`, `journalctl` et `gh run view --log` affichent la sortie d'autres programmes et gardent leurs vues de journaux ; un `git log` qu'un conteneur ou un service a imprimé peut y perdre des lignes. Le brut se récupère toujours par `lm-resizer tee read <id>`. Restent aussi hors garantie les outils de build et de qualité (`cargo build`, `tsc`, `eslint`, `docker build`) et les filtres TOML d'un projet ou d'un utilisateur, qui choisissent leur commande par expression régulière.
+
+Autres limites : la configuration est lue là où `lm-resizer` s'exécute ; les lignes de corps sont coupées à 100 caractères dans la vue, le titre ne l'est jamais ; la garde de contenu (`commit <hash>` ou mot de 4 à 40 chiffres hexadécimaux en début de ligne, et son sujet) reste un dernier rempart sur les voies réduites, reconnaît un hash en début de ligne (même indenté, ou suivi d'un NUL : `%H%x00%s`) ou en fin de ligne après un sujet (`%s %H`, 7 à 40 chiffres) ; la prose des messages au format par défaut n'est pas lue. Un mot comme `added` ou `face` en début de ligne peut lui faire rendre le brut (moins de compression, jamais de perte).
 
 Conséquence mesurée sur le banc de 61 captures : les cinq captures `git log` de plusieurs commits, passées par `pipe`, passent de 91 à 97 % de « réduction » (premier commit seul, comme l'oracle de comparaison, qui le fait toujours) à 0 % ; les deux captures `npm test` (`TypeScript-test`, `visible-jest`) sont brutes. Médiane 4,87 %, moyenne 27,61 %.
