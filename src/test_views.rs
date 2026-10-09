@@ -10,127 +10,488 @@ fn counts(line: &str) -> BTreeMap<&str, usize> {
         .collect()
 }
 
-/// Nom d'un programme : dernier composant du chemin, sans `.exe`, en minuscules (`py.test` reste
-/// `py.test`).
-fn program_name(arg: &str) -> String {
-    let name = arg.rsplit(['/', '\\']).next().unwrap_or(arg);
-    let name = name.strip_suffix(".exe").unwrap_or(name);
-    name.to_ascii_lowercase()
+/// Nom d'un programme : dernier composant du chemin, en minuscules, sans suffixe d'exécutable
+/// Windows (`.exe`, `.cmd`, `.bat`, `.com`, `.ps1`). `py.test` et `python3.12` restent entiers.
+pub fn program_name(arg: &str) -> String {
+    let name = arg
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(arg)
+        .to_ascii_lowercase();
+    for suffix in [".exe", ".cmd", ".bat", ".com", ".ps1"] {
+        if let Some(stem) = name.strip_suffix(suffix) {
+            return stem.to_string();
+        }
+    }
+    name
 }
 
-/// La commande demande explicitement d'afficher la sortie des programmes testés : la vue du lanceur
-/// est alors refusée et la sortie rendue brute, octet pour octet. Décision lue dans l'`argv` seul,
-/// jamais dans la sortie (décision du 9 octobre 2026). Un test peut imprimer n'importe quoi,
-/// `git log --format=%s` compris ; les vues de ce module ne gardent que bilans et échecs.
+/// `python`, `python3`, `python3.12`, `pythonw`, `pypy3` et le lanceur Windows `py`.
+fn is_python(name: &str) -> bool {
+    name == "py"
+        || name
+            .strip_prefix("python")
+            .or_else(|| name.strip_prefix("pypy"))
+            .is_some_and(|rest| rest == "w" || rest.chars().all(|c| c.is_ascii_digit() || c == '.'))
+}
+
+/// Famille d'un lanceur de tests reconnu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// `cargo test`, `cargo t`.
+    Cargo,
+    /// `cargo nextest`.
+    Nextest,
+    /// `pytest`, `py.test`, `python -m pytest`.
+    Pytest,
+    /// `go test`.
+    Go,
+    /// `jest`, `vitest`.
+    Js,
+    /// `dotnet test`.
+    Dotnet,
+    /// `mvn` avec une phase de tests.
+    Maven,
+    /// `gradle` avec une tâche `test…`, `check` ou `build`.
+    Gradle,
+    /// `rspec`, minitest (`ruby …_test.rb`, `rake test`, `rails test`).
+    Ruby,
+    /// `playwright test`.
+    Playwright,
+    /// Lanceurs sans vue dédiée : `python -m unittest|nose2`, `tox`, `nox`, `mocha`, `ava`,
+    /// `ctest`, `phpunit`, `pest`, `paratest`, `php artisan test`, `deno|bun|swift|mix|zig test`.
+    Other,
+    /// Script de tests choisi par l'utilisateur : `npm|pnpm|yarn|bun test`, `run test…`,
+    /// `make|just|task test…|check`.
+    Script,
+}
+
+/// Lanceur de tests reconnu : sa famille, et la commande à partir du lanceur (enveloppes retirées).
+#[derive(Clone, Copy, Debug)]
+pub struct Runner<'a> {
+    pub kind: Kind,
+    pub argv: &'a [String],
+}
+
+/// LA reconnaissance des lanceurs de tests. La porte « lanceur de tests à code 0 = sortie brute »
+/// d'`exec`, `tool-output`, `pipe` et du MCP, et le routage vers les vues de tests (`cargo`, pytest,
+/// `go`, jest/vitest, `dotnet`, nextest), passent tous par elle : aucune autre fonction ne
+/// reconnaît un lanceur de tests (règle validée le 9 octobre 2026). Lecture de l'`argv` seul :
+/// - noms normalisés par [`program_name`] (`cargo.cmd`, `pytest.EXE`, `npx.cmd`) ;
+/// - enveloppes `npx|bunx|pnpx`, `npm|pnpm|yarn|bun exec|dlx|x`, `pnpm|yarn|bun <jest|vitest>`,
+///   `npm|pnpm|yarn|bun run <jest|vitest>`, `bundle exec`, `uv|poetry|pipenv|pdm|hatch|rye run`,
+///   `python[X.Y] [options] -m <module>`, `py -3.12 -m`, avec leurs options ;
+/// - sous-commande lue après les options globales (`cargo +nightly --locked test`, `go -C d test`).
 ///
-/// Lanceurs ayant une vue native, après les enveloppes que le routage reconnaît (`npx`, `bunx`,
-/// `npm|pnpm|yarn|bundle exec`, `uv run`, `python -m`, `pnpm|yarn|bun <jest|vitest>`) :
-/// - `cargo test`, `cargo nextest` : `--nocapture`, `--no-capture`, `--show-output`,
-///   `--success-output…`, avant ou après `--` ;
-/// - `pytest`, `py.test`, `python -m pytest` : `-s` (aussi groupé, `-vs`), `--capture=no|tee-sys`,
-///   `-p no:capture`, `-r` avec `P` ou `A` (sortie des tests réussis), `--log-cli-level`,
-///   `-o log_cli=true` ;
-/// - `go test` : `-v`, `-v=true`, `-test.v…`, `-json` ;
-/// - `jest`, `vitest` : `--silent=false`, `--no-silent`, `--disableConsoleIntercept`,
-///   `--printConsoleTrace` ;
-/// - `dotnet test` : `-v|--verbosity normal|detailed|diagnostic`, `--logger` dont la verbosité est
-///   `normal`, `detailed` ou `diagnostic` ;
-/// - lanceurs qui affichent toujours la sortie des tests (aucune capture) : `rspec`, minitest
-///   (`ruby …_test.rb`, `rake test`, `rails test`), `mvn` avec une phase qui lance les tests
-///   (`test`, `verify`, `package`, `install`, `deploy`), `playwright test` ; `gradle` seulement avec
-///   `-i`, `--info`, `-d` ou `--debug`.
-pub fn shows_test_output(command: &[String]) -> bool {
-    let rest = after_runner_wrappers(command);
-    if rest.is_empty() {
-        return false;
-    }
-    let program = program_name(&rest[0]);
-    let args = &rest[1..];
+/// Une option d'enveloppe ou de gestionnaire de paquets que la lecture ne connaît pas rend `None` :
+/// on ne sait pas quel programme tourne, aucune vue de tests ne s'applique (la sortie suit les
+/// autres routes, brute pour un script).
+pub fn runner(command: &[String]) -> Option<Runner<'_>> {
+    let argv = after_wrappers(command)?;
+    let program = program_name(argv.first()?);
+    let args = &argv[1..];
     let has = |word: &str| args.iter().any(|arg| arg == word);
-    match program.as_str() {
-        "cargo" if has("test") || has("nextest") => args.iter().any(|arg| {
-            matches!(
-                arg.as_str(),
-                "--nocapture" | "--no-capture" | "--show-output"
-            ) || arg.starts_with("--success-output")
-        }),
-        "pytest" | "py.test" => pytest_shows_output(args),
-        "go" if has("test") => args.iter().any(|arg| {
-            let flag = arg.trim_start_matches('-');
-            arg.starts_with('-')
-                && (flag == "v"
-                    || flag == "json"
-                    || flag == "test.v"
-                    || ((flag.starts_with("v=") || flag.starts_with("test.v="))
-                        && !flag.ends_with("=false")
-                        && !flag.ends_with("=0")))
-        }),
-        "jest" | "vitest" => args.iter().enumerate().any(|(i, arg)| {
-            matches!(
-                arg.as_str(),
-                "--silent=false"
-                    | "--no-silent"
-                    | "--disableConsoleIntercept"
-                    | "--disable-console-intercept"
-                    | "--printConsoleTrace"
-                    | "--print-console-trace"
-            ) || (arg == "--silent" && args.get(i + 1).is_some_and(|v| v == "false"))
-        }),
-        "dotnet" if has("test") => dotnet_shows_output(args),
-        // Lanceurs sans capture : la sortie des tests est affichée par défaut, lancer les tests vaut
-        // demande d'affichage. Formes reconnues par les filtres intégrés `rspec`, `minitest`,
-        // `jvm-build` et `js-quality`.
-        "rspec" => true,
-        "ruby" | "rake" | "rails" => runs_ruby_tests(&program, args),
-        "mvn" | "mvnw" => runs_maven_tests(args),
-        "gradle" | "gradlew" => args
-            .iter()
-            .any(|arg| matches!(arg.as_str(), "-i" | "--info" | "-d" | "--debug")),
-        "playwright" => has("test"),
-        _ => false,
+    // `test`, `test:unit`, `:app:testDebugUnitTest`, `check` : un segment qui parle de tests.
+    let test_task = |task: &str| {
+        task.to_ascii_lowercase()
+            .split(':')
+            .any(|part| part.contains("test") || part == "check")
+    };
+    let kind = match program.as_str() {
+        "cargo" => {
+            let skip = args.iter().take_while(|arg| arg.starts_with('+')).count();
+            let rest = &args[skip..];
+            match rest
+                .get(operand(rest, CARGO_VALUE_OPTIONS, None)?)?
+                .as_str()
+            {
+                "test" | "t" => Kind::Cargo,
+                "nextest" => Kind::Nextest,
+                _ => return None,
+            }
+        }
+        "pytest" | "py.test" => Kind::Pytest,
+        "go" if args.get(operand(args, &["-C"], None)?)? == "test" => Kind::Go,
+        "jest" | "vitest" => Kind::Js,
+        "dotnet" if args.get(operand(args, &[], None)?)? == "test" => Kind::Dotnet,
+        "mvn" | "mvnw" if runs_maven_tests(args) => Kind::Maven,
+        "gradle" | "gradlew"
+            if args
+                .iter()
+                .any(|arg| !arg.starts_with('-') && (test_task(arg) || arg == "build")) =>
+        {
+            Kind::Gradle
+        }
+        "rspec" => Kind::Ruby,
+        "ruby" | "rake" | "rails" if runs_ruby_tests(&program, args) => Kind::Ruby,
+        "playwright" if has("test") => Kind::Playwright,
+        "unittest" | "nose2" | "tox" | "nox" | "mocha" | "ava" | "ctest" | "phpunit" | "pest"
+        | "paratest" => Kind::Other,
+        "php" if has("artisan") && has("test") => Kind::Other,
+        "deno" | "swift" | "mix" | "zig" if args.first().is_some_and(|a| a == "test") => {
+            Kind::Other
+        }
+        "npm" | "pnpm" | "yarn" | "bun" => {
+            let at = operand(
+                args,
+                PACKAGE_MANAGER_VALUE_OPTIONS,
+                Some(PACKAGE_MANAGER_FLAGS),
+            )?;
+            match args[at].as_str() {
+                "test" if program == "bun" => Kind::Other,
+                "test" | "t" | "tst" => Kind::Script,
+                "run" | "run-script" | "rum" | "urn"
+                    if args.get(at + 1).is_some_and(|script| test_task(script)) =>
+                {
+                    Kind::Script
+                }
+                _ => return None,
+            }
+        }
+        "make" | "gmake" | "just" | "task"
+            if args
+                .iter()
+                .any(|arg| !arg.starts_with('-') && !arg.contains('=') && test_task(arg)) =>
+        {
+            Kind::Script
+        }
+        _ => return None,
+    };
+    Some(Runner { kind, argv })
+}
+
+impl Runner<'_> {
+    /// La commande demande explicitement d'afficher la sortie des programmes testés, ou le lanceur
+    /// n'a pas de capture : la vue du lanceur est refusée et la sortie rendue brute, octet pour
+    /// octet, quel que soit le code. Un test peut imprimer n'importe quoi, `git log --format=%s`
+    /// compris ; les vues de ce module ne gardent que bilans et échecs.
+    /// - `cargo test`, `cargo nextest` : `--nocapture`, `--no-capture`, `--show-output`,
+    ///   `--success-output…`, avant ou après `--` ;
+    /// - pytest : `-s` (aussi groupé, `-vs`), `--capture=no|tee-sys`, `-p no:capture`, `-r` avec
+    ///   `P` ou `A` (sortie des tests réussis), `--log-cli-level`, `-o log_cli=true` ;
+    /// - `go test` : `-v`, `-v=true`, `-test.v…`, `-json` ;
+    /// - `jest`, `vitest` : `--silent=false`, `--no-silent`, `--disableConsoleIntercept`,
+    ///   `--printConsoleTrace` ;
+    /// - `dotnet test` : `-v|--verbosity normal|detailed|diagnostic`, `--logger` dont la verbosité
+    ///   est `normal`, `detailed` ou `diagnostic` ;
+    /// - sans capture : `rspec`, minitest, `mvn` avec une phase de tests, `playwright test` ;
+    ///   `gradle` seulement avec `-i`, `--info`, `-d` ou `--debug`.
+    pub fn shows_output(&self) -> bool {
+        let args = &self.argv[1..];
+        match self.kind {
+            Kind::Cargo | Kind::Nextest => args.iter().any(|arg| {
+                matches!(
+                    arg.as_str(),
+                    "--nocapture" | "--no-capture" | "--show-output"
+                ) || arg.starts_with("--success-output")
+            }),
+            Kind::Pytest => pytest_shows_output(args),
+            Kind::Go => args.iter().any(|arg| {
+                let flag = arg.trim_start_matches('-');
+                arg.starts_with('-')
+                    && (flag == "v"
+                        || flag == "json"
+                        || flag == "test.v"
+                        || ((flag.starts_with("v=") || flag.starts_with("test.v="))
+                            && !flag.ends_with("=false")
+                            && !flag.ends_with("=0")))
+            }),
+            Kind::Js => args.iter().enumerate().any(|(i, arg)| {
+                matches!(
+                    arg.as_str(),
+                    "--silent=false"
+                        | "--no-silent"
+                        | "--disableConsoleIntercept"
+                        | "--disable-console-intercept"
+                        | "--printConsoleTrace"
+                        | "--print-console-trace"
+                ) || (arg == "--silent" && args.get(i + 1).is_some_and(|v| v == "false"))
+            }),
+            Kind::Dotnet => dotnet_shows_output(args),
+            Kind::Ruby | Kind::Maven | Kind::Playwright => true,
+            Kind::Gradle => args
+                .iter()
+                .any(|arg| matches!(arg.as_str(), "-i" | "--info" | "-d" | "--debug")),
+            Kind::Other | Kind::Script => false,
+        }
     }
 }
 
-/// La commande lance une suite de tests, lue dans l'`argv` seul après les mêmes enveloppes que
-/// [`shows_test_output`] (`npx`, `uv run`, `python -m`, `bundle exec`…). Quand elle se termine
-/// par le code 0, `exec`, `tool-output` et `pipe` rendent sa sortie intacte : un test qui réussit
-/// peut écrire n'importe quoi sur la sortie qu'il hérite (un `git log` relayé par un processus
-/// enfant, un avertissement de sécurité), et une vue de lanceur n'en garde que le bilan. Un code non
-/// nul garde la vue du lanceur, qui montre les échecs. Proposition du 9 octobre 2026, en attente.
-pub fn runs_tests(command: &[String]) -> bool {
-    let rest = after_runner_wrappers(command);
-    let Some(first) = rest.first() else {
-        return false;
-    };
-    let program = program_name(first);
-    let args = &rest[1..];
-    let has = |word: &str| args.iter().any(|arg| arg == word);
-    let first_arg = args.first().map(String::as_str).unwrap_or("");
-    let test_task = |task: &str| {
-        let task = task.rsplit(':').next().unwrap_or(task).to_ascii_lowercase();
-        task.contains("test") || task == "check"
-    };
-    match program.as_str() {
-        "cargo" => has("test") || has("nextest") || first_arg == "t",
-        "pytest" | "py.test" | "unittest" | "nose2" | "tox" | "nox" | "jest" | "vitest"
-        | "mocha" | "ava" | "rspec" | "ctest" | "phpunit" | "pest" | "paratest" => true,
-        "go" | "dotnet" | "playwright" => has("test"),
-        "deno" | "bun" | "swift" | "mix" | "zig" => first_arg == "test" || has("test"),
-        "ruby" | "rake" | "rails" => runs_ruby_tests(&program, args),
-        "mvn" | "mvnw" => runs_maven_tests(args),
-        "gradle" | "gradlew" => args
-            .iter()
-            .any(|arg| !arg.starts_with('-') && (test_task(arg) || arg == "build")),
-        "php" => has("artisan") && has("test"),
-        "npm" | "pnpm" | "yarn" => match first_arg {
-            "test" | "t" | "tst" => true,
-            "run" | "run-script" => args.get(1).is_some_and(|script| test_task(script)),
-            _ => false,
-        },
-        "make" | "gmake" | "just" | "task" => args
-            .iter()
-            .any(|arg| !arg.starts_with('-') && !arg.contains('=') && test_task(arg)),
-        _ => false,
+/// La commande est un lanceur reconnu qui affiche la sortie des tests.
+#[cfg(test)]
+fn shows_test_output(command: &[String]) -> bool {
+    runner(command).is_some_and(|runner| runner.shows_output())
+}
+
+/// Sous-commande de `npm|pnpm|yarn|bun` lue après leurs options, ou `None` quand une option
+/// inconnue la rend illisible (ou qu'il n'y en a pas).
+pub fn package_manager_subcommand(args: &[String]) -> Option<&str> {
+    let at = operand(
+        args,
+        PACKAGE_MANAGER_VALUE_OPTIONS,
+        Some(PACKAGE_MANAGER_FLAGS),
+    )?;
+    Some(args[at].as_str())
+}
+
+/// Options globales de `cargo` qui prennent une valeur.
+const CARGO_VALUE_OPTIONS: &[&str] = &["--color", "--config", "-Z", "-C", "--explain"];
+
+/// Options de `npm|pnpm|yarn|bun` avant la sous-commande : avec valeur, puis sans valeur. Toute
+/// autre option rend la sous-commande illisible.
+const PACKAGE_MANAGER_VALUE_OPTIONS: &[&str] = &[
+    "--prefix",
+    "-C",
+    "--dir",
+    "-w",
+    "--workspace",
+    "--filter",
+    "-F",
+    "--cwd",
+    "--registry",
+    "--cache",
+    "--userconfig",
+    "--loglevel",
+];
+const PACKAGE_MANAGER_FLAGS: &[&str] = &[
+    "-s",
+    "--silent",
+    "-q",
+    "--quiet",
+    "-y",
+    "--yes",
+    "-ws",
+    "--workspaces",
+    "-r",
+    "--recursive",
+    "--if-present",
+    "--color",
+    "--no-color",
+    "--offline",
+    "--prefer-offline",
+    "--frozen-lockfile",
+    "--verbose",
+    "-d",
+];
+
+/// Options de `npx|bunx|pnpx` et de `npm exec` : avec valeur, puis sans valeur. `-c`/`--call`
+/// exécutent une ligne de shell : programme inconnu.
+const EXEC_VALUE_OPTIONS: &[&str] = &[
+    "-p",
+    "--package",
+    "--cache",
+    "--userconfig",
+    "--registry",
+    "--prefix",
+    "-w",
+    "--workspace",
+    "--node-options",
+];
+const EXEC_FLAGS: &[&str] = &[
+    "-y",
+    "--yes",
+    "--no",
+    "--no-install",
+    "-q",
+    "--quiet",
+    "-s",
+    "--silent",
+    "--ignore-existing",
+    "--prefer-offline",
+    "--prefer-online",
+    "--offline",
+    "--no-color",
+    "-ws",
+    "--workspaces",
+    "--include-workspace-root",
+];
+
+/// Options de `uv run` (et `poetry|pipenv|pdm|hatch|rye run`) : avec valeur, puis sans valeur.
+const RUN_VALUE_OPTIONS: &[&str] = &[
+    "--with",
+    "--with-editable",
+    "--with-requirements",
+    "--python",
+    "-p",
+    "--project",
+    "--directory",
+    "--package",
+    "--extra",
+    "--group",
+    "--only-group",
+    "--no-group",
+    "--env-file",
+    "--index",
+    "--default-index",
+    "--index-url",
+    "-i",
+    "--extra-index-url",
+    "--find-links",
+    "-f",
+    "--cache-dir",
+    "--config-file",
+    "--color",
+    "--resolution",
+    "--prerelease",
+    "--exclude-newer",
+    "--link-mode",
+];
+const RUN_FLAGS: &[&str] = &[
+    "--frozen",
+    "--locked",
+    "--no-sync",
+    "--isolated",
+    "--all-extras",
+    "--no-dev",
+    "--dev",
+    "--all-groups",
+    "--active",
+    "--no-project",
+    "--offline",
+    "-q",
+    "--quiet",
+    "-v",
+    "--verbose",
+    "--no-cache",
+    "-n",
+    "--refresh",
+    "--reinstall",
+    "--upgrade",
+    "-U",
+    "--no-env-file",
+    "--exact",
+    "--inexact",
+    "--no-editable",
+    "--compile-bytecode",
+    "--native-tls",
+    "--no-progress",
+];
+
+/// Index du premier opérande de `args` (premier mot qui n'est pas une option), en sautant la valeur
+/// des options de `with_value` (`--opt valeur` ; `--opt=valeur` compte pour un mot). `--` termine
+/// les options. Avec `known`, une option absente des deux listes rend `None` : son effet est inconnu.
+fn operand(args: &[String], with_value: &[&str], known: Option<&[&str]>) -> Option<usize> {
+    let mut index = 0;
+    while let Some(arg) = args.get(index) {
+        if arg == "--" {
+            return (index + 1 < args.len()).then_some(index + 1);
+        }
+        if !arg.starts_with('-') || arg == "-" {
+            return Some(index);
+        }
+        let (name, inline) = match arg.split_once('=') {
+            Some((name, _)) => (name, true),
+            None => (arg.as_str(), false),
+        };
+        if with_value.contains(&name) {
+            index += if inline { 1 } else { 2 };
+        } else if known.is_none_or(|flags| flags.contains(&name)) {
+            index += 1;
+        } else {
+            return None;
+        }
+    }
+    None
+}
+
+/// Programmes que `pnpm|yarn|bun <programme>` et `npm|pnpm|yarn|bun run <programme>` lancent
+/// directement quand ils sont nommés.
+fn is_named_harness(word: &str) -> bool {
+    matches!(program_name(word).as_str(), "jest" | "vitest")
+}
+
+/// La commande sans les enveloppes : le programme qui tourne vraiment, ou `None` quand une option
+/// d'enveloppe rend ce programme illisible (`npx -c '<ligne>'`, option inconnue).
+fn after_wrappers(command: &[String]) -> Option<&[String]> {
+    let mut rest = command;
+    loop {
+        let name = program_name(rest.first()?);
+        let args = &rest[1..];
+        let skip = match name.as_str() {
+            "npx" | "bunx" | "pnpx" => {
+                if args
+                    .iter()
+                    .any(|arg| arg == "-c" || arg.starts_with("--call"))
+                {
+                    return None;
+                }
+                1 + operand(args, EXEC_VALUE_OPTIONS, Some(EXEC_FLAGS))?
+            }
+            "npm" | "pnpm" | "yarn" | "bun" => {
+                let Some(at) = operand(
+                    args,
+                    PACKAGE_MANAGER_VALUE_OPTIONS,
+                    Some(PACKAGE_MANAGER_FLAGS),
+                ) else {
+                    return Some(rest);
+                };
+                match args[at].as_str() {
+                    "exec" | "dlx" | "x" => {
+                        let tail = &args[at + 1..];
+                        if tail
+                            .iter()
+                            .any(|arg| arg == "-c" || arg.starts_with("--call"))
+                        {
+                            return None;
+                        }
+                        1 + at + 1 + operand(tail, EXEC_VALUE_OPTIONS, Some(EXEC_FLAGS))?
+                    }
+                    "run" | "run-script"
+                        if args.get(at + 1).is_some_and(|word| is_named_harness(word)) =>
+                    {
+                        1 + at + 1
+                    }
+                    word if is_named_harness(word) => 1 + at,
+                    _ => return Some(rest),
+                }
+            }
+            "bundle" if args.first().is_some_and(|arg| arg == "exec") => 2,
+            "uv" | "poetry" | "pipenv" | "pdm" | "hatch" | "rye"
+                if args.first().is_some_and(|arg| arg == "run") =>
+            {
+                // Options de `run`, puis le programme ; `-m <module>` : le module est le programme.
+                let tail = &args[1..];
+                let mut index = 0;
+                loop {
+                    let arg = tail.get(index)?;
+                    if matches!(arg.as_str(), "--" | "-m" | "--module") {
+                        break 2 + index + 1;
+                    }
+                    if !arg.starts_with('-') {
+                        break 2 + index;
+                    }
+                    let name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
+                    if RUN_VALUE_OPTIONS.contains(&name) {
+                        index += if arg.contains('=') { 1 } else { 2 };
+                    } else if RUN_FLAGS.contains(&name) {
+                        index += 1;
+                    } else {
+                        return None;
+                    }
+                }
+            }
+            python if is_python(python) => {
+                let mut index = 0;
+                loop {
+                    let Some(arg) = args.get(index) else {
+                        return Some(rest);
+                    };
+                    match arg.as_str() {
+                        "-m" => break 1 + index + 1,
+                        "-c" | "-" => return None,
+                        "-W" | "-X" | "--check-hash-based-pycs" => index += 2,
+                        flag if flag.starts_with('-') => index += 1,
+                        // Un script : il n'est pas un lanceur reconnu.
+                        _ => return Some(rest),
+                    }
+                }
+            }
+            _ => return Some(rest),
+        };
+        if skip >= rest.len() {
+            return None;
+        }
+        rest = &rest[skip..];
     }
 }
 
@@ -157,46 +518,6 @@ fn runs_maven_tests(args: &[String]) -> bool {
         ) || arg.starts_with("surefire:")
             || arg.starts_with("failsafe:")
     })
-}
-
-/// La commande sans les enveloppes que le routage reconnaît : elles désignent le programme qui suit.
-fn after_runner_wrappers(command: &[String]) -> &[String] {
-    let mut rest = command;
-    loop {
-        let Some(first) = rest.first() else {
-            return rest;
-        };
-        let skip = match program_name(first).as_str() {
-            "npx" | "bunx" => {
-                1 + rest[1..]
-                    .iter()
-                    .take_while(|arg| matches!(arg.as_str(), "-y" | "--yes" | "--"))
-                    .count()
-            }
-            "npm" | "pnpm" | "yarn" | "bundle" if rest.get(1).is_some_and(|a| a == "exec") => {
-                if rest.get(2).is_some_and(|a| a == "--") {
-                    3
-                } else {
-                    2
-                }
-            }
-            "uv" | "poetry" | "pipenv" if rest.get(1).is_some_and(|a| a == "run") => 2,
-            "python" | "python3" | "py" if rest.get(1).is_some_and(|a| a == "-m") => 2,
-            "pnpm" | "yarn" | "bun"
-                if rest
-                    .get(1)
-                    .is_some_and(|a| matches!(program_name(a).as_str(), "jest" | "vitest")) =>
-            {
-                1
-            }
-            _ => 0,
-        };
-        if skip == 0 || skip >= rest.len() {
-            break;
-        }
-        rest = &rest[skip..];
-    }
-    rest
 }
 
 /// `pytest` : options courtes groupées (`-vs`), dont `k m p c o r W n` prennent une valeur (la fin de

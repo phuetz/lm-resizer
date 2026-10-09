@@ -300,3 +300,227 @@ fn relay() {
     assert_eq!(report["filter"], "lossless:test-success", "{view}");
     assert!(view.contains(&direct), "{view:?}");
 }
+
+/// Formes relevées par les revues du 9 octobre 2026 (revue indépendante B1, contre-audit Grok) et
+/// voisines. Chacune lance des tests ; à code 0, sa sortie doit passer intacte.
+const RUNNER_FORMS: &[(&str, &str)] = &[
+    ("cargo", "cargo test"),
+    ("cargo", "cargo.cmd test"),
+    ("cargo", "cargo.EXE test"),
+    ("cargo", "cargo +nightly test"),
+    ("cargo", "cargo --locked test"),
+    ("cargo", "cargo t"),
+    ("pytest", "pytest -q"),
+    ("pytest", "pytest.cmd -q"),
+    ("pytest", "py.test -q"),
+    ("pytest", "python -m pytest"),
+    ("pytest", "python3 -m pytest"),
+    ("pytest", "python3.11 -m pytest -q"),
+    ("pytest", "python3.12 -m pytest -q"),
+    ("pytest", "python3.12.exe -m pytest"),
+    ("pytest", "py -3 -m pytest"),
+    ("pytest", "python -X dev -m pytest"),
+    ("pytest", "pypy3 -m pytest"),
+    ("pytest", "uv run pytest"),
+    ("pytest", "uv run --frozen pytest"),
+    ("pytest", "uv run python -m pytest"),
+    ("pytest", "poetry run pytest"),
+    ("js", "jest"),
+    ("js", "jest.cmd"),
+    ("js", "npx jest"),
+    ("js", "npx.cmd jest"),
+    ("js", "npx --no-install jest"),
+    ("js", "npx -y jest"),
+    ("js", "npx --yes -- jest"),
+    ("js", "npx -p jest jest"),
+    ("js", "npm exec jest"),
+    ("js", "npm exec --yes jest"),
+    ("js", "npm exec -- jest"),
+    ("js", "pnpm exec jest"),
+    ("js", "pnpm dlx jest"),
+    ("js", "pnpm jest"),
+    ("js", "yarn jest"),
+    ("js", "yarn exec jest"),
+    ("js", "bunx jest"),
+    ("js", "npm run jest"),
+    ("js", "npm run vitest"),
+    ("js", "vitest run"),
+    ("js", "npx vitest run"),
+    ("js", "./node_modules/.bin/jest"),
+    ("js", "npm test"),
+    ("js", "npm --silent test"),
+    ("js", "npm --prefix app test"),
+    ("js", "npm run test:unit"),
+];
+
+fn success_transcript(family: &str) -> String {
+    match family {
+        "cargo" => cargo_success(),
+        "pytest" => pytest_success(),
+        _ => jest_success(),
+    }
+}
+
+fn failure_transcript(family: &str) -> &'static str {
+    match family {
+        "cargo" => "\nrunning 2 tests\ntest a ... ok\ntest b ... FAILED\n\nfailures:\n\n---- b stdout ----\nthread 'b' panicked at src/lib.rs:9:5:\nassertion failed\n\nfailures:\n    b\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\nerror: test failed, to rerun pass `--lib`\n",
+        "pytest" => "============================= test session starts ==============================\ncollected 3 items\n\ntests/test_a.py .F.                                                      [100%]\n\n=================================== FAILURES ===================================\n_________________________________ test_reject __________________________________\n\n    def test_reject():\n>       assert status(0) == 422\nE       assert 200 == 422\n\ntests/test_a.py:9: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_a.py::test_reject - assert 200 == 422\n========================= 1 failed, 2 passed in 0.05s ==========================\n",
+        _ => " FAIL  src/a.test.js\n  ● sums › adds\n\n    expect(received).toBe(expected)\n\n    Expected: 3\n    Received: 4\n\n      at Object.<anonymous> (src/a.test.js:3:17)\n\nTests:       1 failed, 2 passed, 3 total\nTest Suites: 1 failed, 1 total\n",
+    }
+}
+
+fn tool_output(state: &Path, command: &str, code: &str, raw: &str) -> Value {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+        .env("LM_RESIZER_STATE_DIR", state)
+        .args([
+            "tool-output",
+            "--json",
+            "--command",
+            command,
+            "--exit-code",
+            code,
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(raw.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+/// Une seule reconnaissance des lanceurs de tests : toute forme qu'une vue de tests réduit en échec
+/// sort intacte à code 0. Revue indépendante B1 (`npm exec --yes jest`, `npx --no-install jest`,
+/// `cargo.cmd test`, `cargo.EXE test`, `pytest.cmd -q`, `npx.cmd jest`) et contre-audit Grok
+/// (`python3.11 -m pytest`, `python3.12 -m pytest`) : à code 0, les avertissements disparaissaient.
+#[test]
+fn every_test_runner_form_is_raw_on_success_and_every_reduced_form_is_recognized() {
+    let state = tempfile::tempdir().unwrap();
+    let mut wrong = Vec::new();
+    for (family, command) in RUNNER_FORMS {
+        let success = success_transcript(family);
+        let report = tool_output(state.path(), command, "0", &success);
+        if report["filter"] != "lossless:test-success" || report["output"] != success.as_str() {
+            wrong.push(format!(
+                "code 0 : {command} -> {} {:?}",
+                report["filter"], report["output"]
+            ));
+        }
+        // Propriété : si une route réduit l'échec, la même forme est reconnue comme lanceur.
+        let failure = failure_transcript(family);
+        let failed = tool_output(state.path(), command, "1", failure);
+        let view = failed["output"].as_str().unwrap();
+        let raw_view = format!("[FAIL] Command failed (exit code: 1)\n{failure}");
+        if view != failure && view != raw_view && report["filter"] != "lossless:test-success" {
+            wrong.push(format!("réduit en échec sans être reconnu : {command}"));
+        }
+    }
+    // Des commandes qui ne lancent pas de tests gardent leur route.
+    for command in [
+        "cargo build -p test",
+        "cargo build",
+        "npm install",
+        "git status",
+        "python3 -m http.server",
+        "python3 script.py",
+        "uv run ruff",
+        "node node_modules/.bin/jest",
+    ] {
+        let report = tool_output(state.path(), command, "0", &cargo_success());
+        if report["filter"] == "lossless:test-success" {
+            wrong.push(format!("pas un lanceur de tests : {command}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Les formes de la revue B1, lancées pour de vrai par `exec` avec des doubles sur le `PATH`.
+#[test]
+fn launcher_forms_from_the_reviews_are_raw_on_success_through_exec() {
+    let dir = tempfile::tempdir().unwrap();
+    let cases: Vec<(&str, String, Vec<&str>)> = vec![
+        ("npm", jest_success(), vec!["npm", "exec", "--yes", "jest"]),
+        ("npx", jest_success(), vec!["npx", "--no-install", "jest"]),
+        ("npx.cmd", jest_success(), vec!["npx.cmd", "jest"]),
+        ("cargo.cmd", cargo_success(), vec!["cargo.cmd", "test"]),
+        ("cargo.EXE", cargo_success(), vec!["cargo.EXE", "test"]),
+        ("pytest.cmd", pytest_success(), vec!["pytest.cmd", "-q"]),
+        (
+            "python3.11",
+            pytest_success(),
+            vec!["python3.11", "-m", "pytest", "-q"],
+        ),
+        (
+            "python3.12",
+            pytest_success(),
+            vec!["python3.12", "-m", "pytest", "-q"],
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (program, stdout, argv) in &cases {
+        fake(dir.path(), program, stdout, 0);
+        let (out, report) = exec_json(dir.path(), argv);
+        if out.status.code() != Some(0)
+            || report["output"] != stdout.as_str()
+            || report["filter"] != "lossless:test-success"
+        {
+            wrong.push(format!(
+                "{argv:?}: {} {:?}",
+                report["filter"], report["output"]
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Même règle par l'outil MCP `lm_resizer_tool_output` (revue B1, preuve MCP).
+#[test]
+fn mcp_tool_output_keeps_a_successful_launcher_form_raw() {
+    let state = tempfile::tempdir().unwrap();
+    let raw = jest_success();
+    let mut requests = format!(
+        "{}\n",
+        serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})
+    );
+    for (id, command) in [(2, "npm exec --yes jest"), (3, "npx --no-install jest")] {
+        requests.push_str(&format!(
+            "{}\n",
+            serde_json::json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{
+                "name":"lm_resizer_tool_output",
+                "arguments":{"content":raw,"command":command,"exit_code":0}}})
+        ));
+    }
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+        .env("LM_RESIZER_STATE_DIR", state.path())
+        .args(["mcp", "--store"])
+        .arg(state.path().join("ccr.sqlite3"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(requests.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    for id in [2, 3] {
+        let reply = replies.iter().find(|r| r["id"] == id).expect("réponse MCP");
+        let text = reply["result"]["content"][0]["text"].as_str().unwrap();
+        let report: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(report["filter"], "lossless:test-success", "{id}: {report}");
+        assert_eq!(report["output"], raw.as_str(), "{id}");
+    }
+}

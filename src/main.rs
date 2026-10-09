@@ -3375,7 +3375,7 @@ fn process_captured_output(
     })
 }
 
-/// Un lanceur de tests (voir [`test_views::runs_tests`]), direct ou seul derrière `sh -c`, s'est
+/// Un lanceur de tests (voir [`test_views::runner`]), direct ou seul derrière `sh -c`, s'est
 /// terminé par le code 0 : sa sortie est rendue intacte (`lossless:test-success`). Décision lue dans
 /// l'`argv` et le code de sortie, jamais dans le contenu de la sortie.
 fn successful_test_run(command: &[String], exit_code: i32) -> bool {
@@ -3391,11 +3391,11 @@ fn successful_test_run(command: &[String], exit_code: i32) -> bool {
     {
         if let [ShellToken::Segment(segment)] = split_shell_operators(&command[2]).as_slice() {
             if let Some(words) = split_shell_words(segment) {
-                return test_views::runs_tests(&words);
+                return test_views::runner(&words).is_some();
             }
         }
     }
-    test_views::runs_tests(command)
+    test_views::runner(command).is_some()
 }
 
 fn prepend_failure_status(output: &mut String, exit_code: i32) {
@@ -4061,40 +4061,37 @@ fn pipe_filter_command(name: &str) -> Option<Vec<String>> {
 }
 
 /// Lanceur d'une recette ou d'un script choisi par l'utilisateur : `make`/`gmake` (toute cible),
-/// `npm|pnpm|yarn|bun run|test|start|stop|restart`, `cargo run`, `go run`, `uv|poetry|pipenv run`,
-/// `just`, `task`. La recette peut produire n'importe quoi, `git log` compris : aucun format n'est
-/// établi, la sortie est rendue brute. Seul un harnais nommé dans l'argv lui-même garde sa vue
-/// (`npm run vitest`, `uv run pytest`). `npm exec <programme>`, `npx`, `pnpm exec|dlx` et
-/// `bundle exec` désignent le programme qui suit : il est reconnu, ou il sort brut.
+/// `npm|pnpm|yarn|bun run|test|start|stop|restart` (ou une option inconnue avant la sous-commande),
+/// `cargo run`, `go run`, `uv|poetry|pipenv|pdm|hatch|rye run`, `just`, `task`. La recette peut
+/// produire n'importe quoi, `git log` compris : aucun format n'est établi, la sortie est rendue
+/// brute. Un lanceur de tests nommé dans l'argv (`npm run vitest`, `uv run pytest`) est reconnu
+/// avant, par `test_views::runner`.
 fn runs_a_user_script(command: &[String]) -> bool {
     let Some(program) = command.first().map(|p| command_basename(p)) else {
         return false;
     };
     let sub = command.get(1).map(String::as_str).unwrap_or("");
-    let rest: Vec<&str> = command.iter().skip(2).map(String::as_str).collect();
     match program.as_str() {
         "make" | "gmake" | "just" | "task" => true,
-        "npm" | "pnpm" | "yarn" | "bun" => {
-            matches!(
-                sub,
-                "run"
-                    | "run-script"
-                    | "rum"
-                    | "urn"
-                    | "test"
-                    | "t"
-                    | "tst"
-                    | "start"
-                    | "stop"
-                    | "restart"
-            ) && !command_runs_js_test(command)
-        }
+        // Sous-commande lue après les options ; une option inconnue la rend illisible : script.
+        "npm" | "pnpm" | "yarn" | "bun" => test_views::package_manager_subcommand(&command[1..])
+            .is_none_or(|sub| {
+                matches!(
+                    sub,
+                    "run"
+                        | "run-script"
+                        | "rum"
+                        | "urn"
+                        | "test"
+                        | "t"
+                        | "tst"
+                        | "start"
+                        | "stop"
+                        | "restart"
+                )
+            }),
         "cargo" | "go" => sub == "run",
-        "uv" | "poetry" | "pipenv" => {
-            let pytest = matches!(rest.as_slice(), ["pytest", ..])
-                || matches!(rest.as_slice(), ["python" | "python3", "-m", "pytest", ..]);
-            sub == "run" && !pytest
-        }
+        "uv" | "poetry" | "pipenv" | "pdm" | "hatch" | "rye" => sub == "run",
         _ => false,
     }
 }
@@ -4129,13 +4126,15 @@ fn filter_command_output_as(command: &[String], raw: &str, executed: bool) -> (S
             }
         }
     }
+    // Lanceurs de tests : une seule reconnaissance, `test_views::runner`, la même que la porte
+    // « code 0 = brut ». Aucune route plus bas ne reconnaît un lanceur de tests.
+    if let Some(runner) = test_views::runner(command) {
+        if let Some(view) = test_runner_view(&runner, raw) {
+            return view;
+        }
+    }
     if runs_a_user_script(command) {
         return ("lossless:script-runner".to_string(), raw.to_string());
-    }
-    // Lanceur de tests à qui l'argv demande d'afficher la sortie des tests (`cargo test --
-    // --nocapture`, `pytest -s`, `go test -v`…) : un test peut imprimer n'importe quoi, brut.
-    if test_views::shows_test_output(command) {
-        return ("lossless:test-output".to_string(), raw.to_string());
     }
     // Git : la sous-commande se lit après les options globales (`--no-pager`, `-C`, `-c`…). Une
     // sous-commande sans vue native (liste de commits, alias, `branch`, `blame`…) reste brute :
@@ -4199,6 +4198,12 @@ fn filter_command_output_as(command: &[String], raw: &str, executed: bool) -> (S
     if name == "generic" {
         return ("lossless:generic".to_string(), output);
     }
+    guard_routed_output(name, raw, output)
+}
+
+/// Gardes d'une vue de route : séparation stdout/stderr perdue, ligne d'échec perdue, vue plus
+/// longue que le brut. Chaque cas rend le brut.
+fn guard_routed_output(name: String, raw: &str, output: String) -> (String, String) {
     if raw.lines().any(|line| line == "[stderr]") && !output.lines().any(|line| line == "[stderr]")
     {
         return (format!("{name}:stream-guard"), raw.to_string());
@@ -4213,6 +4218,38 @@ fn filter_command_output_as(command: &[String], raw: &str, executed: bool) -> (S
         return (name, raw.to_string());
     }
     (name, output)
+}
+
+/// Vue d'un lanceur de tests reconnu par [`test_views::runner`] : brut quand l'argv demande la
+/// sortie des tests ou que le lanceur n'a pas de capture ; brut pour un script de tests ; sinon la
+/// vue de sa famille, la même quel que soit le lanceur (`npx`, `npm exec`, `cargo.cmd`…). `None` :
+/// pas de vue dédiée, la sortie suit les autres routes (`gradle` : filtre `jvm-build`).
+fn test_runner_view(runner: &test_views::Runner, raw: &str) -> Option<(String, String)> {
+    use test_views::Kind;
+    if runner.shows_output() {
+        return Some(("lossless:test-output".to_string(), raw.to_string()));
+    }
+    let (name, candidate) = match runner.kind {
+        Kind::Script => return Some(("lossless:script-runner".to_string(), raw.to_string())),
+        Kind::Nextest => {
+            let nextest = ["cargo".to_string(), "nextest".to_string()];
+            let (name, output) = command_filters::filter(&nextest, raw)?;
+            return Some(guard_routed_output(name.to_string(), raw, output));
+        }
+        Kind::Cargo => ("native:cargo-test", test_views::cargo(raw)),
+        Kind::Pytest => ("native:pytest", test_views::pytest(raw)),
+        Kind::Go => ("native:go-test", test_views::go(raw)),
+        Kind::Js => ("native:js-test", test_views::javascript(raw)),
+        Kind::Dotnet => ("native:dotnet-test", test_views::dotnet(raw)),
+        Kind::Maven | Kind::Gradle | Kind::Ruby | Kind::Playwright | Kind::Other => return None,
+    };
+    // Même règle que les vues natives : une vue qui coûte plus de jetons que le brut est refusée.
+    let output = if candidate == raw || TokenCounts::measure(raw, &candidate).tokens_saved >= 0 {
+        candidate
+    } else {
+        raw.to_string()
+    };
+    Some((name.to_string(), output))
 }
 
 fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
@@ -4244,34 +4281,6 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
         .is_some_and(|program| command_basename(program) == "psql")
     {
         return ("psql".to_string(), filter_psql(raw));
-    }
-    let cargo_test = command
-        .first()
-        .is_some_and(|program| command_basename(program) == "cargo")
-        && command.get(1).is_some_and(|verb| verb == "test");
-    if cargo_test
-        && raw.lines().any(|line| {
-            let trimmed = line.trim_start().to_ascii_lowercase();
-            trimmed.starts_with("warning:") || trimmed.starts_with("error:")
-        })
-    {
-        return ("cargo_test_diagnostics".to_string(), raw.to_string());
-    }
-    if cargo_test
-        && raw.lines().any(|line| line.starts_with("test result: ok."))
-        && !raw
-            .lines()
-            .any(|line| line.starts_with("test result: FAILED."))
-    {
-        let summaries: Vec<_> = raw
-            .lines()
-            .filter(|line| line.starts_with("test result: ok."))
-            .collect();
-        if summaries.len() == 1 {
-            let summary = summaries[0].trim_start_matches("test result: ok. ");
-            let counts = summary.split(';').take(3).collect::<Vec<_>>().join(";");
-            return ("cargo_test".to_string(), format!("{counts}\n"));
-        }
     }
     if command
         .first()
@@ -4307,12 +4316,6 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     };
     let sub = command.get(1).map(String::as_str).unwrap_or("");
 
-    // JS test runners (vitest/jest) — directly or via npx/pnpm/yarn/bunx. This is the single
-    // biggest token sink in agent sessions; route it before the generic fallback.
-    if command_runs_js_test(command) {
-        return ("js_test_runner".to_string(), filter_vitest(raw));
-    }
-
     // `docker build` sous ses quatre formes. Les filtres intégrés couvraient
     // `docker ps` et `docker logs` ; le build, lui, tombait dans le générique
     // alors que c'est la commande docker la plus bavarde.
@@ -4323,7 +4326,6 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     match (program.as_str(), sub) {
         ("diff", _) => ("diff_summary".to_string(), filter_diff_summary(raw)),
         ("cargo", "clippy") => ("cargo_diagnostics".to_string(), filter_diagnostics(raw)),
-        ("yarn", "test" | "run") => ("js_test".to_string(), filter_diagnostics(raw)),
         ("fd" | "dir", _) => ("listing".to_string(), filter_listing(raw)),
         _ => ("generic".to_string(), filter_generic(raw)),
     }
@@ -5571,99 +5573,6 @@ fn filter_docker_build(raw: &str) -> String {
     } else {
         append_omitted(kept, skipped)
     }
-}
-
-/// True when the command invokes the vitest/jest JS test runners — directly (`vitest run`,
-/// `jest`) or via a JS launcher (`npx vitest`, `bunx jest`, `pnpm exec vitest`, `yarn jest`).
-/// Deliberately does NOT match `grep vitest` / `cat jest.config.js`: the runner must be the
-/// program itself or an argument to a known launcher, never an arbitrary search pattern/path.
-fn command_runs_js_test(command: &[String]) -> bool {
-    let Some(first) = command.first().map(|s| command_basename(s)) else {
-        return false;
-    };
-    if first == "vitest" || first == "jest" {
-        return true;
-    }
-    const LAUNCHERS: [&str; 6] = ["npx", "bunx", "pnpm", "yarn", "npm", "bun"];
-    if LAUNCHERS.contains(&first.as_str()) {
-        return command
-            .iter()
-            .skip(1)
-            .map(|tok| command_basename(tok))
-            .any(|b| b == "vitest" || b == "jest");
-    }
-    false
-}
-
-/// Filter vitest/jest output down to the real signal: failing files/tests, assertion diffs,
-/// stack frames, and the final `Test Files` / `Tests` summary. Passing-noise, the RUN banner,
-/// deprecation notices and timing footers are dropped. When everything passed, collapse hard to
-/// just the summary line(s) — matching native's `vitest run` semantic collapse.
-fn filter_vitest(raw: &str) -> String {
-    let mut kept = Vec::new();
-    let mut keep_following = 0usize;
-    let mut skipped = 0usize;
-    let mut saw_failure = false;
-
-    for line in raw.lines() {
-        let trimmed = line.trim();
-
-        // Final counters (vitest: "Test Files …" / "Tests …"; jest: "Tests:" / "Test Suites:").
-        let is_summary = trimmed.starts_with("Test Files")
-            || trimmed.starts_with("Test Suites")
-            || trimmed.starts_with("Tests")
-            || trimmed.starts_with("Snapshots:");
-
-        // Failure markers across vitest + jest output shapes.
-        let is_failure = trimmed.starts_with("FAIL ")
-            || trimmed.starts_with('\u{00D7}') // × vitest failed test
-            || trimmed.starts_with('\u{2715}') // ✕ jest failed test
-            || trimmed.starts_with('\u{276F}') // ❯ vitest failing file header / stack frame
-            || trimmed.starts_with('\u{25CF}') // ● jest failure header
-            || trimmed.contains("Failed Tests")
-            || trimmed.contains("AssertionError")
-            || trimmed.contains("Error:")
-            || trimmed.contains("Expected")
-            || trimmed.contains("Received")
-            || trimmed.starts_with("expect(");
-
-        if is_summary {
-            kept.push(line.to_string());
-            keep_following = 0; // final counters end the failure block; drop trailing Start at/Duration
-        } else if is_failure {
-            saw_failure = true;
-            kept.push(line.to_string());
-            keep_following = 3; // grab a little trailing context (diff/stack/code frame)
-        } else if keep_following > 0 && !trimmed.is_empty() {
-            kept.push(line.to_string());
-            keep_following -= 1;
-        } else {
-            keep_following = keep_following.saturating_sub(1);
-            skipped += 1;
-        }
-    }
-
-    if kept.is_empty() {
-        return "vitest: passed\n".to_string();
-    }
-    if !saw_failure {
-        // All green: collapse to the summary counters only.
-        let summary: Vec<String> = kept
-            .into_iter()
-            .filter(|l| {
-                let t = l.trim();
-                t.starts_with("Test Files")
-                    || t.starts_with("Test Suites")
-                    || t.starts_with("Tests")
-            })
-            .collect();
-        return if summary.is_empty() {
-            "vitest: passed\n".to_string()
-        } else {
-            summary.join("\n") + "\n"
-        };
-    }
-    append_omitted(kept, skipped)
 }
 
 fn filter_listing(raw: &str) -> String {
@@ -13140,66 +13049,6 @@ expected = "error: bad\n"
         assert!(!filtered.contains("Compiling demo"));
     }
 
-    #[test]
-    fn command_runs_js_test_matches_runners_not_search() {
-        let v = |args: &[&str]| {
-            command_runs_js_test(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
-        };
-        assert!(v(&["vitest", "run"]));
-        assert!(v(&["jest"]));
-        assert!(v(&["npx", "vitest", "run"]));
-        assert!(v(&["bunx", "jest"]));
-        assert!(v(&["pnpm", "exec", "vitest"]));
-        assert!(v(&["node_modules/.bin/vitest"]));
-        // must NOT misfire when vitest/jest is a search pattern or a config path
-        assert!(!v(&["grep", "vitest", "src/"]));
-        assert!(!v(&["cat", "jest.config.js"]));
-        assert!(!v(&["npm", "run", "build"]));
-    }
-
-    #[test]
-    fn filter_vitest_collapses_passing_run_to_summary() {
-        let raw = " RUN  v4.1.9 /repo\n\n \u{2713} tests/a.test.ts (24 tests) 6ms\n\n Test Files  1 passed (1)\n      Tests  24 passed (24)\n   Start at  20:27:57\n   Duration  132ms (transform 41ms)\n";
-        let filtered = filter_vitest(raw);
-        assert!(filtered.contains("Tests  24 passed (24)"));
-        assert!(filtered.contains("Test Files  1 passed (1)"));
-        assert!(!filtered.contains("RUN  v4.1.9"));
-        assert!(!filtered.contains("Duration"));
-        // hard collapse: dramatically smaller than the raw
-        assert!(filtered.len() < raw.len() / 2);
-    }
-
-    #[test]
-    fn filter_vitest_keeps_failure_signal_drops_noise() {
-        // Real vitest v4 failing output shape (captured live).
-        let raw = concat!(
-            " DEPRECATED  `test.poolOptions` was removed in Vitest 4. See migration guide...\n\n",
-            " RUN  v4.1.9 /repo\n\n",
-            " \u{276F} tests/x.test.ts (3 tests | 1 failed) 6ms\n",
-            "     \u{00D7} fails on purpose 4ms\n\n",
-            "\u{23AF}\u{23AF}\u{23AF} Failed Tests 1 \u{23AF}\u{23AF}\u{23AF}\n\n",
-            " FAIL  tests/x.test.ts > scratch shape > fails on purpose\n",
-            "AssertionError: expected 2 to be 3 // Object.is equality\n\n",
-            "- Expected\n+ Received\n\n- 3\n+ 2\n\n",
-            " \u{276F} tests/x.test.ts:5:48\n",
-            " Test Files  1 failed (1)\n      Tests  1 failed | 2 passed (3)\n",
-            "   Start at  20:35:19\n   Duration  117ms\n",
-        );
-        let filtered = filter_vitest(raw);
-        // signal kept
-        assert!(filtered.contains("fails on purpose"));
-        assert!(filtered.contains("AssertionError: expected 2 to be 3"));
-        assert!(filtered.contains("Failed Tests 1"));
-        assert!(filtered.contains("tests/x.test.ts:5:48"));
-        assert!(filtered.contains("Tests  1 failed | 2 passed (3)"));
-        // noise dropped
-        assert!(!filtered.contains("DEPRECATED"));
-        assert!(!filtered.contains("RUN  v4.1.9"));
-        assert!(!filtered.contains("Duration  117ms"));
-        // and it is genuinely shorter than the raw
-        assert!(filtered.len() < raw.len());
-    }
-
     /// Un `docker build` BuildKit qui se termine bien.
     ///
     /// Forme reproduite depuis la sortie réelle de BuildKit : une étape produit
@@ -13663,7 +13512,8 @@ Successfully tagged localhost/app:latest\n";
             .collect();
         let raw = " Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Duration  10ms\n";
         let (name, filtered) = filter_command_output(&command, raw);
-        assert_eq!(name, "lossless:npm-test");
+        // Une vue par famille de lanceur, quel que soit le lanceur : celle de `vitest run`.
+        assert_eq!(name, "native:js-test");
         assert!(filtered.contains("Tests  3 passed (3)"));
         assert!(filtered.contains("Duration"));
     }
