@@ -91,7 +91,7 @@ lm-resizer gain --history --project
 
 `gain` can start negative: on a tiny output the view and the recovery line cost more tokens than the original. Real outputs turn the total positive.
 
-For any producer, `lm-resizer err|test|summary -- <command>` keeps diagnostics or test totals with adjacent context and a failure status header. `exec` and `tool-output` also summarize commands without a dedicated filter, except shell command lines such as `sh -c`, which are returned raw. Every output remains recoverable with `tee read`. `gain` shows measured command and token totals; `gain --json` returns the full counters. See the [CLI reference](docs/CLI-REFERENCE.md).
+For any producer, `lm-resizer err|test|summary -- <command>` keeps diagnostics or test totals with adjacent context and a failure status header. `exec` and `tool-output` also summarize commands without a dedicated filter, except shell command lines such as `sh -c` and commands whose arguments contain `git` followed by `log`, which are returned raw. Every output remains recoverable with `tee read`. `gain` shows measured command and token totals; `gain --json` returns the full counters. See the [CLI reference](docs/CLI-REFERENCE.md).
 
 For scripts, use `lm-resizer gain --json`.
 
