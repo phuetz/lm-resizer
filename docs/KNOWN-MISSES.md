@@ -2,6 +2,18 @@
 
 Filter migration is still in progress. Earlier measurements do not describe this version. See [the benchmark](../bench/native/README.md) for measured differences, remaining commands and raw recovery. French version: [KNOWN-MISSES.fr.md](KNOWN-MISSES.fr.md).
 
+## Hook: commands left as they are
+
+`exec` keeps the output until the process exits (except with `--stream`). The hook (`hook`) and `rewrite-shell` therefore leave unwrapped any command that can read the terminal or not end, direct or inside the line of `sh|bash|zsh -c` (one of its segments is enough). The list is read from `argv`:
+- editors, pagers, REPLs and interactive clients (`vim`, `less`, `top`, `ssh`, `psql` without `-c`, `python` without a script…), `docker|kubectl exec -it`;
+- network commands that can ask for a credential, a passphrase or a host key: `git push|pull|fetch|clone|ls-remote|submodule|send-email|svn|p4`, `git remote update|prune|show`, `scp`, `mosh`, `ssh-add`, `ssh-copy-id`;
+- password or confirmation: `sudo`, `su`, `doas`, `passwd`, `gpg`, `cargo login`, `npm|pnpm|yarn|bun init|create|login|adduser|publish`, `docker login`, `terraform|tofu apply|destroy` without `-auto-approve` or `-input=false`, `terraform console|login`, `aws configure`, `aws sso login`, `aws ssm start-session`, `aws ecs execute-command`, `gh auth login`, `gh pr|issue|repo create` without `--fill`, `--title` or `--web`, `gh pr merge` without a method;
+- launched programs and servers: `cargo run`, `cargo r`, `go run`, `dotnet run`, `next dev|start`, `npm|pnpm|yarn|bun` with `dev`, `start`, `serve`, `watch` or `preview`, `make|just|task run|serve|server|dev|start|watch|up`, `mvn spring-boot:run|exec:java|exec:exec|jetty:run|quarkus:dev|liberty:dev`, `gradle run|bootRun|appRun|quarkusDev|jettyRun`, `gradle --continuous`;
+- containers: `docker|podman run|create|start` with `-i` or `-t` (without `-d`), `attach`, `compose run|exec|attach` without `-T` or `-d`, `compose up` without `-d`, `kubectl attach|port-forward|proxy|edit`, `kubectl run|debug -it`, `kubectl get -w`;
+- followers: `tail -f`, `journalctl -f`, `docker|kubectl logs -f`, `--watch`, `--follow`, `cargo watch`, `vitest` without `run`, `cat` without a file.
+
+Limits: a command outside this list that asks a question (a script, a test that reads its input, `terraform plan` or `init` missing a variable) is still wrapped and its prompt only shows at the end; so is a foreground server started by `docker run` without `-i`/`-t`. `lm-resizer exec --stream` shows the output live.
+
 ## `git log`: what stays raw
 
 **Rule, closed and read from `argv` only**: a view that removes or rewrites lines applies only to a producer named by `argv` whose output format is established. Everything else comes out **raw, byte for byte** (only the `[FAIL] Command failed (exit code: N)` header is added for a non-zero code). No rule recognises a `git log` from the content of its output.

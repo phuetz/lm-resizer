@@ -48,6 +48,12 @@ into `lm-resizer exec -- <command>` through `updatedInput`.
   through the normal approval prompt. Only the Codex handler answers `allow`, because Codex
   marks the hook as failed otherwise. Before 0.2.6 the Claude hook answered `allow` as well,
   and Claude Code ran the rewritten command without asking.
+- Commands that can prompt or never end are never rewritten: `exec` keeps the output until the
+  process exits, so a `Password:` prompt, a host-key question or a server log would never show.
+  The list is read from `argv` (`git push|pull|fetch|clone`, `cargo run`, `go run`, `npm
+  start|run dev|login|publish`, `docker run -it`, `ssh`, `scp`, `sudo`, `terraform apply` without
+  `-auto-approve`, `aws sso login`, `gh auth login`…; see `docs/KNOWN-MISSES.md`). A command that
+  prompts and is not in the list is still captured until it exits.
 - A permission rule matches the command text. After the rewrite the text is
   `lm-resizer exec -- <command>`, so a `deny` rule written for the original, such as
   `Bash(cargo test)`, no longer applies. Checked on Claude Code 2.1.294 with `allow: Bash` and

@@ -5984,6 +5984,16 @@ fn command_is_interactive(words: &[String]) -> bool {
         return false;
     };
     let base = command_basename(program);
+    // `bash -lc '<ligne>'` (forme des commandes en tableau) : chaque segment de la ligne compte.
+    if matches!(base.as_str(), "bash" | "sh" | "zsh" | "dash")
+        && words.len() == 3
+        && matches!(words[1].as_str(), "-c" | "-lc" | "-ic")
+    {
+        return words[1] == "-ic"
+            || split_shell_operators(&words[2]).iter().any(
+                |token| matches!(token, ShellToken::Segment(seg) if segment_is_interactive(seg)),
+            );
+    }
     if command_requires_live_output(&base, &words[1..]) {
         return true;
     }
@@ -6035,7 +6045,136 @@ fn command_is_interactive(words: &[String]) -> bool {
     if base == "git" {
         return git_command_is_interactive(words);
     }
-    false
+    prompts_or_never_ends(&base, &words[1..])
+}
+
+/// Commande qui peut lire le terminal (mot de passe, confirmation, éditeur) ou qui ne se termine
+/// pas d'elle-même (programme ou serveur lancé) : `exec` garde la sortie jusqu'à la fin du
+/// processus, l'invite ou le journal n'apparaîtrait jamais. Décision lue sur l'argv seul.
+fn prompts_or_never_ends(base: &str, args: &[String]) -> bool {
+    let first = args.first().map(String::as_str).unwrap_or("");
+    let has = |word: &str| args.iter().any(|arg| arg == word);
+    let has_any = |words: &[&str]| args.iter().any(|arg| words.contains(&arg.as_str()));
+    match base {
+        "scp" | "sudo" | "su" | "doas" | "passwd" | "login" | "gpg" | "gpg2" | "ssh-add"
+        | "ssh-keygen" | "ssh-copy-id" | "mosh" => true,
+        "cargo" => matches!(first, "run" | "r" | "login"),
+        "go" | "dotnet" => first == "run",
+        "npm" | "pnpm" | "yarn" | "bun" => {
+            has_any(&["init", "create", "login", "adduser", "publish"])
+        }
+        "next" => matches!(first, "dev" | "start"),
+        "docker" | "podman" => container_run_is_interactive(args),
+        "kubectl" => {
+            has_any(&["attach", "port-forward", "proxy", "edit"])
+                || (has_any(&["run", "debug"])
+                    && has_any(&["-i", "-t", "-it", "-ti", "--stdin", "--tty"]))
+                || (has("get") && has_any(&["-w", "--watch-only"]))
+        }
+        "terraform" | "tofu" => {
+            has_any(&["console", "login"])
+                || (has_any(&["apply", "destroy"])
+                    && !has_any(&["-auto-approve", "--auto-approve", "-input=false"]))
+        }
+        "aws" => {
+            (first == "configure" && args.len() <= 2 && !has("list"))
+                || (has("sso") && has("login"))
+                || (has("ssm") && has("start-session"))
+                || (has("ecs") && has("execute-command"))
+        }
+        "gh" => {
+            let sub = args.get(1).map(String::as_str).unwrap_or("");
+            match (first, sub) {
+                ("auth", "login") | ("run", "watch") => true,
+                ("pr" | "issue" | "repo", "create") => !args.iter().any(|arg| {
+                    matches!(
+                        arg.as_str(),
+                        "--fill"
+                            | "--fill-first"
+                            | "--fill-verbose"
+                            | "--title"
+                            | "-t"
+                            | "--web"
+                            | "-w"
+                    ) || arg.starts_with("--title=")
+                }),
+                ("pr", "merge") => !has_any(&[
+                    "--merge",
+                    "-m",
+                    "--squash",
+                    "-s",
+                    "--rebase",
+                    "-r",
+                    "--auto",
+                    "--disable-auto",
+                ]),
+                _ => false,
+            }
+        }
+        "make" | "gmake" | "just" | "task" => {
+            has_any(&["run", "serve", "server", "dev", "start", "watch", "up"])
+        }
+        "mvn" | "mvnw" => args.iter().any(|arg| {
+            matches!(
+                arg.as_str(),
+                "spring-boot:run"
+                    | "exec:java"
+                    | "exec:exec"
+                    | "jetty:run"
+                    | "quarkus:dev"
+                    | "liberty:dev"
+            )
+        }),
+        "gradle" | "gradlew" => args.iter().any(|arg| {
+            matches!(arg.as_str(), "--continuous" | "-t")
+                || matches!(
+                    arg.rsplit(':').next(),
+                    Some("run" | "bootRun" | "appRun" | "quarkusDev" | "jettyRun")
+                )
+        }),
+        _ => false,
+    }
+}
+
+/// `docker|podman run|create|start` avec `-i`/`-t` (sans `-d`), `attach`, `login`, et `compose
+/// run|exec|attach` (qui allouent un terminal sauf `-T` ou `-d`).
+fn container_run_is_interactive(args: &[String]) -> bool {
+    let Some(pos) = args.iter().position(|arg| {
+        matches!(
+            arg.as_str(),
+            "run" | "create" | "start" | "attach" | "login" | "compose"
+        )
+    }) else {
+        return false;
+    };
+    let rest = &args[pos + 1..];
+    let short = |arg: &String, letter: char| {
+        arg.starts_with('-') && !arg.starts_with("--") && arg.contains(letter)
+    };
+    let detached = rest
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--detach" | "--detach=true") || short(arg, 'd'));
+    match args[pos].as_str() {
+        "attach" | "login" => true,
+        "compose" => {
+            rest.iter()
+                .any(|arg| matches!(arg.as_str(), "run" | "exec" | "attach"))
+                && !detached
+                && !rest
+                    .iter()
+                    .any(|arg| matches!(arg.as_str(), "-T" | "--no-TTY" | "--no-tty"))
+        }
+        _ => {
+            !detached
+                && rest.iter().any(|arg| {
+                    matches!(
+                        arg.as_str(),
+                        "--interactive" | "--tty" | "--interactive=true" | "--tty=true"
+                    ) || short(arg, 'i')
+                        || short(arg, 't')
+                })
+        }
+    }
 }
 
 /// Capturing until exit hides output from followers, watchers and foreground
@@ -6160,6 +6299,12 @@ fn git_command_is_interactive(words: &[String]) -> bool {
     let flags = &words[sub_index + 1..];
     match sub {
         "difftool" | "mergetool" => true,
+        // Réseau : invite d'identifiants, de phrase de passe SSH ou d'empreinte d'hôte.
+        "push" | "pull" | "fetch" | "clone" | "ls-remote" | "submodule" | "send-email" | "svn"
+        | "p4" => true,
+        "remote" => flags
+            .iter()
+            .any(|word| matches!(word.as_str(), "update" | "prune" | "show")),
         "rebase" => flags
             .iter()
             .any(|word| word == "-i" || word == "--interactive"),
@@ -13496,6 +13641,107 @@ Successfully tagged localhost/app:latest\n";
                 "{command}"
             );
         }
+    }
+
+    /// Audit du 9 octobre 2026 : `git push`, `cargo run` et `go run` étaient enveloppés ; `exec`
+    /// garde la sortie jusqu'à la fin du processus, l'invite (`Password:`, une confirmation) ou le
+    /// journal d'un serveur n'apparaissait jamais. Une commande qui peut lire le terminal ou ne pas
+    /// se terminer part telle quelle, décision lue sur l'argv.
+    #[test]
+    fn native_hook_never_wraps_prompting_or_long_running_commands() {
+        let mut failures = Vec::new();
+        for command in [
+            "git push",
+            "git push origin main",
+            "git -C repo pull --rebase",
+            "git fetch --all",
+            "git clone https://example.test/r.git",
+            "git ls-remote origin",
+            "git submodule update --init",
+            "git remote update",
+            "git send-email 0001.patch",
+            "cargo run",
+            "cargo run --bin server",
+            "cargo r",
+            "cargo login",
+            "go run main.go",
+            "go run ./cmd/server",
+            "npm start",
+            "npm run dev",
+            "npm init",
+            "npm login",
+            "npm publish",
+            "yarn create vite",
+            "next dev",
+            "next start",
+            "docker run -it alpine sh",
+            "docker run -i alpine cat",
+            "docker run --tty alpine sh",
+            "podman run -ti alpine sh",
+            "docker attach web",
+            "docker login",
+            "docker compose run web sh",
+            "docker compose exec web sh",
+            "kubectl run -it debug --image=busybox",
+            "kubectl attach pod",
+            "kubectl port-forward svc/web 8080:80",
+            "kubectl proxy",
+            "kubectl edit deploy/web",
+            "kubectl get pods -w",
+            "ssh host",
+            "scp a host:b",
+            "sudo ls",
+            "su -",
+            "terraform apply",
+            "tofu destroy",
+            "terraform console",
+            "terraform login",
+            "aws configure",
+            "aws sso login",
+            "aws ssm start-session --target i-0",
+            "gh auth login",
+            "gh pr create",
+            "gh pr merge 12",
+            "gh run watch",
+            "make run",
+            "make serve",
+            "just dev",
+            "mvn spring-boot:run",
+            "mvn exec:java",
+            "gradle bootRun",
+            "./gradlew run",
+            "gradle build --continuous",
+            "dotnet run",
+            "bash -lc 'git push'",
+            "sh -c 'cargo run'",
+            "bash -c 'cd app && npm start'",
+        ] {
+            if rewrite_command_for_hook(command, "/opt/lm").is_some() {
+                failures.push(format!("enveloppée : {command}"));
+            }
+        }
+        // Témoins : ces formes ne lisent pas le terminal et se terminent, elles restent enveloppées.
+        for command in [
+            "git status",
+            "git log -n 3",
+            "git diff HEAD~1",
+            "cargo test",
+            "cargo build",
+            "go test ./...",
+            "terraform plan",
+            "kubectl get pods",
+            "gh pr list",
+            "gh pr create --fill",
+            "gh pr merge 12 --squash",
+            "mvn -q compile",
+            "gradle assemble",
+            "bash -c 'cargo test'",
+        ] {
+            if rewrite_command_for_hook(command, "/opt/lm").is_none() {
+                failures.push(format!("laissée : {command}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]

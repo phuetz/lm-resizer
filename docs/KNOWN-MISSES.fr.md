@@ -2,6 +2,18 @@
 
 La migration des filtres est en cours. Les mesures antérieures ne décrivent pas cette version. Voir [le banc](../bench/native/README.md) pour les écarts mesurés, les commandes restantes et la récupération du brut.
 
+## Crochet : commandes laissées telles quelles
+
+`exec` garde la sortie jusqu'à la fin du processus (sauf `--stream`). Le crochet (`hook`) et `rewrite-shell` laissent donc partir telle quelle, sans `exec`, toute commande qui peut lire le terminal ou ne pas se terminer, directe ou dans la ligne de `sh|bash|zsh -c` (un seul de ses segments suffit). Liste lue sur l'`argv` :
+- éditeurs, visionneuses, REPL et clients interactifs (`vim`, `less`, `top`, `ssh`, `psql` sans `-c`, `python` sans script…), `docker|kubectl exec -it` ;
+- réseau qui peut demander un identifiant, une phrase de passe ou une empreinte : `git push|pull|fetch|clone|ls-remote|submodule|send-email|svn|p4`, `git remote update|prune|show`, `scp`, `mosh`, `ssh-add`, `ssh-copy-id` ;
+- mot de passe ou confirmation : `sudo`, `su`, `doas`, `passwd`, `gpg`, `cargo login`, `npm|pnpm|yarn|bun init|create|login|adduser|publish`, `docker login`, `terraform|tofu apply|destroy` sans `-auto-approve` ni `-input=false`, `terraform console|login`, `aws configure`, `aws sso login`, `aws ssm start-session`, `aws ecs execute-command`, `gh auth login`, `gh pr|issue|repo create` sans `--fill`, `--title` ni `--web`, `gh pr merge` sans méthode ;
+- programmes et serveurs lancés : `cargo run`, `cargo r`, `go run`, `dotnet run`, `next dev|start`, `npm|pnpm|yarn|bun` avec `dev`, `start`, `serve`, `watch` ou `preview`, `make|just|task run|serve|server|dev|start|watch|up`, `mvn spring-boot:run|exec:java|exec:exec|jetty:run|quarkus:dev|liberty:dev`, `gradle run|bootRun|appRun|quarkusDev|jettyRun`, `gradle --continuous` ;
+- conteneurs : `docker|podman run|create|start` avec `-i` ou `-t` (sans `-d`), `attach`, `compose run|exec|attach` sans `-T` ni `-d`, `compose up` sans `-d`, `kubectl attach|port-forward|proxy|edit`, `kubectl run|debug -it`, `kubectl get -w` ;
+- suiveurs : `tail -f`, `journalctl -f`, `docker|kubectl logs -f`, `--watch`, `--follow`, `cargo watch`, `vitest` sans `run`, `cat` sans fichier.
+
+Limites : une commande hors de cette liste qui pose une question (un script, un test qui lit l'entrée, `terraform plan` ou `init` à qui il manque une variable) reste enveloppée et son invite n'apparaît qu'à la fin ; `docker run` sans `-i`/`-t` d'un serveur au premier plan aussi. `lm-resizer exec --stream` montre la sortie en direct.
+
 ## `git log` : ce qui reste brut
 
 **Règle, fermée et lue dans l'`argv` seulement** : une vue qui retire ou réécrit des lignes ne s'applique qu'à un producteur que l'`argv` nomme et dont le format de sortie est établi. Tout le reste sort **brut, octet pour octet** (seul l'en-tête `[FAIL] Command failed (exit code: N)` s'ajoute quand le code est non nul). Aucune règle ne reconnaît un `git log` par le contenu de la sortie.
