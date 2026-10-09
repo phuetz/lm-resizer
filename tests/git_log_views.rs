@@ -462,3 +462,121 @@ fn already_captured_text_in_an_imitation_format_is_never_shortened() {
         }
     }
 }
+
+/// Dépôt de 23 commits dont un à message vide : 23 hashes, 22 sujets non vides.
+fn trap_history() -> tempfile::TempDir {
+    let repo = repository(false);
+    add_long_commits(&repo, 16);
+    repo
+}
+
+/// Chaque vrai hash de commit et chaque sujet non vide figurent dans `view`.
+fn assert_all_identities(label: &str, repo: &tempfile::TempDir, view: &[u8]) {
+    let view = String::from_utf8_lossy(view);
+    let expected = String::from_utf8(git(repo.path(), &["log", "--format=%H%x09%s"])).unwrap();
+    let (mut hashes, mut subjects) = (0, 0);
+    for row in expected.lines() {
+        let (hash, subject) = row.split_once('\t').unwrap();
+        hashes += 1;
+        // `--oneline` n'affiche que sept caractères.
+        assert!(view.contains(&hash[..7]), "{label}: hash {hash} absent");
+        if !subject.is_empty() {
+            subjects += 1;
+            assert!(view.contains(subject), "{label}: sujet {subject:?} absent");
+        }
+    }
+    assert_eq!((hashes, subjects), (23, 22), "{label}: dépôt piège");
+}
+
+fn pipe_stdin(repo: &Path, state: &Path, args: &[&str], input: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+        .current_dir(repo)
+        .env("LM_RESIZER_STATE_DIR", state)
+        .env("LM_RESIZER_TRACKING", "0")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
+    child.wait_with_output().unwrap().stdout
+}
+
+/// `pipe` et `tool-output` n'ont pas de ligne de commande fiable : aucune compression de
+/// `git log` par reconnaissance du contenu, que le format imite le format par défaut ou le soit.
+#[test]
+fn captured_git_log_text_is_returned_raw_whatever_it_looks_like() {
+    let repo = trap_history();
+    let state = tempfile::tempdir().unwrap();
+    let captures = [
+        // La revue de 222c5c4 : un format qui imite aussi Author: et Date:.
+        git(
+            repo.path(),
+            &[
+                "log",
+                "--format=commit %T%nAuthor: %an <%ae>%nDate: %ad%n%n    a%n    b%n    c%n    d%n    %H %s",
+            ],
+        ),
+        // Le vrai format par défaut.
+        git(repo.path(), &["log"]),
+        git(repo.path(), &["log", "--stat"]),
+    ];
+    for (n, raw) in captures.iter().enumerate() {
+        let input = repo.path().join(format!("capture{n}.txt"));
+        std::fs::write(&input, raw).unwrap();
+        let input = input.to_str().unwrap();
+        let views = [
+            (
+                "tool-output",
+                lm_resizer(
+                    repo.path(),
+                    state.path(),
+                    &["tool-output", "--command", "git log", "--input", input],
+                )
+                .stdout,
+            ),
+            (
+                "pipe",
+                pipe_stdin(
+                    repo.path(),
+                    state.path(),
+                    &["pipe", "--filter", "git-log"],
+                    raw,
+                ),
+            ),
+        ];
+        for (route, view) in views {
+            let label = format!("capture {n} par {route}");
+            assert_all_identities(&label, &repo, &view);
+            assert_eq!(&view, raw, "{label}: la capture n'est pas rendue brute");
+        }
+    }
+}
+
+/// Une commande composée par un shell n'est pas un appel direct à `git log` : le résumé générique ne
+/// doit pas supprimer le commit à message vide.
+#[test]
+fn composed_shell_commands_keep_every_commit() {
+    let repo = trap_history();
+    let state = tempfile::tempdir().unwrap();
+    for (script, code) in [
+        ("git log --oneline; exit 0", 0),
+        ("git log --oneline; exit 7", 7),
+        ("git log --oneline; exit 23", 23),
+        ("git log --oneline | cat", 0),
+        ("git log --oneline && true", 0),
+        ("git log --oneline", 0),
+        ("git log; exit 7", 7),
+    ] {
+        let out = lm_resizer(
+            repo.path(),
+            state.path(),
+            &["exec", "--", "sh", "-c", script],
+        );
+        assert_eq!(out.status.code(), Some(code), "{script}");
+        assert_all_identities(script, &repo, &out.stdout);
+    }
+}

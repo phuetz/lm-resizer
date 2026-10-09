@@ -234,6 +234,73 @@ fn stat_row(row: &str) -> Option<String> {
 }
 
 /// `commit <hash>` : 40 chiffres, ou une abréviation (`--abbrev-commit`, quatre au minimum pour git).
+/// Hashes de commit et sujets non vides qu'un texte présente comme un historique git : en-têtes
+/// `commit <hash>` (sujet = première ligne indentée du message) et lignes `<hash> <sujet>` ou
+/// `<hash>` seul (7 à 40 chiffres hexadécimaux, éventuellement après un graphe `*`/`|`).
+fn git_log_identities(text: &str) -> (Vec<&str>, Vec<&str>) {
+    let rows: Vec<&str> = text.lines().collect();
+    let (mut hashes, mut subjects) = (Vec::new(), Vec::new());
+    for (i, row) in rows.iter().enumerate() {
+        let body = strip_graph(row);
+        if is_commit_header(body) {
+            hashes.push(body.split_whitespace().nth(1).unwrap_or_default());
+            let message = rows[i + 1..]
+                .iter()
+                .skip_while(|l| !l.trim().is_empty())
+                .find(|l| !l.trim().is_empty());
+            if let Some(line) = message.filter(|l| l.starts_with("    ")) {
+                subjects.push(line.trim());
+            }
+        } else if let Some(hash) = body.split(' ').next().filter(|w| is_hex_id(w)) {
+            hashes.push(hash);
+            let subject = body[hash.len()..].trim();
+            if !subject.is_empty() {
+                subjects.push(subject);
+            }
+        }
+    }
+    (hashes, subjects)
+}
+
+fn strip_graph(row: &str) -> &str {
+    if row.starts_with(['*', '|', '/', '\\']) {
+        row.trim_start_matches(['*', '|', '/', '\\', ' ', '_'])
+    } else {
+        row
+    }
+}
+
+fn is_hex_id(word: &str) -> bool {
+    (7..=40).contains(&word.len())
+        && word
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Garde finale, pour toute sortie : `output` perd-il un hash de commit ou un sujet non vide que
+/// `raw` présente ? Elle ne reconnaît le contenu que pour **refuser** une vue (le brut est alors
+/// rendu) : se tromper la rend inutile, jamais dangereuse.
+pub fn lost_git_identity(raw: &str, output: &str) -> bool {
+    if raw == output {
+        return false;
+    }
+    let (hashes, subjects) = git_log_identities(raw);
+    if hashes.is_empty() {
+        return false;
+    }
+    let mut words = std::collections::HashSet::new();
+    let mut lines = std::collections::HashSet::new();
+    for row in output.lines() {
+        words.extend(row.split_whitespace());
+        let body = strip_graph(row).trim();
+        lines.insert(body);
+        if let Some((_, rest)) = body.split_once(' ') {
+            lines.insert(rest.trim());
+        }
+    }
+    hashes.iter().any(|h| !words.contains(h)) || subjects.iter().any(|s| !lines.contains(s))
+}
+
 /// Défense en profondeur pour le texte déjà produit (`tool-output`, `pipe`), dont le format n'est pas
 /// connu par la commande : chaque en-tête `commit <hash>` est suivi de la disposition par défaut, des
 /// lignes `Merge:`, `Author:` et `Date:` seules jusqu'à la ligne vide. Un format qui imite un en-tête
@@ -379,12 +446,16 @@ fn git_log_patch(raw: &str) -> String {
 /// La vue compressée par commit ne s'applique qu'au format par défaut (voir
 /// [`git_log_default_format`]) ; toute autre sortie est rendue brute, sauf un patch demandé, dont
 /// le codec se déplie en l'original exact.
-pub fn git_log_filter(command: &[String], raw: &str) -> (String, String) {
+///
+/// `executed` : la commande est lancée par `lm-resizer` lui-même (`exec`, `lm-resizer git log`). Un
+/// texte déjà produit (`pipe`, `tool-output`) n'a pas de ligne de commande fiable : jamais de vue
+/// compressée, quel que soit son contenu.
+pub fn git_log_filter(command: &[String], raw: &str, executed: bool) -> (String, String) {
     let patch = git_without_globals(command)
         .is_some_and(|plain| log_requests_patch(plain.get(2..).unwrap_or_default()));
     (
         "native:git-log".to_string(),
-        git_log(raw, patch, git_log_default_format(command)),
+        git_log(raw, patch, executed && git_log_default_format(command)),
     )
 }
 
@@ -410,7 +481,7 @@ pub fn git_log_default_format(command: &[String]) -> bool {
         .iter()
         .take_while(|arg| arg.as_str() != "--")
         .any(|arg| {
-            matches!(arg.as_str(), "--oneline" | "-z")
+            matches!(arg.as_str(), "--oneline" | "-z" | "--graph")
                 || arg.starts_with("--format")
                 || arg.starts_with("--pretty")
         });
@@ -743,6 +814,40 @@ mod tests {
         ] {
             assert!(!git_log_default_format(&words(line)), "{line}");
         }
+    }
+    #[test]
+    fn the_final_guard_refuses_a_view_that_loses_a_hash_or_a_subject() {
+        let oneline = "abc1234 premier\n8441500 \ndef5678 troisième\n";
+        // Intact, ou sans identité reconnaissable : jamais refusée.
+        assert!(!lost_git_identity(oneline, oneline));
+        assert!(!lost_git_identity(
+            "rien de git ici\nligne 2\n",
+            "ligne 2\n"
+        ));
+        // Le hash du commit à message vide disparaît.
+        assert!(lost_git_identity(
+            oneline,
+            "abc1234 premier\ndef5678 troisième\n"
+        ));
+        // Un sujet disparaît (ou est tronqué).
+        assert!(lost_git_identity(
+            oneline,
+            "abc1234\n8441500\ndef5678 troisi...\n"
+        ));
+        // Le graphe `*` ne cache pas les identités.
+        let graph = "* abc1234 premier\n| * def5678 deuxième\n";
+        assert!(!lost_git_identity(graph, graph));
+        assert!(lost_git_identity(graph, "* abc1234 premier\n"));
+        // En-têtes `commit <hash>` : le sujet est la première ligne indentée du message.
+        let long = "commit aaaaaaa1\nAuthor: A <a@e.t>\nDate: d\n\n    sujet un\n\n    corps\n";
+        assert!(!lost_git_identity(
+            long,
+            "commit aaaaaaa1\n  Author: A\n  sujet un\n"
+        ));
+        assert!(lost_git_identity(long, "commit aaaaaaa1\n  Author: A\n"));
+        // Une ligne de message qui commence par un mot hexadécimal n'est pas une identité.
+        let prose = "commit aaaaaaa1\nAuthor: A <a@e.t>\nDate: d\n\n    sujet\n\n    deadbeef est le correctif\n";
+        assert!(!lost_git_identity(prose, "commit aaaaaaa1\n  sujet\n"));
     }
     #[test]
     fn python_module_and_uv_runners_use_the_pytest_view() {

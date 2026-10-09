@@ -3034,7 +3034,7 @@ fn run_inspected_command(
                 inspection_views::summarize(mode, &raw, captured.code),
             )
         } else {
-            let (filter, view) = filter_command_output(command, &raw);
+            let (filter, view) = filter_executed_command_output(command, &raw);
             if filter == "lossless:generic" {
                 (
                     "generic:summary".into(),
@@ -3056,6 +3056,13 @@ fn run_inspected_command(
         filter
     } else {
         format!("native:{filter}")
+    };
+    // Garde finale : une vue qui perd un hash de commit ou un sujet est remplacée par le brut.
+    let filter = if mode.is_none() && command_views::lost_git_identity(&raw, &output) {
+        output = raw.clone();
+        "native:git-identity-guard".to_string()
+    } else {
+        filter
     };
     let filtered_bytes = output.len();
     let mut compression_steps = Vec::new();
@@ -3141,7 +3148,7 @@ fn run_exec_command(
     let (filter, mut filtered) = if raw_on_failure && exit_code != 0 {
         ("raw_on_failure".to_string(), raw.clone())
     } else {
-        filter_command_output(command, &raw)
+        filter_executed_command_output(command, &raw)
     };
     if !raw.trim().is_empty() && filtered.trim().is_empty() {
         filtered = raw.clone();
@@ -3220,6 +3227,11 @@ fn run_exec_command(
     }
     // La pipeline peut réduire une sortie que le filtre n'a pas modifiée.
     // Le tee doit couvrir les omissions de toutes les étapes d'exec.
+    if command_views::lost_git_identity(&raw, &compressed.output) {
+        compressed.output = raw.clone();
+        compressed.steps_applied.clear();
+        compressed.cache_keys.clear();
+    }
     let tee_hint = tee_raw_bytes_if_useful(&raw_bytes, &compressed.output)?;
     let mut final_output = compressed.output;
     if streams.stdout_bytes > 0 && streams.stderr_bytes > 0 {
@@ -3314,6 +3326,12 @@ fn process_captured_output(
         && output.len() >= raw.len()
         && output != raw
     {
+        output = raw.to_string();
+        steps.clear();
+        keys.clear();
+    }
+    // Garde finale : une vue qui perd un hash de commit ou un sujet est remplacée par le brut.
+    if !keep_raw && command_views::lost_git_identity(raw, &output) {
         output = raw.to_string();
         steps.clear();
         keys.clear();
@@ -4011,7 +4029,18 @@ fn pipe_filter_command(name: &str) -> Option<Vec<String>> {
     command_views::pipe_command(name)
 }
 
+/// Vue d'une sortie déjà produite (tube, `tool-output`, hook, découverte) : la commande n'est pas
+/// lancée par nous, rien ne prouve son format.
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
+    filter_command_output_as(command, raw, false)
+}
+
+/// Vue de la sortie d'une commande que `lm-resizer` lance lui-même (`exec`).
+fn filter_executed_command_output(command: &[String], raw: &str) -> (String, String) {
+    filter_command_output_as(command, raw, true)
+}
+
+fn filter_command_output_as(command: &[String], raw: &str, executed: bool) -> (String, String) {
     // Only unwrap a single simple shell command. Never execute/rewrite the
     // shell expression, nor guess the producer of pipelines or compound lists.
     if command.len() == 3
@@ -4024,7 +4053,8 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
         if let [ShellToken::Segment(segment)] = split_shell_operators(&command[2]).as_slice() {
             if let Some(words) = split_shell_words(segment) {
                 if !words.is_empty() {
-                    return filter_command_output(&words, raw);
+                    // Une commande passée par un shell n'est pas un appel direct à git.
+                    return filter_command_output_as(&words, raw, false);
                 }
             }
         }
@@ -4038,10 +4068,10 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
     {
         match command_views::git_without_globals(command) {
             Some(plain) if plain.get(1).map(String::as_str) == Some("log") => {
-                return command_views::git_log_filter(command, raw);
+                return command_views::git_log_filter(command, raw, executed);
             }
             Some(plain) if plain.as_slice() != command => {
-                return filter_command_output(&plain, raw);
+                return filter_command_output_as(&plain, raw, executed);
             }
             Some(plain)
                 if !matches!(
