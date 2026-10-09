@@ -72,6 +72,7 @@ Toutes les commandes de premier niveau, puis les sous-commandes de `tee`.
 | `mcp` | Run a minimal MCP stdio server |
 | `mcp-proxy` | Relay an MCP stdio server and compress successful tool text results |
 | `install` | Install lm-resizer as an MCP server for common agent clients |
+| `uninstall` | Remove the lm-resizer MCP server entry written by `install`, keeping the rest of each file |
 | `serve` | Run a small HTTP API |
 | `wrap` | Start the local proxy, then launch an agent through it |
 | `tee list` | List raw output recovery files |
@@ -189,8 +190,8 @@ Ces options existent sur plusieurs commandes ; le script de contrôle exige que 
 | `--provider` | `sanitize-provider-fixture`, `serve`, `wrap` | Fournisseur : `openai`, `anthropic`, `bedrock` ou `vertex` (pour `serve` et `wrap`, défaut `openai`). La variable `LM_RESIZER_PROVIDER` n'est lue que par `serve` et `wrap`. |
 | `--input` | `sanitize-provider-fixture` | Fichier JSON d'entrée (obligatoire). |
 | `--output` | `sanitize-provider-fixture` | Chemin du fichier fixture écrit (obligatoire). |
-| `--client` | `init-native-hooks`, `hook`, `install-hooks`, `uninstall-hooks` | Agent visé : `codex`, `claude`, `gemini`, `copilot`, `cursor` ou `all` (défaut `all`). `install-hooks` n'accepte que `codex`, `claude` et `all` ; pour `gemini`, `copilot` et `cursor`, utiliser `init-native-hooks`. |
-| `--project-dir` | `install-hooks`, `uninstall-hooks` | Dossier du projet (où lire ou écrire `AGENTS.md` / `CLAUDE.md` ou la configuration). |
+| `--client` | `init-native-hooks`, `hook`, `install-hooks`, `uninstall-hooks` | Agent visé : `codex`, `claude`, `gemini`, `copilot`, `cursor` ou `all` (défaut `all`). `uninstall-hooks --client all` retire les configurations natives des cinq clients. Pour `install` et `uninstall` (serveur MCP) : `claude`, `codex`, `cursor`, `vscode` ou `all`, avec `--scope project|global` (Codex toujours global). `install-hooks` n'accepte que `codex`, `claude` et `all` ; pour `gemini`, `copilot` et `cursor`, utiliser `init-native-hooks`. |
+| `--project-dir` | `install-hooks`, `uninstall-hooks`, `install`, `uninstall` | Dossier du projet (où lire ou écrire `AGENTS.md` / `CLAUDE.md` ou la configuration). |
 | `--force` | `install-hooks` | Écrase les fichiers générés existants. |
 
 ## Garde de diagnostic

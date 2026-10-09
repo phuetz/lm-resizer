@@ -237,9 +237,15 @@ Undo what you installed, in this order.
 lm-resizer uninstall-hooks --client all --project-dir .
 ~~~
 
-   This removes the guidance blocks, the generated helpers and the native hook files when they are still exactly as generated; a hand-edited file is left alone.
+   This removes the guidance blocks, the generated helpers and the native hook files of the five clients (Codex, Claude, Gemini, Copilot, Cursor) when they are still exactly as generated; a hand-edited file is left alone.
 
-2. MCP servers. There is no command: delete the `lm-resizer` entry by hand from `.mcp.json` and `.cursor/mcp.json` (key `mcpServers`), from `.vscode/mcp.json` (key `servers`) and the `[mcp_servers.lm_resizer]` table of `~/.codex/config.toml`.
+2. MCP servers, with the same client and scope as `install`:
+
+~~~bash
+lm-resizer uninstall --client all --scope project --project-dir .
+~~~
+
+   This removes only the `lm-resizer` entry from `.mcp.json` and `.cursor/mcp.json` (key `mcpServers`), from `.vscode/mcp.json` (key `servers`) and the `[mcp_servers.lm_resizer]` table of `~/.codex/config.toml` (Codex is global even with `project`); other servers stay, and a file left empty is deleted.
 
 3. Recorded data. Raw-output archives, command history and the CCR database live in the state directory: `~/lm-resizer` by default, or `XDG_STATE_HOME`, `LOCALAPPDATA` or `LM_RESIZER_STATE_DIR` when set. Delete the archives, then the directory:
 

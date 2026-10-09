@@ -8,5 +8,5 @@ Les adaptateurs utilisent `BeforeTool` et `hookSpecificOutput.tool_input` pour G
 
 Les tests exécutent le CLI, créent les configurations dans un répertoire temporaire et vérifient les réponses JSON, les arguments conservés, l'idempotence quand le contenu est identique, et le refus d'écraser un fichier divergent sans `--force`. Aucun test de session authentifiée Gemini, Copilot ou Cursor n'est annoncé.
 
-`init` / `init-native-hooks` est idempotent : un second appel avec le même contenu réussit sans `--force` ; un fichier divergent reste refusé. `install-hooks` réutilise la même règle pour les helpers. `uninstall-hooks` retire le bloc marqué, les helpers `.lm-resizer/hooks`, et une config native seulement si elle correspond encore au JSON généré (codex, claude, gemini, copilot, cursor, ou `all` pour codex+claude). Un second `uninstall-hooks` reste sans effet.
+`init` / `init-native-hooks` est idempotent : un second appel avec le même contenu réussit sans `--force` ; un fichier divergent reste refusé. `install-hooks` réutilise la même règle pour les helpers. `uninstall-hooks` retire le bloc marqué, les helpers `.lm-resizer/hooks`, et une config native seulement si elle correspond encore au JSON généré (codex, claude, gemini, copilot, cursor, ou `all` pour les cinq ; à l'installation, `all` garde Codex + Claude). Un second `uninstall-hooks` reste sans effet.
 

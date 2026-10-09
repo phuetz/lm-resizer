@@ -69,6 +69,9 @@ into `lm-resizer exec -- <command>` through `updatedInput`.
   start|run dev|login|publish`, `docker run -it`, `ssh`, `scp`, `sudo`, `terraform apply` without
   `-auto-approve`, `aws sso login`, `gh auth login`…; see `docs/KNOWN-MISSES.md`). A command that
   prompts and is not in the list is still captured until it exits.
+- `uninstall-hooks --client all` removes the native hook files of all five clients (Codex,
+  Claude, Gemini, Copilot, Cursor) when they still match the generated content; before 0.2.6 it
+  left the Cursor hook. `uninstall --client all --scope project` removes the MCP server entry.
 - A permission rule matches the command text. After the rewrite the text is
   `lm-resizer exec -- <command>`, so a `deny` rule written for the original, such as
   `Bash(cargo test)`, no longer applies. Checked on Claude Code 2.1.294 with `allow: Bash` and

@@ -128,7 +128,10 @@ An existing file is refused unless you pass `--force`, which overwrites the
 whole file: back up and merge any existing settings yourself.
 `uninstall-hooks` removes guidance blocks, generated helpers under
 `.lm-resizer/hooks`, and a native hook config file only when its contents still
-match what `init` / `init-native-hooks` would write. A divergent hand-edited
+match what `init` / `init-native-hooks` would write; `--client all` covers the
+five clients (Codex, Claude, Gemini, Copilot, Cursor). `lm-resizer uninstall
+--client <client> --scope <scope>` removes the MCP entry written by `install`.
+A divergent hand-edited
 file is left alone; restore or delete it yourself if needed. Repeating
 `install-hooks` or `init` with identical content is a no-op success.
 The generated config wires `lm-resizer hook` on two `Bash` events:

@@ -799,6 +799,19 @@ enum Commands {
         #[arg(long)]
         store: Option<PathBuf>,
     },
+    /// Remove the lm-resizer MCP server entry written by `install`, keeping the rest of each file.
+    Uninstall {
+        /// Client to unconfigure: claude, codex, cursor, vscode, all.
+        #[arg(long, default_value = "claude")]
+        client: String,
+        /// Scope: project or global. Codex is user-scoped: `--client codex` requires
+        /// `--scope global`, and `--client all` cleans `~/.codex/config.toml` even with `project`.
+        #[arg(long, default_value = "project")]
+        scope: String,
+        /// Project directory for project-scoped config files.
+        #[arg(long)]
+        project_dir: Option<PathBuf>,
+    },
     /// Run a small HTTP API.
     Serve {
         #[arg(long, default_value = "127.0.0.1:8787")]
@@ -2486,6 +2499,11 @@ async fn run(cli: Cli) -> Result<()> {
             project_dir,
             store,
         } => install_mcp(&client, &scope, project_dir, store)?,
+        Commands::Uninstall {
+            client,
+            scope,
+            project_dir,
+        } => uninstall_mcp(&client, &scope, project_dir)?,
         Commands::Serve {
             bind,
             upstream,
@@ -7968,7 +7986,18 @@ fn uninstall_native_hook_files(client: &str, project_dir: &Path) -> Result<Vec<S
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "lm-resizer".to_string());
     let mut removed = Vec::new();
-    for target in native_hook_targets(client, project_dir)? {
+    // `all` retire les cinq configurations natives ; à l'installation, `all` garde sa portée
+    // historique Codex + Claude.
+    let targets = if client == "all" {
+        let mut targets = native_hook_targets("all", project_dir)?;
+        for name in ["gemini", "copilot", "cursor"] {
+            targets.extend(native_hook_targets(name, project_dir)?);
+        }
+        targets
+    } else {
+        native_hook_targets(client, project_dir)?
+    };
+    for target in targets {
         if !target.path.exists() {
             continue;
         }
@@ -9402,6 +9431,114 @@ fn install_mcp(
             anyhow::bail!("unsupported client '{other}'. Use claude, codex, cursor, vscode, or all")
         }
     }
+}
+
+/// Inverse d'[`install_mcp`] : retire la seule entrée `lm-resizer` (table `mcp_servers.lm_resizer`
+/// pour Codex) et garde le reste du fichier ; un fichier qui ne contient plus rien est supprimé.
+fn uninstall_mcp(client: &str, scope: &str, project_dir: Option<PathBuf>) -> Result<()> {
+    let project_dir = project_dir.unwrap_or(std::env::current_dir()?);
+    match client {
+        "claude" | "claude-code" => uninstall_json_mcp(scope, ClientConfig::Claude, &project_dir),
+        "codex" => {
+            if scope != "global" {
+                anyhow::bail!("Codex MCP config is user-scoped; use --client codex --scope global");
+            }
+            uninstall_codex()
+        }
+        "cursor" => uninstall_json_mcp(scope, ClientConfig::Cursor, &project_dir),
+        "vscode" | "vs-code" => uninstall_json_mcp(scope, ClientConfig::VsCode, &project_dir),
+        "all" => {
+            uninstall_json_mcp(scope, ClientConfig::Claude, &project_dir)?;
+            uninstall_codex()?;
+            uninstall_json_mcp(scope, ClientConfig::Cursor, &project_dir)?;
+            if scope == "global" {
+                println!("VS Code MCP config is project-scoped only: nothing to remove globally");
+                Ok(())
+            } else {
+                uninstall_json_mcp(scope, ClientConfig::VsCode, &project_dir)
+            }
+        }
+        other => {
+            anyhow::bail!("unsupported client '{other}'. Use claude, codex, cursor, vscode, or all")
+        }
+    }
+}
+
+fn uninstall_json_mcp(scope: &str, client: ClientConfig, project_dir: &Path) -> Result<()> {
+    let config_path = client.path(scope, project_dir)?;
+    if !config_path.exists() {
+        println!(
+            "No {} MCP config at {}",
+            client.name(),
+            config_path.display()
+        );
+        return Ok(());
+    }
+    let mut config: Value = serde_json::from_str(&std::fs::read_to_string(&config_path)?)
+        .with_context(|| format!("invalid JSON in {}", config_path.display()))?;
+    let root_key = client.root_key();
+    let removed = config
+        .get_mut(root_key)
+        .and_then(Value::as_object_mut)
+        .and_then(|servers| servers.remove("lm-resizer"))
+        .is_some();
+    if !removed {
+        println!(
+            "No lm-resizer MCP server in {} config at {}",
+            client.name(),
+            config_path.display()
+        );
+        return Ok(());
+    }
+    if config
+        .get(root_key)
+        .and_then(Value::as_object)
+        .is_some_and(serde_json::Map::is_empty)
+    {
+        if let Some(map) = config.as_object_mut() {
+            map.remove(root_key);
+        }
+    }
+    if config.as_object().is_some_and(serde_json::Map::is_empty) {
+        std::fs::remove_file(&config_path)?;
+        if let Some(parent) = config_path.parent().filter(|dir| dir != &project_dir) {
+            let _ = std::fs::remove_dir(parent);
+        }
+    } else {
+        std::fs::write(&config_path, serde_json::to_string_pretty(&config)?)?;
+    }
+    println!(
+        "Removed {} MCP server from {}",
+        client.name(),
+        config_path.display()
+    );
+    Ok(())
+}
+
+fn uninstall_codex() -> Result<()> {
+    let config_path = codex_home_dir()?.join("config.toml");
+    if !config_path.exists() {
+        println!("No Codex MCP config at {}", config_path.display());
+        return Ok(());
+    }
+    let existing = std::fs::read_to_string(&config_path)?;
+    if !existing
+        .lines()
+        .any(|line| line.trim() == "[mcp_servers.lm_resizer]")
+    {
+        println!("No lm-resizer MCP server in {}", config_path.display());
+        return Ok(());
+    }
+    let mut content = remove_toml_table(&existing, "mcp_servers.lm_resizer");
+    trim_blank_suffix(&mut content);
+    if content.trim().is_empty() {
+        std::fs::remove_file(&config_path)?;
+    } else {
+        content.push('\n');
+        std::fs::write(&config_path, content)?;
+    }
+    println!("Removed Codex MCP server from {}", config_path.display());
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
