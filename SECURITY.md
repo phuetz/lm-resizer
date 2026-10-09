@@ -33,6 +33,14 @@ umask. Directories and files created by an earlier version keep their old mode: 
 `chmod -R go-rwx ~/lm-resizer` (or your `LM_RESIZER_STATE_DIR`) once. The history stores
 command lines as typed and is not redacted: treat it like a shell history file.
 
+A raw-output archive (`tee/<sha256>.log`) is created with `O_CREAT|O_EXCL|O_NOFOLLOW` and never
+follows a symbolic link. An archive that already exists under that name is reused only if the
+open descriptor shows a regular file owned by the current user with no group or other permission;
+otherwise nothing is written, no `[tee:]` is shown and a warning names the file (before 0.2.6, a
+link planted in a writable tee directory received the raw output, secrets included). The history
+(`exec-history.jsonl`) and the hook counter file (`hook-audit.jsonl`) are still opened in append
+mode without these checks: keep the state directory private (0700, as created).
+
 The local proxy (`serve`, `wrap`) has no client authentication. It listens on loopback only
 unless `--allow-non-loopback` is given, answers only requests whose `Host` is local, and
 follows no upstream redirect. Any local account that can reach the port can still use the

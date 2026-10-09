@@ -2601,16 +2601,15 @@ fn open_private_append(path: &Path) -> std::io::Result<std::fs::File> {
     options.open(path)
 }
 
-/// Écrit `bytes` dans `path` ; un fichier créé ici l'est en 0600 sous Unix.
+/// Écrit `bytes` dans `path` (hors Unix ; sous Unix, voir [`write_private_archive`]).
+#[cfg(not(unix))]
 fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let mut options = std::fs::OpenOptions::new();
-    options.create(true).write(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(path)?.write_all(bytes)
+    std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)?
+        .write_all(bytes)
 }
 
 fn default_store_path() -> Result<PathBuf> {
@@ -5756,12 +5755,89 @@ fn archive_raw_bytes(raw: &[u8]) -> Result<Option<String>> {
     let tee_dir = state_dir.join("tee");
     let digest = format!("{:x}", Sha256::digest(raw));
     let path = tee_dir.join(format!("{digest}.log"));
-    let written = create_private_dir_all(&tee_dir).and_then(|()| write_private_file(&path, raw));
-    if written.is_err() {
+    if create_private_dir_all(&tee_dir).is_err() {
         warn_state_unwritable(&state_dir);
         return Ok(None);
     }
-    Ok(Some(format!("[raw: {}]", &digest[..12])))
+    match write_private_archive(&path, raw) {
+        Ok(()) => Ok(Some(format!("[raw: {}]", &digest[..12]))),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!(
+                "lm-resizer: archive tee refusée, sortie brute non archivée : {error}. \
+                 Supprimez le fichier ou lancez `chmod -R go-rwx {}`",
+                state_dir.display()
+            );
+            Ok(None)
+        }
+        Err(_) => {
+            warn_state_unwritable(&state_dir);
+            Ok(None)
+        }
+    }
+}
+
+/// Écrit une archive tee sans jamais suivre de lien symbolique. Un fichier neuf est créé en 0600
+/// (`O_CREAT|O_EXCL|O_NOFOLLOW`). Le nom est l'empreinte SHA-256 du contenu : un fichier déjà là est
+/// gardé s'il est ordinaire, à l'utilisateur courant et fermé au groupe et aux autres (contrôle sur
+/// le descripteur ouvert, pas sur le chemin) ; sinon il est refusé (`PermissionDenied`) et rien n'y
+/// est écrit, un lien symbolique compris.
+fn write_private_archive(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        let nofollow = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(nofollow)
+            .open(path)
+        {
+            Ok(mut file) => return file.write_all(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+        let refused = |why: &str| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("{} {why}", path.display()),
+            )
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(nofollow | rustix::fs::OFlags::NONBLOCK.bits() as i32)
+            .open(path)
+            .map_err(|error| {
+                if error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error()) {
+                    refused("est un lien symbolique")
+                } else {
+                    error
+                }
+            })?;
+        let metadata = file.metadata()?;
+        if !metadata.file_type().is_file() {
+            return Err(refused("n'est pas un fichier ordinaire"));
+        }
+        if metadata.uid() != rustix::process::geteuid().as_raw() {
+            return Err(refused("appartient à un autre compte"));
+        }
+        if metadata.mode() & 0o077 != 0 {
+            return Err(refused(&format!(
+                "a le mode {:o}, ouvert au groupe ou aux autres",
+                metadata.mode() & 0o777
+            )));
+        }
+        // Même nom, même contenu : seule une écriture interrompue laisse une autre longueur.
+        if metadata.len() != bytes.len() as u64 {
+            file.set_len(0)?;
+            file.write_all(bytes)?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        write_private_file(path, bytes)
+    }
 }
 
 fn run_tee_command(command: TeeCommand) -> Result<()> {
