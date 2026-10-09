@@ -1599,7 +1599,7 @@ async fn run(cli: Cli) -> Result<()> {
                 print!("{}", report.output);
             }
             if report.exit_code != 0 {
-                std::process::exit(report.exit_code);
+                std::process::exit(process_exit_code(report.exit_code));
             }
         }
         Commands::Json { input } => {
@@ -1685,7 +1685,7 @@ async fn run(cli: Cli) -> Result<()> {
             let report = run_native_command(&command)?;
             print!("{}", report.output);
             if report.exit_code != 0 {
-                std::process::exit(report.exit_code);
+                std::process::exit(process_exit_code(report.exit_code));
             }
         }
 
@@ -1865,7 +1865,7 @@ async fn run(cli: Cli) -> Result<()> {
                 print!("{}", report.output);
             }
             if exit_code != 0 {
-                std::process::exit(exit_code);
+                std::process::exit(process_exit_code(exit_code));
             }
         }
         Commands::Expand { input } => {
@@ -1881,7 +1881,7 @@ async fn run(cli: Cli) -> Result<()> {
             let report = run_exec_command(&command, "", false, false, store.as_deref())?;
             print!("{}", report.output);
             if report.exit_code != 0 {
-                std::process::exit(report.exit_code);
+                std::process::exit(process_exit_code(report.exit_code));
             }
         }
         Commands::Exec {
@@ -1904,7 +1904,7 @@ async fn run(cli: Cli) -> Result<()> {
                 eprintln!("\n[lm-resizer filtered output]\n{}", report.output);
             }
             if exit_code != 0 {
-                std::process::exit(exit_code);
+                std::process::exit(process_exit_code(exit_code));
             }
         }
         Commands::ToolOutput {
@@ -1938,7 +1938,7 @@ async fn run(cli: Cli) -> Result<()> {
             // Comme `exec` et `pipe` : le processus sort avec le code de la commande d'origine.
             if exit_code != 0 {
                 std::io::stdout().flush()?;
-                std::process::exit(exit_code);
+                std::process::exit(process_exit_code(exit_code));
             }
         }
         Commands::Rewrite { json, command } => {
@@ -3396,6 +3396,19 @@ fn successful_test_run(command: &[String], exit_code: i32) -> bool {
         }
     }
     test_views::runner(command).is_some()
+}
+
+/// Code de sortie du processus pour le code `code` de la commande. Sous Unix, seul l'octet bas
+/// d'un code de sortie survit : `256` deviendrait `0`, un succès. Un code non nul garde son octet
+/// bas s'il n'est pas nul, `1` sinon (`-1` → 255, `256` → 1). Le rapport JSON garde le code donné.
+fn process_exit_code(code: i32) -> i32 {
+    if code == 0 || !cfg!(unix) {
+        return code;
+    }
+    match code.rem_euclid(256) {
+        0 => 1,
+        low => low,
+    }
 }
 
 fn prepend_failure_status(output: &mut String, exit_code: i32) {
