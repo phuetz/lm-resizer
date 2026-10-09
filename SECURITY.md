@@ -59,6 +59,10 @@ into `lm-resizer exec -- <command>` through `updatedInput`.
   empty output (the hook prints nothing for a command it does not rewrite) is treated. To keep
   Cursor's own approval only, do not install the Cursor hook, or remove it with
   `uninstall-hooks --client cursor`.
+- A command received as a JSON array is an argument vector: the rewritten command stays an array
+  (`["<lm-resizer>", "exec", "--", …]`), run without a shell. Before 0.2.6 the elements were
+  joined with spaces, so `*` was expanded and `--format=%h %s` split in two. An array with a
+  non-text element is not rewritten.
 - Commands that can prompt or never end are never rewritten: `exec` keeps the output until the
   process exits, so a `Password:` prompt, a host-key question or a server log would never show.
   The list is read from `argv` (`git push|pull|fetch|clone`, `cargo run`, `go run`, `npm

@@ -6402,7 +6402,16 @@ fn pretooluse_rewrite_json(value: &Value, exe: &str, event: &str) -> Option<Valu
             } else {
                 "command"
             };
-            map.insert(key.to_string(), Value::String(rewritten));
+            // Un tableau reçu reste un tableau : l'argv est exécuté sans shell, rien n'est recollé.
+            let replacement = match map.get(key).and_then(value_to_argv) {
+                Some(argv) => {
+                    let mut wrapped = vec![exe.to_string(), "exec".into(), "--".into()];
+                    wrapped.extend(argv);
+                    json!(wrapped)
+                }
+                None => Value::String(rewritten),
+            };
+            map.insert(key.to_string(), replacement);
             Value::Object(map)
         }
         _ => serde_json::json!({ "command": rewritten }),
@@ -6573,23 +6582,25 @@ fn extract_hook_exit_code(value: Option<&Value>) -> Option<i32> {
     None
 }
 
+/// Une commande en tableau est un argv : chaque argument est cité (apostrophes POSIX), jamais
+/// recollé avec des espaces, pour que `*` reste littéral et qu'un argument avec espace reste entier.
+/// Un élément qui n'est pas du texte : pas de commande lisible.
 fn value_to_command_string(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
-        Value::Array(items) => {
-            let parts = items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>();
-            if parts.is_empty() {
-                None
-            } else {
-                Some(parts.join(" "))
-            }
-        }
+        Value::Array(_) => value_to_argv(value).map(|argv| shell_join(&argv)),
         _ => None,
     }
+}
+
+/// Les éléments d'un tableau JSON non vide dont chaque élément est du texte.
+fn value_to_argv(value: &Value) -> Option<Vec<String>> {
+    let items = value.as_array()?;
+    let argv = items
+        .iter()
+        .map(|item| item.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()?;
+    (!argv.is_empty()).then_some(argv)
 }
 
 fn value_to_output_string(value: &Value) -> Option<String> {
@@ -13748,6 +13759,49 @@ Successfully tagged localhost/app:latest\n";
     fn native_hook_skips_explicit_background_tools() {
         let value = json!({"tool_input": {"command": "cargo test", "run_in_background": true}});
         assert!(pretooluse_rewrite_json(&value, "/opt/lm", "PreToolUse").is_none());
+    }
+
+    /// Audit du 9 octobre 2026 : une commande en tableau était recollée avec des espaces, `*` était
+    /// développé par le shell et `--format=%h %s` coupé en deux. Le tableau reste un tableau dans la
+    /// réponse du crochet, et la chaîne lue pour l'analyse cite chaque argument.
+    #[cfg(unix)]
+    #[test]
+    fn native_hook_keeps_an_argument_array_intact() {
+        let argv = ["git", "log", "--format=%h %s", "*"];
+        let value = json!({"tool_name":"Bash","tool_input":{"command":argv,"cwd":"/tmp"}});
+        let line = extract_hook_command(&value).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["aaa", "bbb", "file with space"] {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        let shell = std::process::Command::new("bash")
+            .current_dir(dir.path())
+            .arg("-c")
+            .arg(format!("set -- {line}; printf '<%s>\\n' \"$@\""))
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(shell.stdout).unwrap(),
+            "<git>\n<log>\n<--format=%h %s>\n<*>\n",
+            "{line}"
+        );
+        let out = pretooluse_rewrite_json(&value, "/opt/lm resizer", "PreToolUse").unwrap();
+        assert_eq!(
+            out["hookSpecificOutput"]["updatedInput"]["command"],
+            json!([
+                "/opt/lm resizer",
+                "exec",
+                "--",
+                "git",
+                "log",
+                "--format=%h %s",
+                "*"
+            ])
+        );
+        assert_eq!(out["hookSpecificOutput"]["updatedInput"]["cwd"], "/tmp");
+        // Un élément qui n'est pas du texte : rien n'est réécrit, la commande part telle quelle.
+        let mixed = json!({"tool_name":"Bash","tool_input":{"command":["git","log","-n",3]}});
+        assert!(pretooluse_rewrite_json(&mixed, "/opt/lm", "PreToolUse").is_none());
     }
 
     #[test]
