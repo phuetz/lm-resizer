@@ -104,3 +104,75 @@ fn a_new_archive_is_private_and_a_private_one_is_reused() {
     assert_eq!(second["tee_hint"], first["tee_hint"], "{stderr}");
     assert_eq!(fs::read_to_string(&archive).unwrap(), format!("{SECRET}\n"));
 }
+
+fn tee_read(state: &Path, id: &str) -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+        .env("LM_RESIZER_STATE_DIR", state)
+        .args(["tee", "read", id])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// Revue indépendante B3 : une archive privée de même longueur mais de contenu faux était annoncée
+/// comme l'original (`tee read` rendait `XXXXXXXXXXXXXXXX`). Le contenu est comparé, pas la longueur.
+#[test]
+fn a_private_archive_with_the_right_length_but_wrong_bytes_is_rewritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let tee = state.join("tee");
+    fs::create_dir_all(&tee).unwrap();
+    fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(&tee, fs::Permissions::from_mode(0o700)).unwrap();
+    let archive = tee.join(archive_name());
+    fs::write(&archive, "XXXXXXXXXXXXXXXX\n").unwrap();
+    fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
+
+    let (report, stderr) = exec_echo(&state);
+    let hint = report["tee_hint"].as_str().expect("archive annoncée");
+    let id = hint.trim_start_matches("[raw: ").trim_end_matches(']');
+    assert_eq!(tee_read(&state, id), format!("{SECRET}\n"), "{stderr}");
+}
+
+/// Réserve de la même revue : un lien dur à la place de l'archive recevait la sortie brute dans le
+/// fichier extérieur. Un fichier à plusieurs liens est refusé, et rien n'y est écrit.
+#[test]
+fn a_hard_link_in_place_of_the_archive_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let tee = state.join("tee");
+    fs::create_dir_all(&tee).unwrap();
+    fs::set_permissions(&tee, fs::Permissions::from_mode(0o700)).unwrap();
+    let outside = dir.path().join("outside.txt");
+    fs::write(&outside, "OLD\n").unwrap();
+    fs::set_permissions(&outside, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::hard_link(&outside, tee.join(archive_name())).unwrap();
+
+    let (report, stderr) = exec_echo(&state);
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "OLD\n", "{stderr}");
+    assert!(report["tee_hint"].is_null(), "{report}");
+    assert!(stderr.contains("refusée"), "{stderr}");
+}
+
+/// Contre-audit Grok : une FIFO ou un dossier à la place de l'archive donnaient le message
+/// générique « état non inscriptible ». Le refus est nommé.
+#[test]
+fn a_fifo_or_a_directory_in_place_of_the_archive_is_refused_by_name() {
+    for kind in ["fifo", "dir"] {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let tee = state.join("tee");
+        fs::create_dir_all(&tee).unwrap();
+        fs::set_permissions(&tee, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = tee.join(archive_name());
+        if kind == "fifo" {
+            let made = Command::new("mkfifo").arg(&path).status().unwrap();
+            assert!(made.success());
+        } else {
+            fs::create_dir(&path).unwrap();
+        }
+        let (report, stderr) = exec_echo(&state);
+        assert!(report["tee_hint"].is_null(), "{kind}: {report}");
+        assert!(stderr.contains("archive tee refusée"), "{kind}: {stderr}");
+    }
+}

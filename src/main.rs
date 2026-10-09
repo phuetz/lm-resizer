@@ -5696,10 +5696,11 @@ fn archive_raw_bytes(raw: &[u8]) -> Result<Option<String>> {
 }
 
 /// Écrit une archive tee sans jamais suivre de lien symbolique. Un fichier neuf est créé en 0600
-/// (`O_CREAT|O_EXCL|O_NOFOLLOW`). Le nom est l'empreinte SHA-256 du contenu : un fichier déjà là est
-/// gardé s'il est ordinaire, à l'utilisateur courant et fermé au groupe et aux autres (contrôle sur
-/// le descripteur ouvert, pas sur le chemin) ; sinon il est refusé (`PermissionDenied`) et rien n'y
-/// est écrit, un lien symbolique compris.
+/// (`O_CREAT|O_EXCL|O_NOFOLLOW`). Un fichier déjà là n'est utilisé que s'il est ordinaire, à un seul
+/// lien, à l'utilisateur courant et fermé au groupe et aux autres (contrôle sur le descripteur
+/// ouvert, pas sur le chemin) ; son contenu est alors comparé au nouveau et réécrit s'il diffère.
+/// Sinon il est refusé (`PermissionDenied`) et rien n'y est écrit : lien symbolique, lien dur,
+/// FIFO, dossier.
 fn write_private_archive(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -5722,20 +5723,30 @@ fn write_private_archive(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
                 format!("{} {why}", path.display()),
             )
         };
+        use std::io::Seek;
         let mut file = std::fs::OpenOptions::new()
+            .read(true)
             .write(true)
             .custom_flags(nofollow | rustix::fs::OFlags::NONBLOCK.bits() as i32)
             .open(path)
-            .map_err(|error| {
-                if error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error()) {
+            .map_err(|error| match error.raw_os_error() {
+                Some(code) if code == rustix::io::Errno::LOOP.raw_os_error() => {
                     refused("est un lien symbolique")
-                } else {
-                    error
                 }
+                Some(code)
+                    if code == rustix::io::Errno::ISDIR.raw_os_error()
+                        || code == rustix::io::Errno::NXIO.raw_os_error() =>
+                {
+                    refused("n'est pas un fichier ordinaire")
+                }
+                _ => error,
             })?;
         let metadata = file.metadata()?;
         if !metadata.file_type().is_file() {
             return Err(refused("n'est pas un fichier ordinaire"));
+        }
+        if metadata.nlink() != 1 {
+            return Err(refused(&format!("a {} liens durs", metadata.nlink())));
         }
         if metadata.uid() != rustix::process::geteuid().as_raw() {
             return Err(refused("appartient à un autre compte"));
@@ -5746,8 +5757,15 @@ fn write_private_archive(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
                 metadata.mode() & 0o777
             )));
         }
-        // Même nom, même contenu : seule une écriture interrompue laisse une autre longueur.
-        if metadata.len() != bytes.len() as u64 {
+        // Le nom est l'empreinte du contenu, mais rien ne garantit que le fichier déjà là la
+        // respecte (écriture interrompue, fichier altéré) : son contenu est relu et comparé, puis
+        // réécrit s'il diffère. La longueur seule ne suffit pas (revue du 9 octobre).
+        let mut existing = Vec::new();
+        if metadata.len() == bytes.len() as u64 {
+            file.read_to_end(&mut existing)?;
+        }
+        if existing != bytes {
+            file.seek(std::io::SeekFrom::Start(0))?;
             file.set_len(0)?;
             file.write_all(bytes)?;
         }
