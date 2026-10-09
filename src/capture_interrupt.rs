@@ -1,7 +1,8 @@
 //! Process-group interruption relay and incremental recovery for command capture.
 //!
 //! Noninteractive producers belong to their own process group. Unix producers
-//! inheriting terminal input keep its foreground group. While a producer runs,
+//! that can reach a terminal (terminal stdin or a controlling terminal) keep
+//! the caller's foreground group. While a producer runs,
 //! catchable console/process signals received by lm-resizer are forwarded to
 //! that group, leaving the parent alive long enough to drain the shared pipe
 //! and finish the partial view. Capture bytes are also appended to a visible
@@ -191,9 +192,12 @@ mod platform {
 
     pub fn configure_process_group(command: &mut Command) -> bool {
         // A new group would be behind the controlling terminal: reading
-        // inherited stdin would stop the producer with SIGTTIN. Keep Unix
-        // terminal and job-control behavior in the caller's foreground group.
-        if std::io::stdin().is_terminal() {
+        // inherited stdin, or /dev/tty as sudo, ssh and password prompts do
+        // even when stdin is a pipe, would stop the producer with SIGTTIN.
+        // Keep Unix terminal and job-control behavior in the caller's
+        // foreground group whenever a controlling terminal exists. Opening
+        // /dev/tty fails without one and cannot acquire one.
+        if std::io::stdin().is_terminal() || std::fs::File::open("/dev/tty").is_ok() {
             return false;
         }
         // Preserve Rust's posix_spawn path and its ENOEXEC launch error.
