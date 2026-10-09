@@ -170,3 +170,103 @@ fn uninstall_all_keeps_a_hand_edited_cursor_hook() {
     assert!(out.status.success(), "{out:?}");
     assert!(project.join(".cursor/hooks.json").exists());
 }
+
+/// Contre-audit Grok du 9 octobre : un crochet installé par un binaire et désinstallé par une
+/// copie à un autre chemin restait en place (`Removed 0`), avec sa commande vers le premier chemin.
+/// Le fichier est reconnu s'il est identique au contenu généré pour le chemin qu'il contient.
+#[cfg(unix)]
+#[test]
+fn uninstall_from_another_binary_path_removes_the_generated_hooks() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let (home, project) = (home.path(), project.path());
+    let dir = project.to_str().unwrap();
+    for client in ["cursor", "gemini", "copilot", "all"] {
+        let out = cli(
+            home,
+            project,
+            &[
+                "init-native-hooks",
+                "--client",
+                client,
+                "--project-dir",
+                dir,
+            ],
+        );
+        assert!(out.status.success(), "{client}: {out:?}");
+    }
+    let copy = home.join("ailleurs").join("lm-resizer");
+    std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_lm-resizer"), &copy).unwrap();
+    let out = Command::new(&copy)
+        .current_dir(project)
+        .env("HOME", home)
+        .env("LM_RESIZER_STATE_DIR", home.join("state"))
+        .args(["uninstall-hooks", "--client", "all", "--project-dir", dir])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let left: Vec<_> = [
+        ".cursor/hooks.json",
+        ".gemini/settings.json",
+        ".github/hooks/lm-resizer.json",
+        ".codex/hooks.json",
+        ".claude/settings.json",
+    ]
+    .into_iter()
+    .filter(|hook| project.join(hook).exists())
+    .collect();
+    assert!(left.is_empty(), "crochets restants : {left:?}");
+}
+
+/// Même contre-audit : installer en portée globale puis désinstaller en portée projet laissait
+/// `~/.mcp.json` et `~/.cursor/mcp.json`. `--scope all` retire les deux portées.
+#[test]
+fn uninstall_with_scope_all_removes_project_and_global_entries() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let (home, project) = (home.path(), project.path());
+    let dir = project.to_str().unwrap();
+    for (client, scope) in [
+        ("claude", "global"),
+        ("cursor", "global"),
+        ("all", "project"),
+    ] {
+        let out = cli(
+            home,
+            project,
+            &[
+                "install",
+                "--client",
+                client,
+                "--scope",
+                scope,
+                "--project-dir",
+                dir,
+            ],
+        );
+        assert!(out.status.success(), "{client} {scope}: {out:?}");
+    }
+    let out = cli(
+        home,
+        project,
+        &[
+            "uninstall",
+            "--client",
+            "all",
+            "--scope",
+            "all",
+            "--project-dir",
+            dir,
+        ],
+    );
+    assert!(out.status.success(), "{out:?}");
+    let mut left = files(project);
+    left.extend(
+        files(home)
+            .into_iter()
+            .filter(|path| !path.starts_with("state"))
+            .map(|path| format!("~/{path}")),
+    );
+    assert!(left.is_empty(), "restent : {left:?}");
+}

@@ -804,8 +804,9 @@ enum Commands {
         /// Client to unconfigure: claude, codex, cursor, vscode, all.
         #[arg(long, default_value = "claude")]
         client: String,
-        /// Scope: project or global. Codex is user-scoped: `--client codex` requires
-        /// `--scope global`, and `--client all` cleans `~/.codex/config.toml` even with `project`.
+        /// Scope: project, global, or all (both). Codex is user-scoped: `--client codex` requires
+        /// `--scope global` or `all`, and `--client all` cleans `~/.codex/config.toml` even with
+        /// `project`.
         #[arg(long, default_value = "project")]
         scope: String,
         /// Project directory for project-scoped config files.
@@ -8011,16 +8012,26 @@ fn uninstall_native_hook_files(client: &str, project_dir: &Path) -> Result<Vec<S
         if !target.path.exists() {
             continue;
         }
-        let expected = match target.client.as_str() {
-            "codex" => codex_native_hooks_json(&exe_path)?,
-            "claude" => claude_native_hooks_json(&exe_path)?,
-            name => serde_json::to_string_pretty(
-                &agent_hooks::config(&exe_path, name).context("unknown hook schema")?,
-            )?,
+        let generated = |exe: &str| -> Result<String> {
+            Ok(match target.client.as_str() {
+                "codex" => codex_native_hooks_json(exe)?,
+                "claude" => claude_native_hooks_json(exe)?,
+                name => serde_json::to_string_pretty(
+                    &agent_hooks::config(exe, name).context("unknown hook schema")?,
+                )?,
+            })
         };
         let existing = std::fs::read_to_string(&target.path)?;
-        if existing != expected {
-            // Leave a hand-edited or foreign config alone; uninstall stays safe.
+        // Contenu généré pour le binaire courant, ou pour le chemin de binaire que le fichier
+        // contient (installation faite depuis un autre emplacement). Un fichier modifié à la main
+        // ne correspond à aucun des deux : il reste.
+        let mut ours = generated(&exe_path)? == existing;
+        if !ours {
+            if let Some(other) = generated_hook_program(&existing) {
+                ours = generated(&other)? == existing;
+            }
+        }
+        if !ours {
             continue;
         }
         std::fs::remove_file(&target.path)?;
@@ -8035,6 +8046,33 @@ fn uninstall_native_hook_files(client: &str, project_dir: &Path) -> Result<Vec<S
         }
     }
     Ok(removed)
+}
+
+/// Chemin du binaire écrit dans un fichier de crochets généré : la commande
+/// `<programme cité> hook --client … --event …` du premier crochet.
+fn generated_hook_program(text: &str) -> Option<String> {
+    fn find(value: &Value) -> Option<&str> {
+        match value {
+            Value::Object(map) => map.iter().find_map(|(key, value)| match value {
+                Value::String(text)
+                    if matches!(key.as_str(), "command" | "bash")
+                        && text.contains(" hook --client ") =>
+                {
+                    Some(text.as_str())
+                }
+                other => find(other),
+            }),
+            Value::Array(items) => items.iter().find_map(find),
+            _ => None,
+        }
+    }
+    let value: Value = serde_json::from_str(text).ok()?;
+    let command = find(&value)?;
+    let program = &command[..command.find(" hook --client ")?];
+    match split_shell_words(program)?.as_slice() {
+        [single] => Some(single.clone()),
+        _ => None,
+    }
 }
 
 /// Write `content` when missing; leave identical content alone; refuse a divergent
@@ -9447,6 +9485,17 @@ fn install_mcp(
 /// pour Codex) et garde le reste du fichier ; un fichier qui ne contient plus rien est supprimé.
 fn uninstall_mcp(client: &str, scope: &str, project_dir: Option<PathBuf>) -> Result<()> {
     let project_dir = project_dir.unwrap_or(std::env::current_dir()?);
+    // `all` : les deux portées. Codex n'a que la portée globale, VS Code que la portée projet.
+    if scope == "all" {
+        return match client {
+            "codex" => uninstall_codex(),
+            "vscode" | "vs-code" => uninstall_mcp(client, "project", Some(project_dir)),
+            _ => {
+                uninstall_mcp(client, "project", Some(project_dir.clone()))?;
+                uninstall_mcp(client, "global", Some(project_dir))
+            }
+        };
+    }
     match client {
         "claude" | "claude-code" => uninstall_json_mcp(scope, ClientConfig::Claude, &project_dir),
         "codex" => {

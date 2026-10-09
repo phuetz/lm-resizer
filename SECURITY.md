@@ -85,8 +85,10 @@ into `lm-resizer exec -- <command>` through `updatedInput`.
   `docs/KNOWN-MISSES.md`). A command with a view that prompts and is not in the list is still
   captured until it exits.
 - `uninstall-hooks --client all` removes the native hook files of all five clients (Codex,
-  Claude, Gemini, Copilot, Cursor) when they still match the generated content; before 0.2.6 it
-  left the Cursor hook. `uninstall --client all --scope project` removes the MCP server entry.
+  Claude, Gemini, Copilot, Cursor) when they still match the content generated for the current
+  binary or for the binary path written in the file (installed from another location); before
+  0.2.6 it left the Cursor hook. `uninstall --client all --scope all` removes the MCP server
+  entries of both scopes.
 - A permission rule matches the command text. After the rewrite the text is
   `lm-resizer exec -- <command>`, so a `deny` rule written for the original, such as
   `Bash(cargo test)`, no longer applies. Checked on Claude Code 2.1.294 with `allow: Bash` and
