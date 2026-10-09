@@ -91,7 +91,7 @@ lm-resizer gain --history --project
 
 `gain` peut commencer négatif : sur une sortie minuscule, la vue et la ligne de rappel coûtent plus de jetons que l'original. Les vraies sorties rendent le total positif.
 
-Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagnostics ou bilans de tests avec une ligne de contexte et le code d’échec en tête. `exec` et `tool-output` résument aussi les commandes sans filtre dédié. Chaque sortie reste récupérable avec `tee read`. `gain` affiche les commandes et jetons mesurés ; `gain --json` donne les compteurs complets. Voir la [référence CLI](docs/CLI-REFERENCE.md).
+Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagnostics ou bilans de tests avec une ligne de contexte et le code d’échec en tête. `exec` et `tool-output` résument aussi les commandes sans filtre dédié, sauf les lignes de shell comme `sh -c`, rendues brutes. Chaque sortie reste récupérable avec `tee read`. `gain` affiche les commandes et jetons mesurés ; `gain --json` donne les compteurs complets. Voir la [référence CLI](docs/CLI-REFERENCE.md).
 
 Pour les scripts, utiliser `lm-resizer gain --json`.
 
