@@ -10,9 +10,11 @@ fn first_readme_example_is_the_real_output() {
         let block = &text[start..text[start..].find("~~~").unwrap() + start];
         let (command, expected) = block.split_once('\n').unwrap();
         let command = command.strip_prefix("$ lm-resizer ").unwrap();
-        // `tool-output --command 'cargo test' --input <fichier>` : pas de shell, découpage à la main.
+        // `tool-output --command 'cargo test' --exit-code 101 --input <fichier>` : pas de shell,
+        // découpage à la main. Le code est celui d'un `cargo test` en échec : un code 0 rendrait la
+        // sortie d'un lanceur de tests intacte.
         let (head, input) = command.split_once(" --input ").unwrap();
-        assert_eq!(head, "tool-output --command 'cargo test'");
+        assert_eq!(head, "tool-output --command 'cargo test' --exit-code 101");
         let state = tempfile::tempdir().unwrap();
         let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
             .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -22,12 +24,14 @@ fn first_readme_example_is_the_real_output() {
                 "tool-output",
                 "--command",
                 "cargo test",
+                "--exit-code",
+                "101",
                 "--input",
                 input.trim(),
             ])
             .output()
             .unwrap();
-        assert!(out.status.success(), "{readme}: {out:?}");
+        assert!(out.stderr.is_empty(), "{readme}: {out:?}");
         assert_eq!(String::from_utf8(out.stdout).unwrap(), expected, "{readme}");
     }
 }

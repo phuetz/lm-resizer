@@ -21,6 +21,19 @@ Filter migration is still in progress. Earlier measurements do not describe this
 
 Runners without capture, always raw: `rspec`, minitest (`ruby …_test.rb`, `rake test`, `rails test`, also behind `bundle exec`), `mvn` with a phase that runs tests (`test`, `verify`, `package`, `install`, `deploy`), `playwright test`; `gradle` only with `-i`, `--info`, `-d` or `--debug` (it hides test output by default). The built-in `rspec`, `minitest`, `jvm-build` (for those phases) and `js-quality` (for `playwright test`) filters are therefore no longer reached by `exec`. An environment variable exported before the call (`RUST_TEST_NOCAPTURE=1`) is not in `argv`: it is not read.
 
+**Successful test runners: raw** (proposal of 9 October 2026, awaiting a decision; separate, revertible commit). A test runner named in `argv` that exits with code 0 is returned raw, byte for byte (`lossless:test-success`), by `exec`, `tool-output`, `pipe` and the MCP `lm_resizer_tool_output` tool: `cargo test|nextest`, `pytest`, `py.test`, `python -m pytest|unittest`, `tox`, `nox`, `go test`, `jest`, `vitest`, `mocha`, `ava`, `playwright test`, `dotnet test`, `mvn` with a test phase, `gradle` with a `test…`, `check` or `build` task, `rspec`, minitest, `ctest`, `phpunit`, `pest`, `php artisan test`, `deno|bun|swift|mix|zig test`, `npm|pnpm|yarn test` or `run test…`, `make|just|task test…|check`, after the same wrappers and behind `sh -c`. Reason: a passing test can write anything to the output it inherits (`std::io::stdout().write_all`, a child process), a relayed `git log` (counter-review of `de2ff41`: 22 of 22 subjects lost, code 0) or a warning (`Permission denied`, a CVE line: audit of 9 October), and the view kept only the summary. A nonzero code keeps the runner's view. `pipe` without `--exit-code` counts as code 0. The benchmark's ten test-runner captures all exit with a nonzero code: the rule changes no benchmark view (median 4.87%, mean 27.61%, before and after).
+
+**Failing test runners: what the view does not keep.** Measured on 9 October through `tool-output --exit-code 1` on failure transcripts to which four lines were added outside the failure blocks (`Permission denied: …`, `CVE-…`, `warning: …`, `error: …`):
+
+| View | Kept | Lost |
+|---|---|---|
+| `native:cargo-test` | `---- name stdout ----` blocks without their blank lines, names of the `failures:` list that no block covers, `test result:` and `error: test failed…` lines | any other line, including the four added ones and `test … FAILED` |
+| `native:pytest` | summary; per failure, the block header of the `FAILURES` section, at most three lines (`>`, `E`, `assert`, `error`, `.py:`) and the reason of `FAILED … - reason` | any line outside the `FAILURES` section, including the four added ones, and the rest of each block |
+| `native:js-test` (jest text) | `Tests:` line, `●`, `Expected`, `Received` lines | the rest, including the four added ones and `FAIL  file` |
+| `cargo-nextest`, `vitest run`, `dotnet test`, `gradle test` (diagnostic guard), `go test -json` (raw) | the four added lines | nothing that was added |
+
+The raw output stays in tee (`lm-resizer tee read <id>`); `exec --raw-on-failure` returns every failure raw.
+
 **Outside the rule, measured** (output that a **failing** test causes to be displayed without any flag; transcripts passed through `tool-output`, 23-commit repository, `git log --format=%s` printed by the test):
 
 | Runner and situation | View | Visible subjects |

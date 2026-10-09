@@ -40,41 +40,9 @@ fn program_name(arg: &str) -> String {
 ///   (`test`, `verify`, `package`, `install`, `deploy`), `playwright test` ; `gradle` seulement avec
 ///   `-i`, `--info`, `-d` ou `--debug`.
 pub fn shows_test_output(command: &[String]) -> bool {
-    let mut rest = command;
-    // Enveloppes du routage : elles désignent le programme qui suit.
-    loop {
-        let Some(first) = rest.first() else {
-            return false;
-        };
-        let skip = match program_name(first).as_str() {
-            "npx" | "bunx" => {
-                1 + rest[1..]
-                    .iter()
-                    .take_while(|arg| matches!(arg.as_str(), "-y" | "--yes" | "--"))
-                    .count()
-            }
-            "npm" | "pnpm" | "yarn" | "bundle" if rest.get(1).is_some_and(|a| a == "exec") => {
-                if rest.get(2).is_some_and(|a| a == "--") {
-                    3
-                } else {
-                    2
-                }
-            }
-            "uv" | "poetry" | "pipenv" if rest.get(1).is_some_and(|a| a == "run") => 2,
-            "python" | "python3" | "py" if rest.get(1).is_some_and(|a| a == "-m") => 2,
-            "pnpm" | "yarn" | "bun"
-                if rest
-                    .get(1)
-                    .is_some_and(|a| matches!(program_name(a).as_str(), "jest" | "vitest")) =>
-            {
-                1
-            }
-            _ => 0,
-        };
-        if skip == 0 || skip >= rest.len() {
-            break;
-        }
-        rest = &rest[skip..];
+    let rest = after_runner_wrappers(command);
+    if rest.is_empty() {
+        return false;
     }
     let program = program_name(&rest[0]);
     let args = &rest[1..];
@@ -113,26 +81,122 @@ pub fn shows_test_output(command: &[String]) -> bool {
         // demande d'affichage. Formes reconnues par les filtres intégrés `rspec`, `minitest`,
         // `jvm-build` et `js-quality`.
         "rspec" => true,
-        "ruby" => args
-            .iter()
-            .any(|arg| arg == "rspec" || arg.contains("minitest") || arg.ends_with("_test.rb")),
-        "rake" | "rails" => args.first().is_some_and(|task| {
-            let task = task.split(':').next().unwrap_or(task);
-            task == "test" || task == "minitest"
-        }),
-        "mvn" | "mvnw" => args.iter().any(|arg| {
-            matches!(
-                arg.as_str(),
-                "test" | "integration-test" | "verify" | "package" | "install" | "deploy"
-            ) || arg.starts_with("surefire:")
-                || arg.starts_with("failsafe:")
-        }),
+        "ruby" | "rake" | "rails" => runs_ruby_tests(&program, args),
+        "mvn" | "mvnw" => runs_maven_tests(args),
         "gradle" | "gradlew" => args
             .iter()
             .any(|arg| matches!(arg.as_str(), "-i" | "--info" | "-d" | "--debug")),
         "playwright" => has("test"),
         _ => false,
     }
+}
+
+/// La commande lance une suite de tests, lue dans l'`argv` seul après les mêmes enveloppes que
+/// [`shows_test_output`] (`npx`, `uv run`, `python -m`, `bundle exec`…). Quand elle se termine
+/// par le code 0, `exec`, `tool-output` et `pipe` rendent sa sortie intacte : un test qui réussit
+/// peut écrire n'importe quoi sur la sortie qu'il hérite (un `git log` relayé par un processus
+/// enfant, un avertissement de sécurité), et une vue de lanceur n'en garde que le bilan. Un code non
+/// nul garde la vue du lanceur, qui montre les échecs. Proposition du 9 octobre 2026, en attente.
+pub fn runs_tests(command: &[String]) -> bool {
+    let rest = after_runner_wrappers(command);
+    let Some(first) = rest.first() else {
+        return false;
+    };
+    let program = program_name(first);
+    let args = &rest[1..];
+    let has = |word: &str| args.iter().any(|arg| arg == word);
+    let first_arg = args.first().map(String::as_str).unwrap_or("");
+    let test_task = |task: &str| {
+        let task = task.rsplit(':').next().unwrap_or(task).to_ascii_lowercase();
+        task.contains("test") || task == "check"
+    };
+    match program.as_str() {
+        "cargo" => has("test") || has("nextest") || first_arg == "t",
+        "pytest" | "py.test" | "unittest" | "nose2" | "tox" | "nox" | "jest" | "vitest"
+        | "mocha" | "ava" | "rspec" | "ctest" | "phpunit" | "pest" | "paratest" => true,
+        "go" | "dotnet" | "playwright" => has("test"),
+        "deno" | "bun" | "swift" | "mix" | "zig" => first_arg == "test" || has("test"),
+        "ruby" | "rake" | "rails" => runs_ruby_tests(&program, args),
+        "mvn" | "mvnw" => runs_maven_tests(args),
+        "gradle" | "gradlew" => args
+            .iter()
+            .any(|arg| !arg.starts_with('-') && (test_task(arg) || arg == "build")),
+        "php" => has("artisan") && has("test"),
+        "npm" | "pnpm" | "yarn" => match first_arg {
+            "test" | "t" | "tst" => true,
+            "run" | "run-script" => args.get(1).is_some_and(|script| test_task(script)),
+            _ => false,
+        },
+        "make" | "gmake" | "just" | "task" => args
+            .iter()
+            .any(|arg| !arg.starts_with('-') && !arg.contains('=') && test_task(arg)),
+        _ => false,
+    }
+}
+
+/// minitest (`ruby …_test.rb`, `ruby -Itest …minitest…`), `rake test`, `rails test`, et `ruby -S
+/// rspec`.
+fn runs_ruby_tests(program: &str, args: &[String]) -> bool {
+    match program {
+        "ruby" => args
+            .iter()
+            .any(|arg| arg == "rspec" || arg.contains("minitest") || arg.ends_with("_test.rb")),
+        _ => args.first().is_some_and(|task| {
+            let task = task.split(':').next().unwrap_or(task);
+            task == "test" || task == "minitest"
+        }),
+    }
+}
+
+/// `mvn` avec une phase ou un but qui lance les tests.
+fn runs_maven_tests(args: &[String]) -> bool {
+    args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "test" | "integration-test" | "verify" | "package" | "install" | "deploy"
+        ) || arg.starts_with("surefire:")
+            || arg.starts_with("failsafe:")
+    })
+}
+
+/// La commande sans les enveloppes que le routage reconnaît : elles désignent le programme qui suit.
+fn after_runner_wrappers(command: &[String]) -> &[String] {
+    let mut rest = command;
+    loop {
+        let Some(first) = rest.first() else {
+            return rest;
+        };
+        let skip = match program_name(first).as_str() {
+            "npx" | "bunx" => {
+                1 + rest[1..]
+                    .iter()
+                    .take_while(|arg| matches!(arg.as_str(), "-y" | "--yes" | "--"))
+                    .count()
+            }
+            "npm" | "pnpm" | "yarn" | "bundle" if rest.get(1).is_some_and(|a| a == "exec") => {
+                if rest.get(2).is_some_and(|a| a == "--") {
+                    3
+                } else {
+                    2
+                }
+            }
+            "uv" | "poetry" | "pipenv" if rest.get(1).is_some_and(|a| a == "run") => 2,
+            "python" | "python3" | "py" if rest.get(1).is_some_and(|a| a == "-m") => 2,
+            "pnpm" | "yarn" | "bun"
+                if rest
+                    .get(1)
+                    .is_some_and(|a| matches!(program_name(a).as_str(), "jest" | "vitest")) =>
+            {
+                1
+            }
+            _ => 0,
+        };
+        if skip == 0 || skip >= rest.len() {
+            break;
+        }
+        rest = &rest[skip..];
+    }
+    rest
 }
 
 /// `pytest` : options courtes groupées (`-vs`), dont `k m p c o r W n` prennent une valeur (la fin de

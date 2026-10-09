@@ -1222,7 +1222,8 @@ fn a_real_cargo_test_that_prints_git_log_comes_out_whole_when_output_is_requeste
             }
         }
     }
-    // Témoin : sans demande d'affichage, la vue du lanceur reste (le test n'imprime rien de visible).
+    // Témoin : sans demande d'affichage, le test réussi n'imprime rien de visible (`print!` est
+    // capturé) ; le code 0 d'un lanceur de tests rend la sortie intacte.
     let (filter, _) = exec_relay(
         &repo,
         harness.path(),
@@ -1230,7 +1231,7 @@ fn a_real_cargo_test_that_prints_git_log_comes_out_whole_when_output_is_requeste
         "--format=%s",
         &["cargo", "test", "--quiet", "--manifest-path", manifest],
     );
-    assert_eq!(filter, "native:cargo-test");
+    assert_eq!(filter, "lossless:test-success");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

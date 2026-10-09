@@ -3033,6 +3033,8 @@ fn run_inspected_command(
                 "native:observe".into(),
                 inspection_views::summarize(mode, &raw, captured.code),
             )
+        } else if successful_test_run(command, captured.code) {
+            ("lossless:test-success".to_string(), raw.clone())
         } else {
             filter_executed_command_output(command, &raw)
         }
@@ -3135,6 +3137,8 @@ fn run_exec_command(
     let phase = Instant::now();
     let (filter, mut filtered) = if raw_on_failure && exit_code != 0 {
         ("raw_on_failure".to_string(), raw.clone())
+    } else if successful_test_run(command, exit_code) {
+        ("lossless:test-success".to_string(), raw.clone())
     } else {
         filter_executed_command_output(command, &raw)
     };
@@ -3266,6 +3270,8 @@ fn process_captured_output(
     let keep_raw = raw_on_failure && exit_code != 0;
     let (filter, mut filtered) = if keep_raw {
         ("raw_on_failure".to_string(), raw.to_string())
+    } else if successful_test_run(command, exit_code) {
+        ("lossless:test-success".to_string(), raw.to_string())
     } else {
         filter_command_output(command, raw)
     };
@@ -3345,6 +3351,29 @@ fn process_captured_output(
         tee_hint: None,
         output,
     })
+}
+
+/// Un lanceur de tests (voir [`test_views::runs_tests`]), direct ou seul derrière `sh -c`, s'est
+/// terminé par le code 0 : sa sortie est rendue intacte (`lossless:test-success`). Décision lue dans
+/// l'`argv` et le code de sortie, jamais dans le contenu de la sortie.
+fn successful_test_run(command: &[String], exit_code: i32) -> bool {
+    if exit_code != 0 {
+        return false;
+    }
+    if command.len() == 3
+        && matches!(
+            command_basename(&command[0]).as_str(),
+            "bash" | "sh" | "zsh"
+        )
+        && matches!(command[1].as_str(), "-c" | "-lc")
+    {
+        if let [ShellToken::Segment(segment)] = split_shell_operators(&command[2]).as_slice() {
+            if let Some(words) = split_shell_words(segment) {
+                return test_views::runs_tests(&words);
+            }
+        }
+    }
+    test_views::runs_tests(command)
 }
 
 fn prepend_failure_status(output: &mut String, exit_code: i32) {
@@ -11722,13 +11751,16 @@ command = "node"
         let store = InMemoryCcrStore::default();
         let raw = "PASS [ 0.01s] app::ok\nFAIL [ 0.02s] app::bad\npanicked at src/lib.rs:42:9\nSummary: 1 failed\n";
         let command = vec!["cargo".into(), "nextest".into(), "run".into()];
+        // Code 0 d'un lanceur de tests : la sortie passe intacte.
         let success = process_captured_output(&command, raw, 0, false, "", &store).unwrap();
-        assert_eq!(success.filter, "cargo-nextest");
-        assert!(success.output.contains("app::bad"));
-        assert!(success.output.contains("src/lib.rs:42:9"));
-        assert!(success.output.len() <= raw.len());
-        if success.output != raw {
-            let key = success.cache_keys.last().expect("raw recovery key");
+        assert_eq!(success.filter, "lossless:test-success");
+        assert_eq!(success.output, raw);
+        let reduced = process_captured_output(&command, raw, 1, false, "", &store).unwrap();
+        assert_eq!(reduced.filter, "cargo-nextest");
+        assert!(reduced.output.contains("app::bad"));
+        assert!(reduced.output.contains("src/lib.rs:42:9"));
+        if reduced.output != raw {
+            let key = reduced.cache_keys.last().expect("raw recovery key");
             assert_eq!(store.get(key).as_deref(), Some(raw));
         }
         let failure = process_captured_output(&command, raw, 1, true, "", &store).unwrap();

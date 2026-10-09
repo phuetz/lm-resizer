@@ -21,6 +21,19 @@ La migration des filtres est en cours. Les mesures antérieures ne décrivent pa
 
 Lanceurs sans capture, toujours bruts : `rspec`, minitest (`ruby …_test.rb`, `rake test`, `rails test`, aussi derrière `bundle exec`), `mvn` avec une phase qui lance les tests (`test`, `verify`, `package`, `install`, `deploy`), `playwright test` ; `gradle` seulement avec `-i`, `--info`, `-d` ou `--debug` (il cache la sortie des tests par défaut). Les filtres intégrés `rspec`, `minitest`, `jvm-build` (pour ces phases) et `js-quality` (pour `playwright test`) ne sont donc plus atteints par `exec`. Une variable d'environnement exportée avant l'appel (`RUST_TEST_NOCAPTURE=1`) n'est pas dans l'argv : elle n'est pas lue.
 
+**Lanceurs de tests réussis : brut** (proposition du 9 octobre 2026, en attente de décision ; commit séparé, réversible). Un lanceur de tests nommé dans l'`argv` qui se termine par le code 0 sort brut, octet pour octet (`lossless:test-success`), par `exec`, `tool-output`, `pipe` et l'outil MCP `lm_resizer_tool_output` : `cargo test|nextest`, `pytest`, `py.test`, `python -m pytest|unittest`, `tox`, `nox`, `go test`, `jest`, `vitest`, `mocha`, `ava`, `playwright test`, `dotnet test`, `mvn` avec une phase de tests, `gradle` avec une tâche `test…`, `check` ou `build`, `rspec`, minitest, `ctest`, `phpunit`, `pest`, `php artisan test`, `deno|bun|swift|mix|zig test`, `npm|pnpm|yarn test` ou `run test…`, `make|just|task test…|check`, après les mêmes enveloppes et derrière `sh -c`. Raison : un test qui réussit peut écrire n'importe quoi sur la sortie qu'il hérite (`std::io::stdout().write_all`, un processus enfant), un `git log` relayé (contre-revue de `de2ff41` : 22 sujets sur 22 perdus, code 0) ou un avertissement (`Permission denied`, une ligne CVE : audit du 9 octobre), et la vue n'en gardait que le bilan. Un code non nul garde la vue du lanceur. `pipe` sans `--exit-code` compte comme code 0. Les dix captures de lanceurs de tests du banc se terminent toutes par un code non nul : la règle ne change aucune vue du banc (médiane 4,87 %, moyenne 27,61 %, avant comme après).
+
+**Lanceurs de tests en échec : ce que la vue ne garde pas.** Mesuré le 9 octobre par `tool-output --exit-code 1` sur des transcriptions d'échec auxquelles quatre lignes ont été ajoutées hors des blocs d'échec (`Permission denied: …`, `CVE-…`, `warning: …`, `error: …`) :
+
+| Vue | Gardé | Perdu |
+|---|---|---|
+| `native:cargo-test` | blocs `---- nom stdout ----` sans leurs lignes vides, noms de la liste `failures:` qu'aucun bloc ne couvre, lignes `test result:` et `error: test failed…` | toute autre ligne, dont les quatre ajoutées et les `test … FAILED` |
+| `native:pytest` | bilan ; par échec, l'en-tête du bloc de la section `FAILURES`, trois lignes au plus (`>`, `E`, `assert`, `error`, `.py:`) et la raison de `FAILED … - raison` | toute ligne hors de la section `FAILURES`, dont les quatre ajoutées, et le reste de chaque bloc |
+| `native:js-test` (jest en texte) | ligne `Tests:`, lignes `●`, `Expected`, `Received` | le reste, dont les quatre ajoutées et `FAIL  fichier` |
+| `cargo-nextest`, `vitest run`, `dotnet test`, `gradle test` (garde de diagnostic), `go test -json` (brut) | les quatre ajoutées | rien de ce qui a été ajouté |
+
+Le brut reste dans tee (`lm-resizer tee read <id>`) ; `exec --raw-on-failure` rend tout échec brut.
+
 **Hors de la règle, mesuré** (sortie qu'un test **en échec** fait afficher sans aucun drapeau ; transcriptions passées par `tool-output`, dépôt de 23 commits, `git log --format=%s` imprimé par le test) :
 
 | Lanceur et situation | Vue | Sujets visibles |
