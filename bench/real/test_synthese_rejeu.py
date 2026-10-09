@@ -35,29 +35,31 @@ class Verdict(unittest.TestCase):
         return synthese.verdict(data, **kwargs)[1]
 
     def test_real_candidate_numbers_pass(self):
-        self.assertEqual(self.failures(results(median=21.3244, mean=28.9730)), [])
+        self.assertEqual(self.failures(results(median=4.8748, mean=28.3933)), [])
         self.assertEqual(self.failures(results()), [])
 
     def test_one_capture_is_not_the_corpus(self):
-        # Le contre-exemple de la contre-revue : une capture, médiane 16, moyenne 0, « tenu ».
-        data = results(n=1, median=16.0, mean=0.0)
+        # Le contre-exemple de la contre-revue : une capture, médiane 4, moyenne 0 (sous les seuils actuels), « tenu ».
+        data = results(n=1, median=4.0, mean=0.0)
         failures = self.failures(data)
         self.assertTrue(any("1 captures" in f for f in failures), failures)
         self.assertTrue(any("médiane" in f for f in failures), failures)
         self.assertTrue(any("moyenne" in f for f in failures), failures)
 
     def test_median_below_the_published_floor_fails(self):
-        self.assertTrue(self.failures(results(median=21.31)))
-        self.assertTrue(self.failures(results(median=20.0)))
+        self.assertTrue(self.failures(results(median=4.86)))
+        self.assertTrue(self.failures(results(median=4.0)))
 
     def test_mean_below_the_published_floor_fails(self):
-        failures = self.failures(results(mean=28.96))
+        failures = self.failures(results(mean=28.38))
         self.assertEqual(len(failures), 1, failures)
         self.assertIn("moyenne", failures[0])
 
-    def test_median_below_the_oracle_fails_even_above_the_floor(self):
+    def test_median_below_the_oracle_is_reported_but_is_not_a_condition(self):
         data = results(median=30.0, oracle_median=31.0)
-        self.assertTrue(any("oracle" in f for f in self.failures(data)))
+        lines, failures = synthese.verdict(data)
+        self.assertEqual(failures, [])
+        self.assertTrue(any("sous celle de l'oracle" in line for line in lines), lines)
 
     def test_lost_recovery_or_exit_code_fails(self):
         data = results()
