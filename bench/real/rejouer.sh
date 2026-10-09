@@ -16,7 +16,7 @@
 #
 # Réseau nécessaire la première fois (archive amont, crates, paquets Python).
 # Sortie du script : 0 seulement si les 61 captures sont mesurées, si la médiane et la moyenne de
-# LM Resizer atteignent les seuils de la 0.2.6 (4,87 % et 28,39 %, modifiables), si les 61 bruts se récupèrent ET si les 61 codes du producteur sont conservés (voir
+# LM Resizer atteignent les seuils de la 0.2.6 (4,87 % et 27,60 %, modifiables), si les 61 bruts se récupèrent ET si les 61 codes du producteur sont conservés (voir
 # synthese_rejeu.py). L'égalité stricte des vues n'est pas une condition : parity_rtk.py sort en 1
 # tant que des vues diffèrent (écarts publiés dans bench/native/README.md) ; le nombre exact est
 # affiché.
@@ -95,7 +95,7 @@ tail -3 "$qa_dir/dernier-rejeu.log" | cut -c1-200
 [[ -f "$work/results.json" ]] || { echo "pas de results.json (code $statut) : voir $qa_dir/dernier-rejeu.log" >&2; exit 1; }
 
 echo "== 5/5 synthèse"
-# Les seuils par défaut sont ceux de la 0.2.6 (61 captures, médiane 4,87 %, moyenne 28,39 %) ; ceux de la 0.2.5 (25,18 % et
+# Les seuils par défaut sont ceux de la 0.2.6 (61 captures, médiane 4,87 %, moyenne 27,60 %) ; ceux de la 0.2.5 (25,18 % et
 # 34,68 %) supposaient des vues `git log` qui cachaient tous les commits sauf le premier. La position de la
 # médiane par rapport à celle de l'oracle est affichée, plus exigée (voir synthese_rejeu.py).
 "$venv/bin/python" -I "$repo_dir/bench/real/synthese_rejeu.py" "$work/results.json" ${seuils[@]+"${seuils[@]}"}

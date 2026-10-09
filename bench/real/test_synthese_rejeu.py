@@ -35,7 +35,7 @@ class Verdict(unittest.TestCase):
         return synthese.verdict(data, **kwargs)[1]
 
     def test_real_candidate_numbers_pass(self):
-        self.assertEqual(self.failures(results(median=4.8748, mean=28.3933)), [])
+        self.assertEqual(self.failures(results(median=4.8748, mean=27.6085)), [])
         self.assertEqual(self.failures(results()), [])
 
     def test_one_capture_is_not_the_corpus(self):
@@ -51,7 +51,7 @@ class Verdict(unittest.TestCase):
         self.assertTrue(self.failures(results(median=4.0)))
 
     def test_mean_below_the_published_floor_fails(self):
-        failures = self.failures(results(mean=28.38))
+        failures = self.failures(results(mean=27.59))
         self.assertEqual(len(failures), 1, failures)
         self.assertIn("moyenne", failures[0])
 

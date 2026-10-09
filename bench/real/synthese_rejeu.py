@@ -4,7 +4,7 @@
 Le verdict est « tenu » seulement si tout ceci est vrai :
 - le fichier couvre exactement le nombre de captures attendu (61 par défaut) ;
 - la médiane et la moyenne de jetons économisés, rappel du brut compris, atteignent les seuils
-  (ceux de la 0.2.6 par défaut : 4,87 % et 28,39 %, voir ci-dessous) ;
+  (ceux de la 0.2.6 par défaut : 4,87 % et 27,60 %, voir ci-dessous) ;
 - chaque brut est récupérable et chaque code de sortie du producteur est conservé.
 L'égalité stricte des vues n'est pas une condition : elle est affichée. La position de la médiane par
 rapport à celle de l'oracle de comparaison l'est aussi, sans être une condition : depuis que `pipe` et
@@ -20,9 +20,13 @@ CAPTURES = 61
 # captures `git log` à 91-97 % obtenues en ne montrant que le premier commit. Depuis que la compression de
 # `git log` n'existe que pour `exec` au format par défaut prouvé, ces captures (passées par `pipe`) sont
 # rendues brutes : la médiane retombe à 4,87 % (elle valait 21,32 %, valeur d'une de ces captures) et la
-# moyenne à 28,39 %. Les seuils sont ces mesures, arrondies par défaut : un plancher contre la régression.
+# moyenne à 28,39 %. Rejeu du 9 octobre 2026 (soir) : `npm test` lance un script choisi par l'utilisateur
+# et sort brut (la vue `packages` supprimait les lignes vides, dont celle d'un commit sans message en
+# `git log --format=%s`) ; seules TypeScript-test (14 → 28 jetons sur 31) et visible-jest (607 → 624 sur 627)
+# changent, la moyenne passe à 27,61 %. Les seuils sont ces mesures, arrondies par défaut : un plancher
+# contre la régression.
 MEDIANE_MIN = 4.87
-MOYENNE_MIN = 28.39
+MOYENNE_MIN = 27.60
 
 
 def verdict(results, captures=CAPTURES, mediane_min=MEDIANE_MIN, moyenne_min=MOYENNE_MIN):
