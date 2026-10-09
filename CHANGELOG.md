@@ -5,7 +5,7 @@
 La 0.2.5 est publiée. Cette version corrige deux failles de sécurité relevées par un audit, ajoute le résumé syntaxique local de `smart`, corrige les vues `git log` et pytest, retire les chemins du constructeur du binaire et documente le rejeu du banc en une commande.
 
 ### Capture des commandes
-- `--stream` et `--raw-on-failure` conservent la provenance des flux dans la vue et dans le champ JSON `streams` : stdout est affiché avant une frontière `[stderr]`, avec une annotation quand les deux flux sont présents. Cette disposition ne représente pas leur chronologie. Le tee ne reçoit aucune balise synthétique ; chaque bloc y garde exactement ses octets, concaténés dans l'ordre de drainage sans garantir l'ordre d'émission entre flux.
+- `--stream` et `--raw-on-failure` conservent la provenance des flux dans la vue et dans le champ JSON `streams` : stdout est affiché avant une frontière `[stderr]`, avec une annotation quand les deux flux sont présents. Cette disposition ne représente pas leur chronologie. Le tee ne reçoit aucune balise synthétique ; chaque bloc y garde exactement ses octets, concaténés dans l'ordre de drainage sans garantir l'ordre d'émission entre flux. Sans ces options, `exec` draine un tube commun et le tee garde l'ordre d'écriture.
 - Sous Unix, un producteur lancé sans terminal reçoit son propre groupe de processus, que l'interruption de lm-resizer atteint en entier. Dès qu'un terminal de contrôle existe (stdin terminal, ou `/dev/tty` accessible même si stdin est un tube), il reste dans le groupe de premier plan comme en 0.2.5 : `sudo`, `ssh`, `gpg` ou une invite de mot de passe lisent le terminal au lieu d'être arrêtés par SIGTTIN, et l'interruption relayée ne vise que l'enfant immédiat.
 
 ### Sécurité

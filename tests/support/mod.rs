@@ -49,6 +49,26 @@ pub fn report(out: &Output) -> serde_json::Value {
         .unwrap_or_else(|| panic!("no JSON report in output: {out:?}"))
 }
 
+/// Whether `merged` holds exactly the bytes of `stdout` and `stderr`, each in
+/// its own order, interleaved in any way. Separate-stream modes archive chunks
+/// in the order two drain workers deliver them: per-stream bytes are a
+/// contract, the order between the two streams is not.
+pub fn is_interleaving(merged: &[u8], stdout: &[u8], stderr: &[u8]) -> bool {
+    if merged.len() != stdout.len() + stderr.len() {
+        return false;
+    }
+    // reachable[j]: merged[..i + j] is stdout[..i] interleaved with stderr[..j].
+    let mut reachable = vec![false; stderr.len() + 1];
+    for i in 0..=stdout.len() {
+        for j in 0..=stderr.len() {
+            reachable[j] = (i == 0 && j == 0)
+                || (i > 0 && reachable[j] && stdout[i - 1] == merged[i + j - 1])
+                || (j > 0 && reachable[j - 1] && stderr[j - 1] == merged[i + j - 1]);
+        }
+    }
+    reachable[stderr.len()]
+}
+
 pub fn recovered(root: &Path, value: &serde_json::Value) -> Vec<u8> {
     let hint = value["tee_hint"]
         .as_str()

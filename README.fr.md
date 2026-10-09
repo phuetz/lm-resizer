@@ -94,7 +94,7 @@ LM Resizer raccourcit, il ne cache pas. Les vues de commandes conservent littér
 
 ## Récupérer la sortie exacte
 
-`exec` archive la sortie jusqu'à EOF, sans plafond de 10 Mio. Le tee ne contient que les octets du producteur : jamais la frontière `[stderr]` ni l'annotation ajoutées à la vue. Dans les modes à flux séparés, les blocs sont archivés dans l'ordre de leur drainage ; leur ordre d'émission entre flux n'est pas garanti. Une vue suffisamment réduite peut afficher `[tee:<id>]` ; le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.
+`exec` archive la sortie jusqu'à EOF, sans plafond de 10 Mio. Le tee ne contient que les octets du producteur : jamais la frontière `[stderr]` ni l'annotation ajoutées à la vue. Par défaut, `exec` draine un seul tube commun : le tee garde l'ordre d'écriture du producteur. Dans les modes à flux séparés (`--stream`, `--raw-on-failure`), les octets de chaque flux sont exacts et dans leur ordre, mais les blocs sont archivés dans l'ordre de leur drainage : l'ordre entre stdout et stderr n'est pas garanti, et un bloc d'un flux peut tomber au milieu d'une longue ligne de l'autre. Une vue suffisamment réduite peut afficher `[tee:<id>]` ; le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.
 
 Depuis Bash, récupérer un original listé lorsqu'il en existe un :
 

@@ -96,7 +96,7 @@ LM Resizer shortens, it does not hide. Command views keep literal numbers, paths
 
 ## Recover the exact output
 
-`exec` drains output through EOF, without a 10 MiB ceiling. The tee contains the producer bytes only: it never includes the view's `[stderr]` boundary or capture annotation. In separate-stream modes, chunks are archived in drain order; their cross-stream emission order is not guaranteed. A sufficiently reduced view may display `[tee:<id>]`; read it with `lm-resizer tee read <id>`; otherwise `tee list` and the JSON `tee_hint` field provide recovery without adding tokens to the view.
+`exec` drains output through EOF, without a 10 MiB ceiling. The tee contains the producer bytes only: it never includes the view's `[stderr]` boundary or capture annotation. By default `exec` drains one shared pipe, so the tee keeps the producer's write order. In separate-stream modes (`--stream`, `--raw-on-failure`), each stream's bytes are exact and in order, but chunks are archived in drain order: the order between stdout and stderr is not guaranteed, and a chunk of one stream can fall inside a long line of the other. A sufficiently reduced view may display `[tee:<id>]`; read it with `lm-resizer tee read <id>`; otherwise `tee list` and the JSON `tee_hint` field provide recovery without adding tokens to the view.
 
 From Bash, retrieve a listed original when one exists:
 

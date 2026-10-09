@@ -12,10 +12,8 @@ fn main() {
         Some("dual") => {
             io::stdout().write_all(b"OUT begin\r\n").unwrap();
             io::stdout().flush().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(20));
             io::stderr().write_all("ERROR été\r\n".as_bytes()).unwrap();
             io::stderr().flush().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(20));
             io::stdout().write_all(b"OUT end\0\r\n").unwrap();
             io::stdout().flush().unwrap();
         }

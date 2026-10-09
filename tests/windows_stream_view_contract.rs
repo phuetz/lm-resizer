@@ -28,9 +28,15 @@ fn raw_failure_view_labels_stderr_but_tee_stays_unmodified() {
 OUT begin\r\nOUT end\0\r\n\n[stderr]\nERROR été\r\n\
 [capture: stdout and stderr captured separately; displayed order is not chronological]\n"
     );
-    assert_eq!(
-        recovered(dir.path(), &value),
-        "OUT begin\r\nERROR été\r\nOUT end\0\r\n".as_bytes()
+    let tee = recovered(dir.path(), &value);
+    assert!(
+        is_interleaving(
+            &tee,
+            b"OUT begin\r\nOUT end\0\r\n",
+            "ERROR été\r\n".as_bytes()
+        ),
+        "{:?}",
+        String::from_utf8_lossy(&tee)
     );
 }
 
