@@ -230,12 +230,30 @@ fn stat_row(row: &str) -> Option<String> {
         .then(|| format!("  {path} | {count}"))
 }
 
-/// `commit <hash>` : 40 chiffres, ou une abréviation (`--abbrev-commit`, quatre au minimum pour git).
-/// Hashes de commit et sujets non vides qu'un texte présente comme un historique git : en-têtes
-/// `commit <hash>` (sujet = première ligne indentée du message) et lignes `<hash> <sujet>` ou
-/// `<hash>` seul (7 à 40 chiffres hexadécimaux, éventuellement après un graphe `*`/`|`).
+/// Séparateurs de champs d'une ligne d'historique : blancs et NUL (`--format=%H%x00%s`).
+fn is_field_separator(c: char) -> bool {
+    c.is_whitespace() || c == '\0'
+}
+
+/// `(avant, après)` le dernier séparateur de champs de `text`, s'il y en a un.
+fn split_last_field(text: &str) -> Option<(&str, &str)> {
+    let at = text.rfind(is_field_separator)?;
+    let width = text[at..].chars().next().map_or(1, char::len_utf8);
+    Some((&text[..at], &text[at + width..]))
+}
+
+/// Hashes de commit et sujets non vides qu'un texte présente comme un historique git :
+/// - en-têtes `commit <hash>` (4 à 40 chiffres hexadécimaux ; sujet = première ligne indentée du
+///   message) ;
+/// - lignes `<hash> <sujet>` ou `<hash>` seul, même indentées, après un graphe `*`/`|`, ou avec un
+///   NUL pour séparateur (`%H%x00%s`) ;
+/// - lignes `<sujet> <hash>` (`%s %H`) : dernier mot de 7 à 40 chiffres hexadécimaux.
+///
+/// Quand le texte a des en-têtes `commit <hash>`, ses lignes indentées de quatre sont la prose des
+/// messages : un mot hexadécimal y est du texte, pas une identité.
 fn git_log_identities(text: &str) -> (Vec<&str>, Vec<&str>) {
     let rows: Vec<&str> = text.lines().collect();
+    let headered = rows.iter().any(|row| is_commit_header(strip_graph(row)));
     let (mut hashes, mut subjects) = (Vec::new(), Vec::new());
     for (i, row) in rows.iter().enumerate() {
         let body = strip_graph(row);
@@ -248,11 +266,26 @@ fn git_log_identities(text: &str) -> (Vec<&str>, Vec<&str>) {
             if let Some(line) = message.filter(|l| l.starts_with("    ")) {
                 subjects.push(line.trim());
             }
-        } else if let Some(hash) = body.split(' ').next().filter(|w| is_hex_id(w)) {
-            hashes.push(hash);
-            let subject = body[hash.len()..].trim();
+            continue;
+        }
+        if headered && row.starts_with("    ") {
+            continue;
+        }
+        let content = body.trim_matches(is_field_separator);
+        let first = content.split(is_field_separator).next().unwrap_or_default();
+        if is_hex_id(first) {
+            hashes.push(first);
+            let subject = content[first.len()..].trim_matches(is_field_separator);
             if !subject.is_empty() {
                 subjects.push(subject);
+            }
+        } else if let Some((before, last)) = split_last_field(content) {
+            if last.len() >= 7 && is_hex_id(last) {
+                hashes.push(last);
+                let subject = before.trim_matches(is_field_separator);
+                if !subject.is_empty() {
+                    subjects.push(subject);
+                }
             }
         }
     }
@@ -289,11 +322,15 @@ pub fn lost_git_identity(raw: &str, output: &str) -> bool {
     let mut words = std::collections::HashSet::new();
     let mut lines = std::collections::HashSet::new();
     for row in output.lines() {
-        words.extend(row.split_whitespace());
-        let body = strip_graph(row).trim();
+        words.extend(row.split(is_field_separator).filter(|w| !w.is_empty()));
+        let body = strip_graph(row).trim_matches(is_field_separator);
         lines.insert(body);
-        if let Some((_, rest)) = body.split_once(' ') {
-            lines.insert(rest.trim());
+        // Sujet après le premier champ (`<hash> <sujet>`) ou avant le dernier (`<sujet> <hash>`).
+        if let Some(at) = body.find(is_field_separator) {
+            lines.insert(body[at..].trim_matches(is_field_separator));
+        }
+        if let Some((before, _)) = split_last_field(body) {
+            lines.insert(before.trim_matches(is_field_separator));
         }
     }
     hashes.iter().any(|h| !words.contains(h)) || subjects.iter().any(|s| !lines.contains(s))
@@ -812,6 +849,52 @@ mod tests {
         // Une ligne de message qui commence par un mot hexadécimal n'est pas une identité.
         let prose = "commit aaaaaaa1\nAuthor: A <a@e.t>\nDate: d\n\n    sujet\n\n    deadbeef est le correctif\n";
         assert!(!lost_git_identity(prose, "commit aaaaaaa1\n  sujet\n"));
+        let revert = "commit aaaaaaa1\nAuthor: A <a@e.t>\nDate: d\n\n    sujet\n\n    retour de 0123456789abcdef\n";
+        assert!(!lost_git_identity(revert, "commit aaaaaaa1\n  sujet\n"));
+    }
+    #[test]
+    fn the_final_guard_sees_hashes_after_a_subject_indented_or_after_a_nul() {
+        let h1 = "1f0e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
+        let h2 = "2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d";
+        // `%s %H`, commit à message vide compris (` <hash>`).
+        let subject_then_hash = format!("premier sujet {h1}\n {h2}\n");
+        assert!(!lost_git_identity(&subject_then_hash, &subject_then_hash));
+        assert!(lost_git_identity(
+            &subject_then_hash,
+            &format!("premier sujet {h1}\n")
+        ));
+        assert!(lost_git_identity(
+            &subject_then_hash,
+            &format!("premier {h1}\n {h2}\n")
+        ));
+        assert!(lost_git_identity(
+            &subject_then_hash,
+            "1 passed, 0 failed\n"
+        ));
+        // `    %H %s`.
+        let indented = format!("    {h1} premier sujet\n    {h2} second\n");
+        assert!(!lost_git_identity(&indented, &indented));
+        assert!(lost_git_identity(
+            &indented,
+            &format!("    {h1} premier sujet\n")
+        ));
+        // `%H%x00%s`.
+        let nul = format!("{h1}\0premier sujet\n{h2}\0second\n");
+        assert!(!lost_git_identity(&nul, &nul));
+        assert!(lost_git_identity(&nul, &format!("{h1}\0premier sujet\n")));
+        assert!(lost_git_identity(
+            &nul,
+            &format!("{h1}\0premier sujet\n{h2}\0sec\n")
+        ));
+        // La vue compacte garde `Merge: a b` tel quel : pas de refus.
+        let merge =
+            "commit aaaaaaa1\nMerge: abc1234 def5678\nAuthor: A <a@e.t>\nDate: d\n\n    fusion\n";
+        assert!(!lost_git_identity(
+            merge,
+            "commit aaaaaaa1\n  Merge: abc1234 def5678\n  Author: A <a@e.t>\n  fusion\n"
+        ));
+        // Un sujet qui finit par un mot non hexadécimal ou trop court n'est pas une identité.
+        assert!(!lost_git_identity("version 1.2.3\nadd cafe\n", ""));
     }
     #[test]
     fn python_module_and_uv_runners_use_the_pytest_view() {

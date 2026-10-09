@@ -4081,6 +4081,11 @@ fn filter_command_output_as(command: &[String], raw: &str, executed: bool) -> (S
     if runs_a_user_script(command) {
         return ("lossless:script-runner".to_string(), raw.to_string());
     }
+    // Lanceur de tests à qui l'argv demande d'afficher la sortie des tests (`cargo test --
+    // --nocapture`, `pytest -s`, `go test -v`…) : un test peut imprimer n'importe quoi, brut.
+    if test_views::shows_test_output(command) {
+        return ("lossless:test-output".to_string(), raw.to_string());
+    }
     // Git : la sous-commande se lit après les options globales (`--no-pager`, `-C`, `-c`…). Une
     // sous-commande sans vue native (liste de commits, alias, `branch`, `blame`…) reste brute :
     // le résumé générique supprime des lignes sans signal, donc des entrées.
@@ -12657,7 +12662,8 @@ expected = "error: bad\n"
                 "native:dotnet-test",
             ),
             (
-                vec!["mvn", "test"],
+                // `mvn test` affiche la sortie des tests (brut) ; la compilation garde le filtre.
+                vec!["mvn", "compile"],
                 "Downloading dependency\n[ERROR] Failed to execute goal\nBUILD FAILURE\n",
                 "toml:jvm-build",
             ),
@@ -14501,6 +14507,18 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
     fn vue_exec(command: &[&str], raw: &str) -> VueExec {
         let cmd: Vec<String> = command.iter().map(|arg| (*arg).to_string()).collect();
         let (filtre, texte_filtre) = filter_command_output(&cmd, raw);
+        vue_de(filtre, texte_filtre)
+    }
+
+    /// Vue du filtre TOML intégré qui correspond à `command`, appliqué directement : `exec` rend brute
+    /// la sortie d'un lanceur sans capture (`rspec`, minitest), le filtre reste vérifié pour lui-même.
+    fn vue_toml(command: &[&str], raw: &str) -> VueExec {
+        let (filtre, texte_filtre) =
+            apply_toml_filters(&command.join(" "), raw).expect("filtre TOML intégré");
+        vue_de(filtre, texte_filtre)
+    }
+
+    fn vue_de(filtre: String, texte_filtre: String) -> VueExec {
         let store = InMemoryCcrStore::default();
         let compresse = compress_text_with_pipeline_gate(
             &texte_filtre,
@@ -14553,7 +14571,11 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
             ligne.contains("eq(3)"),
             "le fichier de test ne place pas eq(3) à la ligne 5 : {ligne}"
         );
-        let vue = vue_exec(&["rspec", "rspec_test.rb"], RSPEC_RAW);
+        // `rspec` affiche toujours la sortie des tests : `exec` la rend brute.
+        let brut = vue_exec(&["rspec", "rspec_test.rb"], RSPEC_RAW);
+        assert_eq!(brut.filtre, "lossless:test-output");
+        assert_eq!(brut.texte_filtre, RSPEC_RAW);
+        let vue = vue_toml(&["rspec", "rspec_test.rb"], RSPEC_RAW);
         let faits = [
             "1) Math adds numbers",
             "Failure/Error: expect(1 + 1).to eq(3)",
@@ -14601,7 +14623,11 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
             soustraction.contains("assert_equal 2, 2 - 1"),
             "{soustraction}"
         );
-        let vue = vue_exec(&["ruby", "minitest_test.rb"], MINITEST_RAW);
+        // minitest affiche toujours la sortie des tests : `exec` la rend brute.
+        let brut = vue_exec(&["ruby", "minitest_test.rb"], MINITEST_RAW);
+        assert_eq!(brut.filtre, "lossless:test-output");
+        assert_eq!(brut.texte_filtre, MINITEST_RAW);
+        let vue = vue_toml(&["ruby", "minitest_test.rb"], MINITEST_RAW);
         let faits = [
             "Run options: --seed 64567",
             "1) Failure:",
@@ -14726,16 +14752,20 @@ Prisma CLI Version : 5.15.0
     #[test]
     fn ruby_prisma_routage_des_lanceurs() {
         let cas = [
-            (vec!["rspec", "rspec_test.rb"], "toml:rspec"),
-            (vec!["bundle", "exec", "rspec", "spec"], "toml:rspec"),
-            (vec!["ruby", "-S", "rspec"], "toml:rspec"),
-            (vec!["ruby", "minitest_test.rb"], "toml:minitest"),
+            // Lanceurs sans capture : la sortie des tests est rendue brute.
+            (vec!["rspec", "rspec_test.rb"], "lossless:test-output"),
+            (
+                vec!["bundle", "exec", "rspec", "spec"],
+                "lossless:test-output",
+            ),
+            (vec!["ruby", "-S", "rspec"], "lossless:test-output"),
+            (vec!["ruby", "minitest_test.rb"], "lossless:test-output"),
             (
                 vec!["bundle", "exec", "ruby", "minitest_test.rb"],
-                "toml:minitest",
+                "lossless:test-output",
             ),
-            (vec!["rake", "test"], "toml:minitest"),
-            (vec!["rails", "test"], "toml:minitest"),
+            (vec!["rake", "test"], "lossless:test-output"),
+            (vec!["rails", "test"], "lossless:test-output"),
             (vec!["prisma", "validate"], "toml:prisma"),
             (vec!["prisma", "migrate", "dev"], "prisma-migrate"),
             (vec!["prisma", "generate"], "toml:prisma"),

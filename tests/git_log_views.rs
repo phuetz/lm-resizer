@@ -1088,3 +1088,315 @@ fn the_compact_git_log_view_is_limited_to_a_closed_whitelist() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Projet Rust sans dépendance dont l'unique test, réussi, lance le vrai Git (`HISTORY_REPO`,
+/// `HISTORY_FORMAT`) et imprime sa sortie. `[workspace]` l'isole du dépôt parent.
+fn relay_harness() -> tempfile::TempDir {
+    let harness = tempfile::tempdir().unwrap();
+    std::fs::write(
+        harness.path().join("Cargo.toml"),
+        "[package]\nname = \"relais\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n",
+    )
+    .unwrap();
+    std::fs::create_dir(harness.path().join("src")).unwrap();
+    std::fs::write(
+        harness.path().join("src/lib.rs"),
+        r#"#[test]
+fn relay_history() {
+    let format = std::env::var("HISTORY_FORMAT").unwrap();
+    let repo = std::env::var("HISTORY_REPO").unwrap();
+    let out = std::process::Command::new("git")
+        .args(["-C", &repo, "log", &format])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    print!("{}", String::from_utf8(out.stdout).unwrap());
+}
+"#,
+    )
+    .unwrap();
+    harness
+}
+
+/// `exec --json -- <args>` avec l'environnement du harnais : (filtre, vue).
+fn exec_relay(
+    repo: &tempfile::TempDir,
+    harness: &Path,
+    state: &Path,
+    format: &str,
+    args: &[&str],
+) -> (String, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+        .current_dir(repo.path())
+        .env("LM_RESIZER_STATE_DIR", state)
+        .env("LM_RESIZER_STORE", state.join("ccr.sqlite"))
+        .env("LM_RESIZER_TRACKING", "0")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("HISTORY_REPO", repo.path())
+        .env("HISTORY_FORMAT", format)
+        .env("CARGO_TARGET_DIR", harness.join("target"))
+        .env("RUSTC_WRAPPER", "")
+        .env("CARGO_NET_OFFLINE", "true")
+        .env_remove("RUST_TEST_NOCAPTURE")
+        .args(["exec", "--json", "--"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{args:?}: {out:?}");
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    (
+        report["filter"].as_str().unwrap().to_string(),
+        report["output"].as_str().unwrap().to_string(),
+    )
+}
+
+/// Décision du 9 octobre et contre-revue de f396bd5 : un vrai `cargo test` dont le test
+/// réussi imprime `git log` gardait le seul bilan (`1 passed, 0 failed`), 23 commits perdus. Quand
+/// l'argv demande d'afficher la sortie des tests (`--nocapture`, `--show-output`, aussi derrière
+/// `sh -c`), la sortie est brute : chaque `git log` du dépôt piège y figure d'un seul tenant.
+#[test]
+fn a_real_cargo_test_that_prints_git_log_comes_out_whole_when_output_is_requested() {
+    let repo = trap_history();
+    let harness = relay_harness();
+    let state = tempfile::tempdir().unwrap();
+    let manifest = harness.path().join("Cargo.toml");
+    let manifest = manifest.to_str().unwrap();
+    let mut failures = Vec::new();
+    for format in [
+        "--format=%s",
+        "--format=%s %H",
+        "--format=    %H %s",
+        "--format=%H%x00%s",
+    ] {
+        let direct = String::from_utf8(git(repo.path(), &["log", format])).unwrap();
+        let line = format!("cargo test --quiet --manifest-path {manifest} -- --nocapture");
+        let forms: [(&str, Vec<&str>); 4] = [
+            (
+                "-- --nocapture",
+                vec![
+                    "cargo",
+                    "test",
+                    "--quiet",
+                    "--manifest-path",
+                    manifest,
+                    "--",
+                    "--nocapture",
+                ],
+            ),
+            (
+                "-- --show-output",
+                vec![
+                    "cargo",
+                    "test",
+                    "--quiet",
+                    "--manifest-path",
+                    manifest,
+                    "--",
+                    "--show-output",
+                ],
+            ),
+            (
+                "--release -- --nocapture",
+                vec![
+                    "cargo",
+                    "test",
+                    "--release",
+                    "--quiet",
+                    "--manifest-path",
+                    manifest,
+                    "--",
+                    "--test-threads=1",
+                    "--nocapture",
+                ],
+            ),
+            ("sh -c", vec!["sh", "-c", &line]),
+        ];
+        for (name, args) in forms {
+            let (filter, view) = exec_relay(&repo, harness.path(), state.path(), format, &args);
+            if filter.contains("cargo-test") || !view.contains(&direct) {
+                failures.push(format!(
+                    "{name} {format:?}: filtre {filter}, git log absent ou incomplet ({} octets de vue)",
+                    view.len()
+                ));
+            }
+        }
+    }
+    // Témoin : sans demande d'affichage, la vue du lanceur reste (le test n'imprime rien de visible).
+    let (filter, _) = exec_relay(
+        &repo,
+        harness.path(),
+        state.path(),
+        "--format=%s",
+        &["cargo", "test", "--quiet", "--manifest-path", manifest],
+    );
+    assert_eq!(filter, "native:cargo-test");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Transcriptions au format des lanceurs absents de cette machine (pytest, go, jest, vitest,
+/// dotnet, rspec, minitest, maven, gradle, playwright), dont un test imprime `git log --format=%s`
+/// du dépôt piège : quand l'argv déclaré demande la sortie des tests, ou que le lanceur n'a pas de
+/// capture, `tool-output` et `exec` la rendent brute.
+#[test]
+fn test_runners_asked_to_show_test_output_return_it_raw() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = trap_history();
+    let state = tempfile::tempdir().unwrap();
+    let log = String::from_utf8(git(repo.path(), &["log", "--format=%s"])).unwrap();
+    let indented: String = log.lines().map(|l| format!("    {l}\n")).collect();
+    let pytest = format!(
+        "============================= test session starts ==============================\n\
+         platform linux -- Python 3.12.3, pytest-8.3.3, pluggy-1.5.0\n\
+         rootdir: /tmp/relais\ncollected 1 item\n\n\
+         test_relais.py {log}.\n\n\
+         ============================== 1 passed in 0.01s ===============================\n"
+    );
+    // `go test -json` : un événement par ligne de sortie.
+    let mut go = String::new();
+    let event = |action: &str, test: Option<&str>, output: Option<&str>| {
+        let mut value = serde_json::json!({
+            "Time": "2026-10-09T10:00:00Z",
+            "Action": action,
+            "Package": "example.com/relais",
+        });
+        if let Some(test) = test {
+            value["Test"] = test.into();
+        }
+        if let Some(output) = output {
+            value["Output"] = output.into();
+        }
+        value.to_string() + "\n"
+    };
+    go.push_str(&event("start", None, None));
+    go.push_str(&event("run", Some("TestRelais"), None));
+    go.push_str(&event(
+        "output",
+        Some("TestRelais"),
+        Some("=== RUN   TestRelais\n"),
+    ));
+    for line in log.lines() {
+        go.push_str(&event(
+            "output",
+            Some("TestRelais"),
+            Some(&format!("{line}\n")),
+        ));
+    }
+    go.push_str(&event(
+        "output",
+        Some("TestRelais"),
+        Some("--- PASS: TestRelais (0.00s)\n"),
+    ));
+    go.push_str(&event("pass", Some("TestRelais"), None));
+    go.push_str(&event("output", None, Some("PASS\n")));
+    go.push_str(&event(
+        "output",
+        None,
+        Some("ok  \texample.com/relais\t0.003s\n"),
+    ));
+    go.push_str(&event("pass", None, None));
+    let go_verbose = format!(
+        "=== RUN   TestRelais\n{log}--- PASS: TestRelais (0.00s)\nPASS\nok  \texample.com/relais\t0.003s\n"
+    );
+    // Un test réussi imprime l'historique, un autre échoue : la vue d'échec ne garde que l'échec.
+    let jest = format!(
+        "  console.log\n{indented}\n      at Object.log (relais.test.js:5:11)\n\n\
+         FAIL ./relais.test.js\n  ✓ relais (5 ms)\n  ✕ autre (2 ms)\n\n  ● autre\n\n\
+         \x20   expect(received).toBe(expected) // Object.is equality\n\n\
+         \x20   Expected: 2\n    Received: 1\n\n      at Object.toBe (relais.test.js:9:13)\n\n\
+         Test Suites: 1 failed, 1 total\nTests:       1 failed, 1 passed, 2 total\n\
+         Snapshots:   0 total\nTime:        0.5 s\nRan all test suites.\n"
+    );
+    let vitest = format!(
+        "stdout | relais.test.js > relais\n{log}\n ❯ relais.test.js (2 tests | 1 failed) 5ms\n\
+         \x20  ✓ relais\n   × autre\n\n\
+         ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯\n\n FAIL  relais.test.js > autre\n\
+         AssertionError: expected 1 to be 2 // Object.is equality\n\n\
+         \x20Test Files  1 failed (1)\n      Tests  1 failed | 1 passed (2)\n\
+         \x20  Start at  10:00:00\n   Duration  412ms\n"
+    );
+    let dotnet = format!(
+        "  Determining projects to restore...\n  All projects are up-to-date for restore.\n\
+         \x20 Relais -> /tmp/relais/bin/Debug/net8.0/Relais.dll\n\
+         Test run for /tmp/relais/bin/Debug/net8.0/Relais.dll (.NETCoreApp,Version=v8.0)\n\
+         \x20 Passed Relais.Test [1 ms]\n  Standard Output Messages:\n{indented}\n\
+         Test Run Successful.\nTotal tests: 1\n     Passed: 1\n Total time: 0.5123 Seconds\n"
+    );
+    let rspec = format!(
+        "{log}.\n\nFinished in 0.00123 seconds (files took 0.12175 seconds to load)\n1 example, 0 failures\n\n"
+    );
+    let minitest = format!(
+        "Run options: --seed 1234\n\n# Running:\n\n{log}.\n\n\
+         Finished in 0.000654s, 1529.0520 runs/s, 1529.0520 assertions/s.\n\n\
+         1 runs, 1 assertions, 0 failures, 0 errors, 0 skips\n"
+    );
+    let maven = format!(
+        "[INFO] -------------------------------------------------------\n[INFO]  T E S T S\n\
+         [INFO] -------------------------------------------------------\n[INFO] Running RelaisTest\n\
+         {log}[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.05 s -- in RelaisTest\n\
+         [INFO] \n[INFO] Results:\n[INFO] \n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0\n\
+         [INFO] \n[INFO] BUILD SUCCESS\n"
+    );
+    let playwright = format!(
+        "Running 1 test using 1 worker\n{log}  ✓  1 relais.spec.ts:3:5 › relais (12ms)\n\n  1 passed (1.2s)\n"
+    );
+    let cases: Vec<(&str, &str)> = vec![
+        ("pytest -s", &pytest),
+        ("pytest -vs test_relais.py", &pytest),
+        ("python -m pytest --capture=no", &pytest),
+        ("uv run pytest -rP", &pytest),
+        ("go test -v ./...", &go_verbose),
+        ("go test -json ./...", &go),
+        ("go test ./... -json", &go),
+        ("jest --silent=false", &jest),
+        ("npx jest --silent=false", &jest),
+        ("yarn jest --no-silent", &jest),
+        ("vitest run --disableConsoleIntercept", &vitest),
+        ("npx vitest run --printConsoleTrace", &vitest),
+        ("yarn vitest run --disableConsoleIntercept", &vitest),
+        ("dotnet test -v d", &dotnet),
+        ("dotnet test --logger console;verbosity=detailed", &dotnet),
+        ("rspec", &rspec),
+        ("bundle exec rspec spec", &rspec),
+        ("ruby relais_test.rb", &minitest),
+        ("rake test", &minitest),
+        ("mvn test", &maven),
+        ("mvn -q clean install", &maven),
+        ("gradle test --info", &maven),
+        ("playwright test", &playwright),
+        ("npx playwright test", &playwright),
+    ];
+    let mut failures = Vec::new();
+    for (command, transcript) in &cases {
+        // Sortie déjà capturée.
+        let view = pipe_stdin(
+            repo.path(),
+            state.path(),
+            &["tool-output", "--command", command],
+            transcript.as_bytes(),
+        );
+        if view != transcript.as_bytes() {
+            failures.push(format!("tool-output {command:?}: la vue n'est pas le brut"));
+        }
+        // `exec` d'un programme du même nom qui rejoue la transcription.
+        let bin = tempfile::tempdir().unwrap();
+        let words: Vec<&str> = command.split(' ').collect();
+        let fixture = bin.path().join("transcription");
+        std::fs::write(&fixture, transcript).unwrap();
+        let program = bin.path().join(words[0]);
+        std::fs::write(
+            &program,
+            format!("#!/bin/sh\ncat '{}'\n", fixture.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut args = vec!["exec", "--"];
+        args.push(program.to_str().unwrap());
+        args.extend(&words[1..]);
+        let out = lm_resizer(repo.path(), state.path(), &args);
+        if out.stdout != transcript.as_bytes() {
+            failures.push(format!("exec {command:?}: la vue n'est pas le brut"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

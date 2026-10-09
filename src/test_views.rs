@@ -10,6 +10,235 @@ fn counts(line: &str) -> BTreeMap<&str, usize> {
         .collect()
 }
 
+/// Nom d'un programme : dernier composant du chemin, sans `.exe`, en minuscules (`py.test` reste
+/// `py.test`).
+fn program_name(arg: &str) -> String {
+    let name = arg.rsplit(['/', '\\']).next().unwrap_or(arg);
+    let name = name.strip_suffix(".exe").unwrap_or(name);
+    name.to_ascii_lowercase()
+}
+
+/// La commande demande explicitement d'afficher la sortie des programmes testés : la vue du lanceur
+/// est alors refusée et la sortie rendue brute, octet pour octet. Décision lue dans l'`argv` seul,
+/// jamais dans la sortie (décision du 9 octobre 2026). Un test peut imprimer n'importe quoi,
+/// `git log --format=%s` compris ; les vues de ce module ne gardent que bilans et échecs.
+///
+/// Lanceurs ayant une vue native, après les enveloppes que le routage reconnaît (`npx`, `bunx`,
+/// `npm|pnpm|yarn|bundle exec`, `uv run`, `python -m`, `pnpm|yarn|bun <jest|vitest>`) :
+/// - `cargo test`, `cargo nextest` : `--nocapture`, `--no-capture`, `--show-output`,
+///   `--success-output…`, avant ou après `--` ;
+/// - `pytest`, `py.test`, `python -m pytest` : `-s` (aussi groupé, `-vs`), `--capture=no|tee-sys`,
+///   `-p no:capture`, `-r` avec `P` ou `A` (sortie des tests réussis), `--log-cli-level`,
+///   `-o log_cli=true` ;
+/// - `go test` : `-v`, `-v=true`, `-test.v…`, `-json` ;
+/// - `jest`, `vitest` : `--silent=false`, `--no-silent`, `--disableConsoleIntercept`,
+///   `--printConsoleTrace` ;
+/// - `dotnet test` : `-v|--verbosity normal|detailed|diagnostic`, `--logger` dont la verbosité est
+///   `normal`, `detailed` ou `diagnostic` ;
+/// - lanceurs qui affichent toujours la sortie des tests (aucune capture) : `rspec`, minitest
+///   (`ruby …_test.rb`, `rake test`, `rails test`), `mvn` avec une phase qui lance les tests
+///   (`test`, `verify`, `package`, `install`, `deploy`), `playwright test` ; `gradle` seulement avec
+///   `-i`, `--info`, `-d` ou `--debug`.
+pub fn shows_test_output(command: &[String]) -> bool {
+    let mut rest = command;
+    // Enveloppes du routage : elles désignent le programme qui suit.
+    loop {
+        let Some(first) = rest.first() else {
+            return false;
+        };
+        let skip = match program_name(first).as_str() {
+            "npx" | "bunx" => {
+                1 + rest[1..]
+                    .iter()
+                    .take_while(|arg| matches!(arg.as_str(), "-y" | "--yes" | "--"))
+                    .count()
+            }
+            "npm" | "pnpm" | "yarn" | "bundle" if rest.get(1).is_some_and(|a| a == "exec") => {
+                if rest.get(2).is_some_and(|a| a == "--") {
+                    3
+                } else {
+                    2
+                }
+            }
+            "uv" | "poetry" | "pipenv" if rest.get(1).is_some_and(|a| a == "run") => 2,
+            "python" | "python3" | "py" if rest.get(1).is_some_and(|a| a == "-m") => 2,
+            "pnpm" | "yarn" | "bun"
+                if rest
+                    .get(1)
+                    .is_some_and(|a| matches!(program_name(a).as_str(), "jest" | "vitest")) =>
+            {
+                1
+            }
+            _ => 0,
+        };
+        if skip == 0 || skip >= rest.len() {
+            break;
+        }
+        rest = &rest[skip..];
+    }
+    let program = program_name(&rest[0]);
+    let args = &rest[1..];
+    let has = |word: &str| args.iter().any(|arg| arg == word);
+    match program.as_str() {
+        "cargo" if has("test") || has("nextest") => args.iter().any(|arg| {
+            matches!(
+                arg.as_str(),
+                "--nocapture" | "--no-capture" | "--show-output"
+            ) || arg.starts_with("--success-output")
+        }),
+        "pytest" | "py.test" => pytest_shows_output(args),
+        "go" if has("test") => args.iter().any(|arg| {
+            let flag = arg.trim_start_matches('-');
+            arg.starts_with('-')
+                && (flag == "v"
+                    || flag == "json"
+                    || flag == "test.v"
+                    || ((flag.starts_with("v=") || flag.starts_with("test.v="))
+                        && !flag.ends_with("=false")
+                        && !flag.ends_with("=0")))
+        }),
+        "jest" | "vitest" => args.iter().enumerate().any(|(i, arg)| {
+            matches!(
+                arg.as_str(),
+                "--silent=false"
+                    | "--no-silent"
+                    | "--disableConsoleIntercept"
+                    | "--disable-console-intercept"
+                    | "--printConsoleTrace"
+                    | "--print-console-trace"
+            ) || (arg == "--silent" && args.get(i + 1).is_some_and(|v| v == "false"))
+        }),
+        "dotnet" if has("test") => dotnet_shows_output(args),
+        // Lanceurs sans capture : la sortie des tests est affichée par défaut, lancer les tests vaut
+        // demande d'affichage. Formes reconnues par les filtres intégrés `rspec`, `minitest`,
+        // `jvm-build` et `js-quality`.
+        "rspec" => true,
+        "ruby" => args
+            .iter()
+            .any(|arg| arg == "rspec" || arg.contains("minitest") || arg.ends_with("_test.rb")),
+        "rake" | "rails" => args.first().is_some_and(|task| {
+            let task = task.split(':').next().unwrap_or(task);
+            task == "test" || task == "minitest"
+        }),
+        "mvn" | "mvnw" => args.iter().any(|arg| {
+            matches!(
+                arg.as_str(),
+                "test" | "integration-test" | "verify" | "package" | "install" | "deploy"
+            ) || arg.starts_with("surefire:")
+                || arg.starts_with("failsafe:")
+        }),
+        "gradle" | "gradlew" => args
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "-i" | "--info" | "-d" | "--debug")),
+        "playwright" => has("test"),
+        _ => false,
+    }
+}
+
+/// `pytest` : options courtes groupées (`-vs`), dont `k m p c o r W n` prennent une valeur (la fin de
+/// l'argument ou l'argument suivant) ; `-rs` demande le rapport des tests sautés, pas `-s`.
+fn pytest_shows_output(args: &[String]) -> bool {
+    let shows = |option: char, value: &str| match option {
+        'r' => value.contains(['P', 'A']),
+        'p' => value == "no:capture",
+        'o' => matches!(
+            value.to_ascii_lowercase().as_str(),
+            "log_cli=true" | "log_cli=1" | "log_cli=yes" | "log_cli=on"
+        ),
+        _ => false,
+    };
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        index += 1;
+        if arg == "--" {
+            break;
+        }
+        if let Some(long) = arg.strip_prefix("--") {
+            let (name, inline) = match long.split_once('=') {
+                Some((name, value)) => (name, Some(value.to_string())),
+                None => (long, None),
+            };
+            let value = |index: &mut usize| {
+                inline.clone().or_else(|| {
+                    let next = args.get(*index).cloned();
+                    *index += 1;
+                    next
+                })
+            };
+            let found = match name {
+                "capture" => value(&mut index).is_some_and(|v| v == "no" || v == "tee-sys"),
+                "override-ini" => value(&mut index).is_some_and(|v| shows('o', &v)),
+                _ => name.starts_with("log-cli-level"),
+            };
+            if found {
+                return true;
+            }
+            continue;
+        }
+        let Some(cluster) = arg.strip_prefix('-') else {
+            continue;
+        };
+        for (offset, option) in cluster.char_indices() {
+            if option == 's' {
+                return true;
+            }
+            if "kmpcorWn".contains(option) {
+                let attached = &cluster[offset + option.len_utf8()..];
+                let value = if attached.is_empty() {
+                    index += 1;
+                    args.get(index - 1).map(String::as_str).unwrap_or("")
+                } else {
+                    attached
+                };
+                if shows(option, value) {
+                    return true;
+                }
+                break;
+            }
+        }
+    }
+    false
+}
+
+/// `dotnet test` : verbosité `normal`, `detailed` ou `diagnostic` (`-v d`, `--verbosity:detailed`,
+/// `--logger "console;verbosity=detailed"`).
+fn dotnet_shows_output(args: &[String]) -> bool {
+    let verbose = |value: &str| {
+        matches!(
+            value.trim_matches('"').to_ascii_lowercase().as_str(),
+            "n" | "normal" | "d" | "detailed" | "diag" | "diagnostic"
+        )
+    };
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        let (name, attached) = match arg.find(['=', ':']) {
+            Some(at) if arg.starts_with('-') => (&arg[..at], Some(&arg[at + 1..])),
+            _ => (arg.as_str(), None),
+        };
+        let mut value = || {
+            attached
+                .map(str::to_string)
+                .or_else(|| iter.next().cloned())
+        };
+        let shown = match name {
+            "-v" | "--verbosity" => value().is_some_and(|v| verbose(&v)),
+            "-l" | "--logger" => value().is_some_and(|v| {
+                v.split(';').any(|part| {
+                    part.split_once('=').is_some_and(|(key, level)| {
+                        key.trim().eq_ignore_ascii_case("verbosity") && verbose(level)
+                    })
+                })
+            }),
+            _ => false,
+        };
+        if shown {
+            return true;
+        }
+    }
+    false
+}
+
 /// Successful .NET console runs: project discovery is progress; verdicts and
 /// counters are facts. Unknown output (including warnings) stays visible.
 pub fn dotnet(raw: &str) -> String {
@@ -462,6 +691,114 @@ pub fn go(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explicit_test_output_requests_are_read_from_argv_only() {
+        let words =
+            |line: &str| -> Vec<String> { line.split_whitespace().map(str::to_string).collect() };
+        for line in [
+            "cargo test -- --nocapture",
+            "cargo test --nocapture",
+            "cargo test --release -- --show-output",
+            "cargo +nightly test -- --nocapture",
+            "/home/x/.cargo/bin/cargo test -q -- --test-threads=1 --nocapture",
+            "cargo nextest run --no-capture",
+            "cargo nextest run --success-output=immediate",
+            "pytest -s",
+            "pytest -vs tests",
+            "pytest -svv",
+            "pytest -x -s",
+            "pytest --capture=no",
+            "pytest --capture no",
+            "pytest --capture=tee-sys",
+            "pytest -p no:capture",
+            "pytest -rP",
+            "pytest -rfEA",
+            "pytest -r A",
+            "pytest --log-cli-level=INFO",
+            "pytest -o log_cli=true",
+            "py.test -s",
+            "python -m pytest -s",
+            "python3 -m pytest -vs",
+            "uv run pytest -s",
+            "uv run python -m pytest --capture=no",
+            "go test -v ./...",
+            "go test ./... -v",
+            "go test -v=true ./...",
+            "go test -json ./...",
+            "go test ./pkg -test.v",
+            "jest --silent=false",
+            "jest --no-silent",
+            "vitest run --disableConsoleIntercept",
+            "vitest run --printConsoleTrace",
+            "npx jest --silent=false",
+            "npx -y vitest run --disable-console-intercept",
+            "bunx vitest --silent false",
+            "pnpm vitest run --silent=false",
+            "yarn jest --no-silent",
+            "npm exec -- jest --silent=false",
+            "dotnet test -v d",
+            "dotnet test --verbosity detailed",
+            "dotnet test --verbosity:normal",
+            "dotnet test --logger console;verbosity=detailed",
+            "dotnet test -l console;verbosity=diagnostic",
+            "rspec",
+            "bundle exec rspec spec/relais_spec.rb",
+            "ruby relais_test.rb",
+            "ruby -Itest test/minitest_relais.rb",
+            "ruby -S rspec",
+            "rake test",
+            "rails test",
+            "bundle exec rake test:units",
+            "mvn test",
+            "mvn -q clean install",
+            "./mvnw verify",
+            "gradle test --info",
+            "./gradlew test -i",
+            "playwright test",
+            "npx playwright test",
+        ] {
+            assert!(shows_test_output(&words(line)), "{line}");
+        }
+        for line in [
+            "cargo test",
+            "cargo test -- --test-threads=1",
+            "cargo test --color never",
+            "cargo build --nocapture",
+            "pytest",
+            "pytest -q --tb=long test_failures.py",
+            "pytest -rs",
+            "pytest -ra",
+            "pytest -k test_s",
+            "pytest -ktest_s",
+            "pytest -m slow -x",
+            "pytest -v",
+            "pytest --capture=fd",
+            "pytest -p xdist",
+            "python -m pytest -q",
+            "go test ./...",
+            "go test -v=false ./...",
+            "go test -vet=off ./...",
+            "go build -v ./...",
+            "jest",
+            "jest --runInBand --no-colors",
+            "jest --silent",
+            "vitest run --maxWorkers=1",
+            "npx vitest run",
+            "dotnet test",
+            "dotnet test -v q",
+            "dotnet test --logger trx",
+            "dotnet build -v d",
+            "ruby script.rb",
+            "rake db:migrate",
+            "mvn compile",
+            "gradle test",
+            "playwright install",
+            "grep -rn pytest -s .",
+        ] {
+            assert!(!shows_test_output(&words(line)), "{line}");
+        }
+    }
+
     /// Sortie réelle de `pytest -q` (pytest 9) pour trois tests en échec : une fonction, une
     /// méthode de classe et un cas paramétré.
     const PYTEST_THREE_FAILURES: &str = "\
