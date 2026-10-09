@@ -271,7 +271,8 @@ fn strip_graph(row: &str) -> &str {
 }
 
 fn is_hex_id(word: &str) -> bool {
-    (7..=40).contains(&word.len())
+    // Git abrège jusqu'à quatre caractères (`--abbrev=4`).
+    (4..=40).contains(&word.len())
         && word
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
@@ -838,6 +839,15 @@ mod tests {
         assert!(lost_git_identity(
             oneline,
             "abc1234\n8441500\ndef5678 troisi...\n"
+        ));
+        // Quatre caractères suffisent (`--abbrev=4`), avec ou sans sujet, avec ou sans graphe.
+        let short = "a1b2 un\n3c4d \ne5f6 trois\n";
+        assert!(!lost_git_identity(short, short));
+        assert!(lost_git_identity(short, "a1b2 un\ne5f6 trois\n"));
+        assert!(lost_git_identity("a1b2\n3c4d\n", "a1b2\n"));
+        assert!(lost_git_identity(
+            "* a1b2 un\n| * 3c4d deux\n",
+            "* a1b2 un\n"
         ));
         // Le graphe `*` ne cache pas les identités.
         let graph = "* abc1234 premier\n| * def5678 deuxième\n";

@@ -4042,12 +4042,33 @@ fn is_shell_interpreter(command: &[String]) -> bool {
     })
 }
 
+/// `argv` contient le mot `git` puis, plus loin, le mot `log` : directement (`env git log`,
+/// `timeout 5 git log`, `xargs git log`), dans un script passé à un shell (`sh -c 'git log …'`) ou dans
+/// le code d'un autre langage (`awk 'BEGIN { system("git log") }'`, `python3 -c '…["git", "log"]…'`).
+/// Les mots sont lus sans reconnaître le programme appelant : il y en aurait toujours un de plus.
+fn argv_mentions_git_log(command: &[String]) -> bool {
+    let mut seen_git = false;
+    for arg in command {
+        for word in arg.split(|c: char| c.is_whitespace() || "\"'`;|&(),[]{}<>".contains(c)) {
+            if word.rsplit('/').next() == Some("git") {
+                seen_git = true;
+            } else if seen_git && word == "log" {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Repli des commandes sans vue dédiée : le résumé générique (`inspection_views::summarize`) ne garde
 /// que les lignes de diagnostic et supprime les autres. Il n'est jamais appliqué à un shell
 /// composé : le producteur et le format de sa sortie ne sont pas établis, la sortie est rendue brute.
 fn generic_summary_or_raw(command: &[String], raw: &str, exit_code: i32) -> (String, String) {
     if is_shell_interpreter(command) {
         ("native:shell-raw".to_string(), raw.to_string())
+    } else if argv_mentions_git_log(command) {
+        // Format de la sortie inconnu (`--format=%s` n'a aucun hash que la garde puisse suivre).
+        ("native:git-log-argv-raw".to_string(), raw.to_string())
     } else {
         (
             "generic:summary".to_string(),

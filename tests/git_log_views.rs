@@ -704,3 +704,158 @@ fn a_described_composed_shell_line_is_returned_raw_by_tool_output() {
         assert_eq!(out.stdout, raw, "{command}");
     }
 }
+
+const HARD_FORMS: [&str; 4] = [
+    "--oneline --abbrev=4",
+    "--format=%h --abbrev=4",
+    "--format=%s",
+    "--graph --oneline --abbrev=4",
+];
+
+fn direct_log(repo: &tempfile::TempDir, form: &str) -> Vec<u8> {
+    let words: Vec<&str> = std::iter::once("log").chain(form.split(' ')).collect();
+    git(repo.path(), &words)
+}
+
+/// `exec -- <args>` doit rendre le brut de Git, avec le code attendu ; le seul ajout toléré est
+/// l'en-tête `[FAIL] Command failed (exit code: N)`.
+fn exec_gives_raw(
+    repo: &tempfile::TempDir,
+    state: &Path,
+    args: &[&str],
+    code: i32,
+    direct: &[u8],
+    label: &str,
+    failures: &mut Vec<String>,
+) {
+    let mut wrapped = vec!["exec", "--"];
+    wrapped.extend(args);
+    let out = lm_resizer(repo.path(), state, &wrapped);
+    if out.status.code() != Some(code) {
+        failures.push(format!(
+            "{label}: code {:?} au lieu de {code}",
+            out.status.code()
+        ));
+        return;
+    }
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let view = text
+        .strip_prefix(&format!("[FAIL] Command failed (exit code: {code})\n"))
+        .unwrap_or(&text);
+    if view.as_bytes() != direct {
+        failures.push(format!(
+            "{label}: la vue n'est pas le brut ({} octets contre {})",
+            view.len(),
+            direct.len()
+        ));
+    }
+}
+
+/// Revue de 595c01c : un wrapper devant le shell réactivait le résumé générique. La règle ne
+/// reconnaît plus les commandes une par une : tout `argv` qui contient `git` et `log` sort brut.
+#[test]
+fn wrappers_in_front_of_a_shell_running_git_log_are_returned_raw() {
+    let repo = trap_history();
+    let state = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+    for form in HARD_FORMS {
+        let direct = direct_log(&repo, form);
+        for code in [0, 7, 23] {
+            let script = format!("git log {form}; exit {code}");
+            // `xargs` répond 123 quand la commande sort en 1..=125.
+            let xargs_code = if code == 0 { 0 } else { 123 };
+            let cases: Vec<(&str, Vec<&str>, i32)> = vec![
+                ("env", vec!["env", "sh", "-c", &script], code),
+                ("timeout", vec!["timeout", "20", "sh", "-c", &script], code),
+                ("nice", vec!["nice", "sh", "-c", &script], code),
+                ("stdbuf", vec!["stdbuf", "-oL", "sh", "-c", &script], code),
+                ("xargs", vec!["xargs", "sh", "-c", &script], xargs_code),
+                ("sh", vec!["sh", "-c", &script], code),
+                ("bash -lc", vec!["bash", "-lc", &script], code),
+            ];
+            for (wrapper, args, expected) in cases {
+                let label = format!("{wrapper} {form} exit {code}");
+                exec_gives_raw(
+                    &repo,
+                    state.path(),
+                    &args,
+                    expected,
+                    &direct,
+                    &label,
+                    &mut failures,
+                );
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Un programme quelconque qui lance `git log` : `argv` contient `git` et `log`.
+#[test]
+fn programs_that_spawn_git_log_are_returned_raw() {
+    let repo = trap_history();
+    let state = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+    for form in HARD_FORMS {
+        let direct = direct_log(&repo, form);
+        let awk = format!("BEGIN {{ system(\"git log {form}\") }}");
+        let words: Vec<String> = form.split(' ').map(|w| format!("\"{w}\"")).collect();
+        let python = format!(
+            "import subprocess; subprocess.run([\"git\", \"log\", {}])",
+            words.join(", ")
+        );
+        exec_gives_raw(
+            &repo,
+            state.path(),
+            &["awk", &awk],
+            0,
+            &direct,
+            &format!("awk {form}"),
+            &mut failures,
+        );
+        exec_gives_raw(
+            &repo,
+            state.path(),
+            &["python3", "-c", &python],
+            0,
+            &direct,
+            &format!("python3 {form}"),
+            &mut failures,
+        );
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Dernier rempart, fondé sur le contenu : un script lancé directement ne montre ni `git` ni `log`
+/// dans son `argv`, mais ses lignes `<hash> …` (4 à 40 chiffres hexadécimaux, graphe compris) ne
+/// doivent pas être supprimées par le résumé.
+#[test]
+fn a_script_run_directly_never_loses_a_hash_line() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = trap_history();
+    let state = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+    for form in [
+        "--oneline --abbrev=4",
+        "--format=%h --abbrev=4",
+        "--graph --oneline --abbrev=4",
+    ] {
+        let direct = direct_log(&repo, form);
+        for code in [0, 7, 23] {
+            let script = repo.path().join("show-history");
+            std::fs::write(&script, format!("#!/bin/sh\ngit log {form}\nexit {code}\n")).unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let path = script.to_str().unwrap().to_string();
+            exec_gives_raw(
+                &repo,
+                state.path(),
+                &[&path],
+                code,
+                &direct,
+                &format!("script {form} exit {code}"),
+                &mut failures,
+            );
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
