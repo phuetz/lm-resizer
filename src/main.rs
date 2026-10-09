@@ -1935,6 +1935,11 @@ async fn run(cli: Cli) -> Result<()> {
             } else {
                 print!("{}", report.output);
             }
+            // Comme `exec` et `pipe` : le processus sort avec le code de la commande d'origine.
+            if exit_code != 0 {
+                std::io::stdout().flush()?;
+                std::process::exit(exit_code);
+            }
         }
         Commands::Rewrite { json, command } => {
             let report = rewrite_command_report(&command);

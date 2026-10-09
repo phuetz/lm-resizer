@@ -104,7 +104,8 @@ fn generic_tool_output_and_gain_record_a_failed_command() {
             input.to_str().unwrap(),
         ],
     );
-    assert!(result.status.success());
+    // `tool-output` sort avec le code de la commande d'origine.
+    assert_eq!(result.status.code(), Some(7), "{result:?}");
     let report: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert!(report["output"]
         .as_str()
