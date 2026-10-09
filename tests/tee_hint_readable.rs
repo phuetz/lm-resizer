@@ -9,7 +9,8 @@ fn exec(dir: &std::path::Path, script: &str) -> String {
         .env("LM_RESIZER_STATE_DIR", &state)
         .env("LM_RESIZER_STORE", state.join("ccr.sqlite"))
         .env("LM_RESIZER_TRACKING", "0")
-        .args(["exec", "--", "sh", "-c", script])
+        // `awk` : un programme inconnu (le résumé générique s'applique), pas un shell composé (brut).
+        .args(["exec", "--", "awk", script])
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
@@ -19,7 +20,7 @@ fn exec(dir: &std::path::Path, script: &str) -> String {
 #[test]
 fn every_displayed_tee_hint_says_how_to_read_the_original() {
     let dir = tempfile::tempdir().unwrap();
-    let script = "i=0; while [ $i -lt 3000 ]; do echo \"tout va bien dans cette etape\"; i=$((i+1)); done; echo 'error: boom'";
+    let script = r#"BEGIN { for (i = 0; i < 3000; i++) print "tout va bien dans cette etape"; print "error: boom" }"#;
     let view = exec(dir.path(), script);
     let hint = view
         .lines()

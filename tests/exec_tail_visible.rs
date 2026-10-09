@@ -9,21 +9,30 @@ fn exec(dir: &std::path::Path, script: &str) -> String {
         .env("LM_RESIZER_STATE_DIR", &state)
         .env("LM_RESIZER_STORE", state.join("ccr.sqlite"))
         .env("LM_RESIZER_TRACKING", "0")
-        .args(["exec", "--", "sh", "-c", script])
+        // `awk` : un programme inconnu (le résumé générique s'applique), pas un shell composé (brut).
+        .args(["exec", "--", "awk", script])
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
     String::from_utf8(out.stdout).unwrap()
 }
 
-/// Sortie de script longue, de plusieurs formes, dont la dernière ligne porte le verdict.
+/// Sortie longue de plusieurs formes (programme `awk`), dont la dernière ligne porte le verdict.
 fn long_script(kind: usize) -> String {
     let body = match kind {
-        0 => "i=0; while [ $i -lt 3000 ]; do echo \"== étape $i: compilation de crate-$i\"; echo \"warning: unused variable x$i\"; echo \"  --> src/f$i.rs:$i:5\"; i=$((i+1)); done",
-        1 => "i=0; while [ $i -lt 2500 ]; do echo \"downloading chunk $i of 2500\"; echo \"test module::case_$i ... ok\"; i=$((i+1)); done",
-        _ => "i=0; while [ $i -lt 800 ]; do echo \"ok $i\"; i=$((i+1)); done; echo 'error: une erreur au milieu'; i=0; while [ $i -lt 800 ]; do echo \"ok $i\"; i=$((i+1)); done",
+        0 => {
+            r#"for (i = 0; i < 3000; i++) { print "== étape " i ": compilation de crate-" i; print "warning: unused variable x" i; print "  --> src/f" i ".rs:" i ":5" }"#
+        }
+        1 => {
+            r#"for (i = 0; i < 2500; i++) { print "downloading chunk " i " of 2500"; print "test module::case_" i " ... ok" }"#
+        }
+        _ => {
+            r#"for (i = 0; i < 800; i++) print "ok " i; print "error: une erreur au milieu"; for (i = 0; i < 800; i++) print "ok " i"#
+        }
     };
-    format!("{body}; echo 'Packaged dist/x.tar.gz'; echo 'Vérification README install : OK'; echo 'release check passed'")
+    format!(
+        "BEGIN {{ {body}; print \"Packaged dist/x.tar.gz\"; print \"Vérification README install : OK\"; print \"release check passed\" }}"
+    )
 }
 
 #[test]

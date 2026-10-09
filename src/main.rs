@@ -3036,14 +3036,7 @@ fn run_inspected_command(
         } else {
             let (filter, view) = filter_executed_command_output(command, &raw);
             if filter == "lossless:generic" {
-                (
-                    "generic:summary".into(),
-                    inspection_views::summarize(
-                        inspection_views::Mode::Summary,
-                        &raw,
-                        captured.code,
-                    ),
-                )
+                generic_summary_or_raw(command, &raw, captured.code)
             } else {
                 (filter, view)
             }
@@ -3281,10 +3274,7 @@ fn process_captured_output(
     } else {
         let (filter, view) = filter_command_output(command, raw);
         if filter == "lossless:generic" {
-            (
-                "generic:summary".into(),
-                inspection_views::summarize(inspection_views::Mode::Summary, raw, exit_code),
-            )
+            generic_summary_or_raw(command, raw, exit_code)
         } else {
             (filter, view)
         }
@@ -4027,6 +4017,43 @@ fn shell_join(args: &[String]) -> String {
 
 fn pipe_filter_command(name: &str) -> Option<Vec<String>> {
     command_views::pipe_command(name)
+}
+
+/// Interpréteur de shell : `sh`, `bash`, `zsh`, `dash`, `ksh`, `ash`, `fish`, `csh`, `tcsh`,
+/// `pwsh`, `powershell`, `cmd`. Quand `filter_command_output` n'a pas pu en tirer une commande simple
+/// (script composé par `;`, `&&`, `|`, fichier de script), ni le producteur ni le format de la
+/// sortie ne sont établis.
+fn is_shell_interpreter(command: &[String]) -> bool {
+    command.first().is_some_and(|program| {
+        matches!(
+            command_basename(program).as_str(),
+            "sh" | "bash"
+                | "zsh"
+                | "dash"
+                | "ksh"
+                | "ash"
+                | "fish"
+                | "csh"
+                | "tcsh"
+                | "pwsh"
+                | "powershell"
+                | "cmd"
+        )
+    })
+}
+
+/// Repli des commandes sans vue dédiée : le résumé générique (`inspection_views::summarize`) ne garde
+/// que les lignes de diagnostic et supprime les autres. Il n'est jamais appliqué à un shell
+/// composé : le producteur et le format de sa sortie ne sont pas établis, la sortie est rendue brute.
+fn generic_summary_or_raw(command: &[String], raw: &str, exit_code: i32) -> (String, String) {
+    if is_shell_interpreter(command) {
+        ("native:shell-raw".to_string(), raw.to_string())
+    } else {
+        (
+            "generic:summary".to_string(),
+            inspection_views::summarize(inspection_views::Mode::Summary, raw, exit_code),
+        )
+    }
 }
 
 /// Vue d'une sortie déjà produite (tube, `tool-output`, hook, découverte) : la commande n'est pas

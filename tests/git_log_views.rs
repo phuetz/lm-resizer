@@ -618,3 +618,89 @@ fn long_subjects_do_not_disable_the_shortened_default_view() {
         );
     }
 }
+
+/// Revue de bf84f2d : quatre formes de `git log` derrière un shell composé, trois opérateurs, trois
+/// codes. Un shell composé n'a ni producteur ni format établis : la sortie est le brut de Git, octet
+/// pour octet (le seul ajout permis est l'en-tête `[FAIL] Command failed (exit code: N)`).
+#[test]
+fn composed_shell_log_forms_are_returned_raw_for_every_operator_and_exit_code() {
+    let repo = trap_history();
+    let state = tempfile::tempdir().unwrap();
+    let forms = [
+        "--oneline --abbrev=4",
+        "--format=%h --abbrev=4",
+        "--format=%s",
+        "--graph --oneline --abbrev=4",
+    ];
+    let mut failures = Vec::new();
+    for form in forms {
+        let direct = git(
+            repo.path(),
+            &form.split(' ').fold(vec!["log"], |mut acc, word| {
+                acc.push(word);
+                acc
+            }),
+        );
+        for code in [0, 7, 23] {
+            for (operator, script) in [
+                (";", format!("git log {form}; exit {code}")),
+                ("|", format!("git log {form} | cat; exit {code}")),
+                ("&&", format!("git log {form} && exit {code}")),
+            ] {
+                let out = lm_resizer(
+                    repo.path(),
+                    state.path(),
+                    &["exec", "--", "sh", "-c", &script],
+                );
+                let label = format!("{form} {operator} exit {code}");
+                if out.status.code() != Some(code) {
+                    failures.push(format!("{label}: code {:?}", out.status.code()));
+                    continue;
+                }
+                let text = String::from_utf8_lossy(&out.stdout).to_string();
+                let view = text
+                    .strip_prefix(&format!("[FAIL] Command failed (exit code: {code})\n"))
+                    .unwrap_or(&text);
+                if view.as_bytes() != direct.as_slice() {
+                    failures.push(format!(
+                        "{label}: la vue n'est pas le brut ({} octets contre {})",
+                        view.len(),
+                        direct.len()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Une ligne de shell décrite à `tool-output` n'établit pas non plus le producteur : brut.
+#[test]
+fn a_described_composed_shell_line_is_returned_raw_by_tool_output() {
+    let repo = trap_history();
+    let state = tempfile::tempdir().unwrap();
+    for form in [
+        "--oneline --abbrev=4",
+        "--format=%h --abbrev=4",
+        "--format=%s",
+        "--graph --oneline --abbrev=4",
+    ] {
+        let words: Vec<&str> = std::iter::once("log").chain(form.split(' ')).collect();
+        let raw = git(repo.path(), &words);
+        let input = repo.path().join("capture.txt");
+        std::fs::write(&input, &raw).unwrap();
+        let command = format!("sh -c 'git log {form}; exit 0'");
+        let out = lm_resizer(
+            repo.path(),
+            state.path(),
+            &[
+                "tool-output",
+                "--command",
+                &command,
+                "--input",
+                input.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(out.stdout, raw, "{command}");
+    }
+}
