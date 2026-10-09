@@ -153,7 +153,7 @@ Les nouvelles entrées d'historique conservent les deux comptes. Les statistique
 
 ## Filtres natifs et mesures actuelles
 
-Le produit utilise ses propres filtres Rust et TOML. Les commandes d'inspection explicites incluent `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` et `dedup`. Les lectures de fichiers restent littérales. Pour un programme sans vue native, seuls un document JSON entier (table) et des lignes de journal à niveau répétées sont pliés, de façon réversible ; toute autre sortie d'un programme inconnu, d'un script ou d'un lanceur de recettes est rendue brute. Le contour syntaxique et la déduplication de blocs sont explicites.
+Le produit utilise ses propres filtres Rust et TOML. Les commandes d'inspection explicites incluent `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` et `dedup`. Les lectures de fichiers restent littérales. Pour un programme sans vue native, seuls un document JSON entier (réencodé en table ou compacté) et des lignes de journal à niveau répétées sont pliés, de façon réversible ; toute autre sortie d'un programme inconnu, d'un script ou d'un lanceur de recettes est rendue brute. Le contour syntaxique et la déduplication de blocs sont explicites.
 
 **Moyenne tee compris : 27,61 %.** La médiane est de 4,87 % ; les 61 récupérations du brut et les codes de sortie du producteur passent tous, et le démarrage mesure environ 5 ms pour `lm-resizer --version` et environ 20 ms pour `lm-resizer exec -- echo hello` (médiane de 60 lancements, Linux, build release, machine chargée). Ces médianes de corpus ne sont pas une affirmation sur des dépôts vivants arbitraires. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
 

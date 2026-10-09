@@ -153,7 +153,7 @@ New execution history records persist both counts. Stats keep existing byte coun
 
 ## Native filters and current measurements
 
-The product uses its own Rust and TOML filters. Explicit inspection commands include `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` and `dedup`. File reads remain literal. For a program without a native view only whole JSON documents (tables) and log-level line runs are folded, reversibly; any other output from an unknown program, script or recipe runner is returned raw. Syntax outlines and exact repeated-message folding are opt-in.
+The product uses its own Rust and TOML filters. Explicit inspection commands include `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` and `dedup`. File reads remain literal. For a program without a native view only a whole JSON document (re-encoded as a table or compacted) and runs of log-level lines are folded, reversibly; any other output from an unknown program, script or recipe runner is returned raw. Syntax outlines and exact repeated-message folding are opt-in.
 
 **Mean saving including tee: 27.61%.** Median saving is 4.87%; all 61 raw recoveries and producer exit codes pass, and startup measures about 5 ms for `lm-resizer --version` and about 20 ms for `lm-resizer exec -- echo hello` (median of 60 runs, Linux, release build, loaded machine). These corpus medians are not a claim about arbitrary live repositories. [Current measurements, exact differences and limitations](bench/native/windows-release/delivery.md).
 
