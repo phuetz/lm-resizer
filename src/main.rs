@@ -2413,6 +2413,8 @@ async fn run(cli: Cli) -> Result<()> {
             event,
             json,
         } => {
+            // Le nom du client est lu sans tenir compte de la casse (`Cursor`, `CURSOR`).
+            let client = client.to_ascii_lowercase();
             // PreToolUse: rewrite a supported Bash command to run through `lm-resizer exec --`
             // (in-place output substitution, the native role). PostToolUse: measure-only telemetry.
             if event == "Capabilities" {

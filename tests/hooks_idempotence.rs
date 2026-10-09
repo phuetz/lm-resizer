@@ -193,3 +193,34 @@ fn install_hooks_refuses_native_only_clients_without_writing() {
         assert!(!project.join("CLAUDE.md").exists());
     }
 }
+
+/// Contre-audit Grok du 9 octobre : `--client Cursor` et `--client CURSOR` ne prenaient pas la
+/// branche Cursor et renvoyaient le format Claude (`hookSpecificOutput`), qu'une réponse hors
+/// schéma fait bloquer par Cursor. Le nom du client est lu sans tenir compte de la casse.
+#[test]
+fn hook_client_name_is_case_insensitive() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    for client in ["cursor", "Cursor", "CURSOR"] {
+        let mut child = cli(dir.path())
+            .args(["hook", "--client", client, "--event", "preToolUse"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(br#"{"tool_name":"Shell","tool_input":{"command":"cargo test"}}"#)
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        let reply: serde_json::Value = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|_| panic!("{client}: {}", String::from_utf8_lossy(&out.stdout)));
+        assert_eq!(reply["permission"], "ask", "{client}: {reply}");
+        assert!(
+            reply.get("hookSpecificOutput").is_none(),
+            "{client}: {reply}"
+        );
+    }
+}
