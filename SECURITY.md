@@ -48,6 +48,17 @@ into `lm-resizer exec -- <command>` through `updatedInput`.
   through the normal approval prompt. Only the Codex handler answers `allow`, because Codex
   marks the hook as failed otherwise. Before 0.2.6 the Claude hook answered `allow` as well,
   and Claude Code ran the rewritten command without asking.
+- For Cursor the hook answers `permission: "ask"` with `updated_input`. Before 0.2.6 it answered
+  `allow`, which the Cursor Hooks documentation (read on 9 October 2026) defines as "proceed".
+  What that documentation says: `allow` proceeds, `deny` blocks, `ask` "is accepted by the schema
+  but not enforced for `preToolUse` today"; a response that does not match the schema blocks the
+  action, and `permission` is not marked optional; across hooks `deny` wins over `ask` and `ask`
+  over `allow`. `ask` is therefore the only valid answer that grants nothing and cannot override
+  another hook's refusal. What it does not say, and was not checked in a running Cursor: whether
+  `updated_input` is applied with `ask`, whether Cursor then asks the user or proceeds, and how an
+  empty output (the hook prints nothing for a command it does not rewrite) is treated. To keep
+  Cursor's own approval only, do not install the Cursor hook, or remove it with
+  `uninstall-hooks --client cursor`.
 - Commands that can prompt or never end are never rewritten: `exec` keeps the output until the
   process exits, so a `Password:` prompt, a host-key question or a server log would never show.
   The list is read from `argv` (`git push|pull|fetch|clone`, `cargo run`, `go run`, `npm

@@ -25,7 +25,12 @@ pub fn rewrite(value: &Value, exe: &str, event: &str, client: &str) -> Option<Va
     Some(match client {
         "gemini" => json!({"hookSpecificOutput":{"hookEventName":"BeforeTool","tool_input":input}}),
         "copilot" => json!({"modifiedArgs":input}),
-        "cursor" => json!({"permission":"allow","updated_input":input}),
+        // Cursor (documentation Hooks lue le 9 octobre 2026) : `allow` laisse passer, une réponse
+        // hors schéma bloque l'action et `permission` n'y est pas marqué optionnel. `ask` est la
+        // seule valeur valide qui ne donne pas de feu vert ; elle l'emporte sur l'`allow` d'un autre
+        // crochet (`deny` > `ask` > `allow`). La documentation dit `ask` « non appliqué pour
+        // preToolUse aujourd'hui » et ne dit pas si `updated_input` l'est alors : voir SECURITY.md.
+        "cursor" => json!({"permission":"ask","updated_input":input}),
         // Codex exige `permissionDecision: "allow"` (voir `pretooluse_rewrite_json`). Tout autre
         // client ne la reçoit pas : avec `allow`, Claude Code exécute la commande réécrite sans
         // demander l'accord de l'utilisateur, et l'invite d'approbation disparaît.
@@ -94,6 +99,25 @@ mod tests {
             Some("allow")
         );
     }
+    /// Audit du 9 octobre 2026 : le crochet Cursor répondait `permission: allow`, que la
+    /// documentation de Cursor définit comme « proceed ». Le crochet ne donne jamais un feu vert que
+    /// l'utilisateur n'a pas donné.
+    #[test]
+    fn cursor_never_answers_allow() {
+        for tool in ["Shell", "Bash"] {
+            let value = json!({"hook_event_name":"preToolUse","tool_name":tool,"tool_input":{"command":"cargo test","working_directory":"/tmp"}});
+            let out = rewrite(&value, "/opt/lm", "preToolUse", "cursor").unwrap();
+            assert_eq!(out["permission"], "ask", "{tool}: {out}");
+            assert_eq!(
+                out.pointer("/updated_input/command")
+                    .and_then(Value::as_str),
+                Some("\"/opt/lm\" exec -- cargo test"),
+                "{tool}"
+            );
+            assert_eq!(out["updated_input"]["working_directory"], "/tmp");
+        }
+    }
+
     #[test]
     fn adapters_preserve_tool_arguments_and_do_not_rewrite_other_tools() {
         for (client, tool, path) in [
