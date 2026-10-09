@@ -1,6 +1,6 @@
 # LM Resizer
 
-**Shorten noisy command output before it reaches your coding agent — and never lose a failure.** LM Resizer is a fast, local Rust CLI for developers who drive tests, builds, Git, containers and other tools through an AI coding agent such as Claude Code, Codex, Cursor, Gemini CLI, an MCP client or a custom pipeline. It runs a command, keeps a compact result for the agent, and stores the byte-exact original for instant recall.
+**Shorten noisy command output before it reaches your coding agent — and never lose a failure.** LM Resizer is a fast, local Rust CLI for developers who drive tests, builds, Git, containers and other tools through an AI coding agent such as Claude Code, Codex, Cursor, Gemini CLI, an MCP client or a custom pipeline. It runs a command, keeps a compact result for the agent, and stores the original for instant recall: the bytes and the order of each stream are exact, while the order between stdout and stderr is guaranteed only in the default mode (see [Recover the exact output](#recover-the-exact-output)).
 
 On a benchmark of 61 command captures it saves a median **21.32%** of tokens with the raw recovery included, keeps the producer's exit code in **61/61** cases and starts in about **8 ms**. Zero telemetry, 100% local, deterministic.
 
