@@ -106,9 +106,11 @@ It shares the PreToolUse refusal: a command whose stdout or stderr is redirected
 fed by a here-document, captured by `$(...)` or backticks, or interactive is
 returned unchanged. Interactive includes editors, pagers and REPLs, and every
 command that can prompt or run until stopped, read from `argv`: `git
-push|pull|fetch|clone`, `cargo run`, `go run`, `npm start|run dev|init|login|publish`,
-`docker run -it`, `ssh`, `sudo`, `terraform apply` without `-auto-approve`, `make
-run|serve|dev`, `gradle bootRun`… ([full list](KNOWN-MISSES.md)). Wrapping those forms used to glue the redirect onto
+push|pull|fetch|clone`, every `docker run|exec`, `compose run|exec` (even with
+`-T`), `ssh`, `sudo`, Terraform without `-input=false`, `pytest --pdb`… A command
+whose output `exec` would return as is (a script such as `npm test` or
+`make run-server`, `php -S`, `git credential`) is not rewritten either
+([full list](KNOWN-MISSES.md)). Wrapping those forms used to glue the redirect onto
 `lm-resizer exec`, so the file or the next program received the reduced view.
 The hook is stricter: any shell operator, including `&&`, leaves the whole line raw.
 

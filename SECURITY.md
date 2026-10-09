@@ -71,12 +71,16 @@ into `lm-resizer exec -- <command>` through `updatedInput`.
   (`["<lm-resizer>", "exec", "--", …]`), run without a shell. Before 0.2.6 the elements were
   joined with spaces, so `*` was expanded and `--format=%h %s` split in two. An array with a
   non-text element is not rewritten.
-- Commands that can prompt or never end are never rewritten: `exec` keeps the output until the
-  process exits, so a `Password:` prompt, a host-key question or a server log would never show.
-  The list is read from `argv` (`git push|pull|fetch|clone`, `cargo run`, `go run`, `npm
-  start|run dev|login|publish`, `docker run -it`, `ssh`, `scp`, `sudo`, `terraform apply` without
-  `-auto-approve`, `aws sso login`, `gh auth login`…; see `docs/KNOWN-MISSES.md`). A command that
-  prompts and is not in the list is still captured until it exits.
+- The hook rewrites only a command that a view really reduces, and never one that can read its
+  input or not end: `exec` keeps the output until the process exits, so a `Password:` prompt, a
+  host-key question or a server log would never show. A script (`npm test`, `npm run server`,
+  `make run-server`), a program without a view (`php -S`, `docker run`) and a Git subcommand
+  without a view (`git credential fill`, `git lfs pull`) run directly; so do, even with a view,
+  `git push|pull|fetch|clone`, every `docker|podman run|exec|…` and `compose run|exec` (with or
+  without `-T`), `kubectl exec|run|debug`, `sudo`, `ssh`, `scp`, Terraform without `-input=false`,
+  `pytest --pdb`, `pip uninstall` without `-y`… (rule read from `argv`, full list in
+  `docs/KNOWN-MISSES.md`). A command with a view that prompts and is not in the list is still
+  captured until it exits.
 - `uninstall-hooks --client all` removes the native hook files of all five clients (Codex,
   Claude, Gemini, Copilot, Cursor) when they still match the generated content; before 0.2.6 it
   left the Cursor hook. `uninstall --client all --scope project` removes the MCP server entry.

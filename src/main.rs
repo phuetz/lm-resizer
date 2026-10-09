@@ -3557,7 +3557,12 @@ fn rewrite_command_report(command: &[String]) -> RewriteReport {
     }
 
     let (filter, _) = filter_command_output(command, "");
-    let supported = !matches!(filter.as_str(), "none" | "generic" | "lossless:generic");
+    // N'est réécrite qu'une commande qu'une vue réduit vraiment. Un filtre `lossless:*` rend la
+    // sortie telle quelle (script choisi par l'utilisateur, sortie des tests demandée, identité),
+    // `git-passthrough` aussi : l'enveloppe n'y gagnerait rien et retiendrait la sortie jusqu'à la
+    // fin du processus (invite d'identifiants, journal d'un serveur).
+    let supported = !matches!(filter.as_str(), "none" | "generic" | "git-passthrough")
+        && !filter.starts_with("lossless:");
     let mut argv = vec![
         "lm-resizer".to_string(),
         "exec".to_string(),
@@ -6063,6 +6068,13 @@ fn prompts_or_never_ends(base: &str, args: &[String]) -> bool {
     let first = args.first().map(String::as_str).unwrap_or("");
     let has = |word: &str| args.iter().any(|arg| arg == word);
     let has_any = |words: &[&str]| args.iter().any(|arg| words.contains(&arg.as_str()));
+    // Débogueur interactif de pytest, quel que soit le lanceur (`python -m pytest --pdb`).
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--pdb" | "--trace") || arg.starts_with("--pdbcls"))
+    {
+        return true;
+    }
     match base {
         "scp" | "sudo" | "su" | "doas" | "passwd" | "login" | "gpg" | "gpg2" | "ssh-add"
         | "ssh-keygen" | "ssh-copy-id" | "mosh" => true,
@@ -6074,16 +6086,20 @@ fn prompts_or_never_ends(base: &str, args: &[String]) -> bool {
         "next" => matches!(first, "dev" | "start"),
         "docker" | "podman" => container_run_is_interactive(args),
         "kubectl" => {
-            has_any(&["attach", "port-forward", "proxy", "edit"])
-                || (has_any(&["run", "debug"])
-                    && has_any(&["-i", "-t", "-it", "-ti", "--stdin", "--tty"]))
-                || (has("get") && has_any(&["-w", "--watch-only"]))
+            has_any(&[
+                "attach",
+                "port-forward",
+                "proxy",
+                "edit",
+                "exec",
+                "run",
+                "debug",
+            ]) || (has("get") && has_any(&["-w", "--watch-only"]))
         }
-        "terraform" | "tofu" => {
-            has_any(&["console", "login"])
-                || (has_any(&["apply", "destroy"])
-                    && !has_any(&["-auto-approve", "--auto-approve", "-input=false"]))
-        }
+        // Toute commande Terraform peut demander une variable manquante ou une confirmation, sauf
+        // avec `-input=false` ; `console` et `login` lisent toujours le terminal.
+        "terraform" | "tofu" => has_any(&["console", "login"]) || !has("-input=false"),
+        "pip" | "pip3" => has("uninstall") && !has_any(&["-y", "--yes"]),
         "aws" => {
             (first == "configure" && args.len() <= 2 && !has("list"))
                 || (has("sso") && has("login"))
@@ -6144,45 +6160,18 @@ fn prompts_or_never_ends(base: &str, args: &[String]) -> bool {
     }
 }
 
-/// `docker|podman run|create|start` avec `-i`/`-t` (sans `-d`), `attach`, `login`, et `compose
-/// run|exec|attach` (qui allouent un terminal sauf `-T` ou `-d`).
+/// `docker|podman run|create|start|exec|attach|login` : un conteneur lance n'importe quel
+/// programme (un serveur, un shell), au premier plan ou non ; `compose run|exec|attach` : l'entrée
+/// reste ouverte même avec `-T`, qui ne retire que le pseudo-terminal (revue du 9 octobre) ;
+/// `… prune` sans `-f` demande une confirmation.
 fn container_run_is_interactive(args: &[String]) -> bool {
-    let Some(pos) = args.iter().position(|arg| {
-        matches!(
-            arg.as_str(),
-            "run" | "create" | "start" | "attach" | "login" | "compose"
-        )
-    }) else {
-        return false;
-    };
-    let rest = &args[pos + 1..];
-    let short = |arg: &String, letter: char| {
-        arg.starts_with('-') && !arg.starts_with("--") && arg.contains(letter)
-    };
-    let detached = rest
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--detach" | "--detach=true") || short(arg, 'd'));
-    match args[pos].as_str() {
-        "attach" | "login" => true,
-        "compose" => {
-            rest.iter()
-                .any(|arg| matches!(arg.as_str(), "run" | "exec" | "attach"))
-                && !detached
-                && !rest
-                    .iter()
-                    .any(|arg| matches!(arg.as_str(), "-T" | "--no-TTY" | "--no-tty"))
-        }
-        _ => {
-            !detached
-                && rest.iter().any(|arg| {
-                    matches!(
-                        arg.as_str(),
-                        "--interactive" | "--tty" | "--interactive=true" | "--tty=true"
-                    ) || short(arg, 'i')
-                        || short(arg, 't')
-                })
-        }
-    }
+    let has_any = |words: &[&str]| args.iter().any(|arg| words.contains(&arg.as_str()));
+    has_any(&["run", "create", "start", "exec", "attach", "login"])
+        || (has("prune", args) && !has_any(&["-f", "--force"]))
+}
+
+fn has(word: &str, args: &[String]) -> bool {
+    args.iter().any(|arg| arg == word)
 }
 
 /// Capturing until exit hides output from followers, watchers and foreground
@@ -13705,18 +13694,23 @@ Successfully tagged localhost/app:latest\n";
                 "{command}"
             );
         }
+        for command in ["cargo test", "pytest tests", "docker ps", "vitest run"] {
+            assert!(
+                rewrite_command_for_hook(command, "/opt/lm").is_some(),
+                "{command}"
+            );
+        }
+        // Sortie brute de toute façon (fichier, script choisi par l'utilisateur) : l'enveloppe ne
+        // réduirait rien et retiendrait la sortie jusqu'à la fin.
         for command in [
             "tail -n 20 output.log",
             "cat output.log",
             "npm run build",
             "npm test",
-            "cargo test",
-            "pytest tests",
             "docker compose up -d",
-            "vitest run",
         ] {
             assert!(
-                rewrite_command_for_hook(command, "/opt/lm").is_some(),
+                rewrite_command_for_hook(command, "/opt/lm").is_none(),
                 "{command}"
             );
         }
@@ -13807,7 +13801,7 @@ Successfully tagged localhost/app:latest\n";
             "cargo test",
             "cargo build",
             "go test ./...",
-            "terraform plan",
+            "terraform plan -input=false",
             "kubectl get pods",
             "gh pr list",
             "gh pr create --fill",
@@ -13815,6 +13809,82 @@ Successfully tagged localhost/app:latest\n";
             "mvn -q compile",
             "gradle assemble",
             "bash -c 'cargo test'",
+        ] {
+            if rewrite_command_for_hook(command, "/opt/lm").is_none() {
+                failures.push(format!("laissée : {command}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// Revue indépendante B2 et contre-audit Grok du 9 octobre : `docker compose exec -T` (sans
+    /// pseudo-terminal, mais l'entrée reste ouverte), `git credential fill`, `npm run server`,
+    /// `php -S`, `make run-server` et `docker run` étaient enveloppés ; `exec` retenait l'invite ou
+    /// le journal jusqu'à la fin. Règle prudente : n'est enveloppée qu'une commande qu'une vue réduit
+    /// vraiment, et jamais une commande qui peut lire l'entrée ou ne pas finir.
+    #[test]
+    fn native_hook_wraps_only_finite_commands_that_a_view_reduces() {
+        let mut failures = Vec::new();
+        for command in [
+            "docker compose exec -T app sh",
+            "docker compose run -T app sh",
+            "docker compose exec -d app sh",
+            "docker compose up -d",
+            "docker-compose exec -T app sh",
+            "podman compose exec -T app sh",
+            "git credential fill",
+            "git credential approve",
+            "git lfs pull",
+            "git lfs fetch",
+            "git gui",
+            "git citool",
+            "npm run server",
+            "npm run api",
+            "npm run backend",
+            "npm run start-server",
+            "npm run dev-server",
+            "bun run server",
+            "make run-server",
+            "make test",
+            "php -S 0.0.0.0:8080",
+            "docker run --rm nginx",
+            "docker run -d nginx",
+            "podman run alpine sleep 30",
+            "docker exec web ls",
+            "docker system prune",
+            "kubectl exec pod -- ls",
+            "kubectl debug node/x",
+            "terraform plan",
+            "terraform init",
+            "terraform apply -auto-approve",
+            "tofu plan",
+            "pytest --pdb",
+            "pytest --trace tests",
+            "pip uninstall requests",
+            "cargo test -- --nocapture",
+            "mvn test",
+        ] {
+            if rewrite_command_for_hook(command, "/opt/lm").is_some() {
+                failures.push(format!("enveloppée : {command}"));
+            }
+        }
+        for command in [
+            "git status",
+            "git log -n 3",
+            "cargo test",
+            "cargo build",
+            "go test ./...",
+            "pytest -q",
+            "jest",
+            "npx jest",
+            "dotnet test",
+            "gradle test",
+            "terraform plan -input=false",
+            "kubectl get pods",
+            "gh pr list",
+            "npm install",
+            "pip uninstall -y requests",
+            "docker ps",
         ] {
             if rewrite_command_for_hook(command, "/opt/lm").is_none() {
                 failures.push(format!("laissée : {command}"));
