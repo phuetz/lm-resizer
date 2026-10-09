@@ -62,7 +62,12 @@ impl SqliteCcrStore {
     /// fall back to the in-memory backend (`feedback_no_silent_fallbacks.md`).
     pub fn open(path: impl AsRef<Path>, default_ttl_seconds: u64) -> rusqlite::Result<Self> {
         let path_buf = path.as_ref().to_path_buf();
-        let conn = Connection::open(&path_buf)?;
+        // Jamais à travers un lien symbolique : un lien posé dans un dossier d'état ouvert en
+        // écriture ferait écrire la base (sorties brutes comprises) dans le fichier visé.
+        let conn = Connection::open_with_flags(
+            &path_buf,
+            rusqlite::OpenFlags::default() | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
 
         // WAL gives us readers-don't-block-writers. `synchronous=NORMAL`
         // is the WAL-recommended setting (FULL is overkill for a CCR

@@ -40,9 +40,12 @@ other permission; its content is then compared with the new output and rewritten
 file of the right length but altered content was announced as the original). Otherwise nothing
 is written, no `[tee:]` is shown and a warning names the file: symbolic link, hard link, FIFO,
 directory (before 0.2.6, a link planted in a writable tee directory received the raw output,
-secrets included). The history
-(`exec-history.jsonl`) and the hook counter file (`hook-audit.jsonl`) are still opened in append
-mode without these checks: keep the state directory private (0700, as created).
+secrets included). The history (`exec-history.jsonl`), the hook counter file
+(`hook-audit.jsonl`), the other state logs and the CCR database (`ccr.sqlite3`, opened with
+`SQLITE_OPEN_NOFOLLOW`) are not opened through a symbolic link either, and a log file is written
+only under the same conditions (regular, single link, owned, private); otherwise the line is not
+written and `exec` names the refused history file. A history file left by a version before 0.2.6
+with a group- or world-readable mode is refused until `chmod -R go-rwx` is run once.
 
 The local proxy (`serve`, `wrap`) has no client authentication. It listens on loopback only
 unless `--allow-non-loopback` is given, answers only requests whose `Host` is local, and

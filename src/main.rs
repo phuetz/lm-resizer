@@ -2595,16 +2595,85 @@ fn create_private_dir_all(dir: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Ouvre `path` en ajout ; un fichier créé ici l'est en 0600 sous Unix.
+/// Ouvre `path` en ajout ; un fichier créé ici l'est en 0600 sous Unix. Sous Unix, un lien
+/// symbolique n'est jamais suivi (`O_NOFOLLOW`) et le fichier ouvert doit être privé (voir
+/// [`refuse_unless_private`]) : sinon rien n'y est écrit.
 fn open_private_append(path: &Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.create(true).append(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        options.mode(0o600).custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+        );
+        let file = options
+            .open(path)
+            .map_err(|error| refused_open(path, error))?;
+        refuse_unless_private(&file, path)?;
+        Ok(file)
     }
-    options.open(path)
+    #[cfg(not(unix))]
+    {
+        options.open(path)
+    }
+}
+
+/// Refus d'un fichier d'état : erreur `PermissionDenied` sans code système, qui nomme le fichier.
+#[cfg(unix)]
+fn refused_state_file(path: &Path, why: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!("{} {why}", path.display()),
+    )
+}
+
+/// Erreur d'ouverture sans suivre de lien : lien symbolique (`ELOOP`), FIFO sans lecteur
+/// (`ENXIO`) et dossier (`EISDIR`) deviennent des refus nommés.
+#[cfg(unix)]
+fn refused_open(path: &Path, error: std::io::Error) -> std::io::Error {
+    match error.raw_os_error() {
+        Some(code) if code == rustix::io::Errno::LOOP.raw_os_error() => {
+            refused_state_file(path, "est un lien symbolique")
+        }
+        Some(code)
+            if code == rustix::io::Errno::ISDIR.raw_os_error()
+                || code == rustix::io::Errno::NXIO.raw_os_error() =>
+        {
+            refused_state_file(path, "n'est pas un fichier ordinaire")
+        }
+        _ => error,
+    }
+}
+
+/// Un fichier d'état ouvert n'est utilisé que s'il est ordinaire, à un seul lien, à l'utilisateur
+/// courant et fermé au groupe et aux autres. Contrôle sur le descripteur, pas sur le chemin.
+#[cfg(unix)]
+fn refuse_unless_private(file: &std::fs::File, path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    if !metadata.file_type().is_file() {
+        return Err(refused_state_file(path, "n'est pas un fichier ordinaire"));
+    }
+    if metadata.nlink() != 1 {
+        return Err(refused_state_file(
+            path,
+            &format!("a {} liens durs", metadata.nlink()),
+        ));
+    }
+    if metadata.uid() != rustix::process::geteuid().as_raw() {
+        return Err(refused_state_file(path, "appartient à un autre compte"));
+    }
+    if metadata.mode() & 0o077 != 0 {
+        return Err(refused_state_file(
+            path,
+            &format!(
+                "a le mode {:o}, ouvert au groupe ou aux autres",
+                metadata.mode() & 0o777
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Écrit `bytes` dans `path` (hors Unix ; sous Unix, voir [`write_private_archive`]).
@@ -5718,7 +5787,7 @@ fn archive_raw_bytes(raw: &[u8]) -> Result<Option<String>> {
 fn write_private_archive(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        use std::os::unix::fs::OpenOptionsExt;
         let nofollow = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
         match std::fs::OpenOptions::new()
             .write(true)
@@ -5731,46 +5800,15 @@ fn write_private_archive(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error),
         }
-        let refused = |why: &str| {
-            std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                format!("{} {why}", path.display()),
-            )
-        };
         use std::io::Seek;
         let mut file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .custom_flags(nofollow | rustix::fs::OFlags::NONBLOCK.bits() as i32)
             .open(path)
-            .map_err(|error| match error.raw_os_error() {
-                Some(code) if code == rustix::io::Errno::LOOP.raw_os_error() => {
-                    refused("est un lien symbolique")
-                }
-                Some(code)
-                    if code == rustix::io::Errno::ISDIR.raw_os_error()
-                        || code == rustix::io::Errno::NXIO.raw_os_error() =>
-                {
-                    refused("n'est pas un fichier ordinaire")
-                }
-                _ => error,
-            })?;
+            .map_err(|error| refused_open(path, error))?;
+        refuse_unless_private(&file, path)?;
         let metadata = file.metadata()?;
-        if !metadata.file_type().is_file() {
-            return Err(refused("n'est pas un fichier ordinaire"));
-        }
-        if metadata.nlink() != 1 {
-            return Err(refused(&format!("a {} liens durs", metadata.nlink())));
-        }
-        if metadata.uid() != rustix::process::geteuid().as_raw() {
-            return Err(refused("appartient à un autre compte"));
-        }
-        if metadata.mode() & 0o077 != 0 {
-            return Err(refused(&format!(
-                "a le mode {:o}, ouvert au groupe ou aux autres",
-                metadata.mode() & 0o777
-            )));
-        }
         // Le nom est l'empreinte du contenu, mais rien ne garantit que le fichier déjà là la
         // respecte (écriture interrompue, fichier altéré) : son contenu est relu et comparé, puis
         // réécrit s'il diffère. La longueur seule ne suffit pas (revue du 9 octobre).
@@ -5910,8 +5948,21 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     if std::env::var("LM_RESIZER_TRACKING").ok().as_deref() == Some("0") {
         return Ok(());
     }
-    if write_exec_history(report, elapsed).is_err() {
-        warn_state_unwritable(&state_path_for_warning(None));
+    if let Err(error) = write_exec_history(report, elapsed) {
+        match error.downcast_ref::<std::io::Error>() {
+            // Refus nommé (lien, lien dur, droits) : l'erreur n'a pas de code système.
+            Some(io)
+                if io.kind() == std::io::ErrorKind::PermissionDenied
+                    && io.raw_os_error().is_none() =>
+            {
+                eprintln!(
+                    "lm-resizer: historique non écrit, fichier refusé : {io}. Supprimez-le ou \
+                     lancez `chmod -R go-rwx {}`",
+                    state_path_for_warning(None).display()
+                );
+            }
+            _ => warn_state_unwritable(&state_path_for_warning(None)),
+        }
     }
     Ok(())
 }
