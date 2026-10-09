@@ -19,7 +19,13 @@ Filter migration is still in progress. Earlier measurements do not describe this
 
 Limits: a command that has a view, outside this list, and asks a question (a test reading its input, a `cargo test` that starts a server) is still wrapped and its prompt only shows at the end. `lm-resizer exec --stream` shows the output live.
 
-**`exec` killed abruptly**: on Linux the child started by `exec` receives SIGKILL when `lm-resizer` dies, even through `kill -9` (`PR_SET_PDEATHSIG`). Its own children are not covered: after `kill -9` of `exec -- sh -c 'sleep 40'`, `sh` dies and `sleep` remains (measured on 9 October). Nothing equivalent on macOS or Windows: the child survives an abrupt stop there.
+**`exec` killed abruptly**: on Linux the child started by `exec` receives SIGKILL when `lm-resizer` dies, even through `kill -9` (`PR_SET_PDEATHSIG`). Its own children are not covered (measured on 9 October, replayed by the counter-audit the same day):
+
+```sh
+lm-resizer exec -- sh -c 'sleep 47' & sleep 1; kill -9 $!; sleep 1; pgrep -af '^sleep 47'
+```
+
+`sh` dies, `sleep 47` remains, reparented. Killing them needs a survivor outside `lm-resizer` (which can no longer act after SIGKILL) and a separate process group, which breaks terminal job control (a child reading the terminal would be stopped by SIGTTIN): it is not fixed cleanly here. The hook's prudent rule reduces the surface: servers, scripts and containers are no longer wrapped. Nothing equivalent on macOS or Windows: the child survives an abrupt stop there.
 
 ## `git log`: what stays raw
 

@@ -19,7 +19,13 @@ La migration des filtres est en cours. Les mesures antérieures ne décrivent pa
 
 Limites : une commande qui a une vue, hors de cette liste, et qui pose une question (un test qui lit l'entrée, un `cargo test` qui lance un serveur) reste enveloppée et son invite n'apparaît qu'à la fin. `lm-resizer exec --stream` montre la sortie en direct.
 
-**Arrêt brutal d'`exec`** : sous Linux, l'enfant lancé par `exec` reçoit SIGKILL quand `lm-resizer` meurt, même par `kill -9` (`PR_SET_PDEATHSIG`). Ses propres enfants ne sont pas couverts : après `kill -9` d'`exec -- sh -c 'sleep 40'`, `sh` meurt et `sleep` reste (mesuré le 9 octobre). Rien de tel sous macOS ni Windows : l'enfant y survit à un arrêt brutal.
+**Arrêt brutal d'`exec`** : sous Linux, l'enfant lancé par `exec` reçoit SIGKILL quand `lm-resizer` meurt, même par `kill -9` (`PR_SET_PDEATHSIG`). Ses propres enfants ne sont pas couverts (mesuré le 9 octobre, rejoué par le contre-audit du même jour) :
+
+```sh
+lm-resizer exec -- sh -c 'sleep 47' & sleep 1; kill -9 $!; sleep 1; pgrep -af '^sleep 47'
+```
+
+`sh` meurt, `sleep 47` reste, rattaché à un autre parent. Les tuer exige un survivant extérieur à `lm-resizer` (qui ne peut plus agir après SIGKILL) et un groupe de processus séparé, qui casse le contrôle du terminal (un enfant qui lit le terminal serait arrêté par SIGTTIN) : ce n'est pas corrigé proprement ici. La règle prudente du crochet réduit la surface : les serveurs, les scripts et les conteneurs ne sont plus enveloppés. Rien de tel sous macOS ni Windows : l'enfant y survit à un arrêt brutal.
 
 ## `git log` : ce qui reste brut
 

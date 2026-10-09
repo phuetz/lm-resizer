@@ -53,6 +53,17 @@ follows no upstream redirect. Any local account that can reach the port can stil
 upstream key it holds: do not run it on a shared machine. Give the key through
 `LM_RESIZER_API_KEY` or `--api-key-file`, never on the command line.
 
+## Successful test runners
+
+A test runner named in the command line (`cargo test`, pytest, `go test`, jest, vitest, `dotnet
+test`, Maven or Gradle test tasks, `npm test`… and their wrapped forms such as `npx`, `npm exec`,
+`python3.12 -m pytest`) that exits with code 0 is returned raw, byte for byte, by `exec`,
+`tool-output`, `pipe` and the MCP tool (rule validated on 9 October 2026). A passing test can
+print a security warning (`Permission denied`, a CVE line) or a child process's output that a
+summary would hide. A single recognition of test runners serves both this rule and the reduced
+views, so no form reduced on failure escapes it. A failing run keeps the reduced view; what it
+drops is measured in `docs/KNOWN-MISSES.md`.
+
 ## Agent hooks and permission rules
 
 The native hooks (`init-native-hooks`, `install-hooks`) rewrite a supported Bash command
