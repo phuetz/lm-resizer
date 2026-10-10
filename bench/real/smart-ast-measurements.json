@@ -1,0 +1,39 @@
+{
+  "token_estimate": "Approximation : octets UTF-8 divisés par 4 ; aucune tokenisation.",
+  "timing": "Une exécution par fichier, durée du processus CLI incluse ; pas une garantie de latence.",
+  "files": [
+    {
+      "file": "src/outline_view.rs",
+      "input_sha256": "d785a6c02f861d775dd4d8bb1786f4dde9bcc6f943e4d188208fe64170c2b5fa",
+      "input_bytes": 3405,
+      "output_bytes": 603,
+      "input_approx_tokens": 851.25,
+      "output_approx_tokens": 150.75,
+      "saved_percent": 82.29,
+      "elapsed_ms": 53.482,
+      "output": "[smart AST: rust; corps omis]\nL1 doc Explicit callable outline: indexed scopes, original signature bytes and\nL3 import use lm_resizer_core::ccr::CcrStore; // Explicit callable outline: indexed scopes, original signature bytes and\nL4 import use lm_resizer_core::transforms::retention_advice::RetentionAdvice;\nL5 import use std::{ io::Write, path::Path, process::{Command, Stdio}, };\nL11 fn pub fn outline(path: &Path, raw: &str, store: &dyn CcrStore) -> String\nL33 fn fn python(raw: &str, advice: &RetentionAdvice) -> Option<String> // CPython validates the complete document; indexed tree-sitter ranges\n"
+    },
+    {
+      "file": "packages/wasm/index.js",
+      "input_sha256": "07aa82c34fb36b22d533b97cacde19e5eada25987c95b04b343efb15093dac8f",
+      "input_bytes": 3494,
+      "output_bytes": 228,
+      "input_approx_tokens": 873.5,
+      "output_approx_tokens": 57.0,
+      "saved_percent": 93.47,
+      "elapsed_ms": 33.554,
+      "output": "[smart AST: javascript; corps omis]\nL4 fn export async function initLmResizerWasm(input)\nL113 fn export async function initLmResizerWasmFromPackage() // Load the `lm_resizer_wasm.wasm` shipped inside this npm package (Node.js).\n"
+    },
+    {
+      "file": "bench/real/build.py",
+      "input_sha256": "0d40d62e088e10101ed0de2f713c2d2ffa72b776364332a5975f625e33194667",
+      "input_bytes": 3206,
+      "output_bytes": 350,
+      "input_approx_tokens": 801.5,
+      "output_approx_tokens": 87.5,
+      "saved_percent": 89.08,
+      "elapsed_ms": 68.832,
+      "output": "[smart AST: python; corps omis]\nL2 doc Bind measurements to the executable reported by Cargo, never a guessed path.\nL3 import import hashlib\nL4 import import json\nL5 import from pathlib import Path\nL6 import import subprocess\nL8 const ROOT\nL11 fn def git(*args):\nL15 fn def build_executable(root, name):\nL35 fn def verify_build_proof(binary, proof):\n"
+    }
+  ]
+}

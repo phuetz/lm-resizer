@@ -35,5 +35,9 @@ export CARGO_TARGET_DIR=/w/target/static
 # Do NOT set +crt-static by hand: on a musl host it also applies to proc-macros,
 # which then fail to build. The musl target is static by default with rustup.
 export RUSTFLAGS="--remap-path-prefix=/w=/build/lm-resizer --remap-path-prefix=/root/.cargo=/build/cargo --remap-path-prefix=/root/.rustup=/build/rustup"
+# The same prefixes for C sources compiled by build scripts (tree-sitter, SQLite, ring): rustc alone
+# leaves their __FILE__ paths in the binary.
+export CFLAGS="-ffile-prefix-map=/w=/build/lm-resizer -ffile-prefix-map=/root/.cargo=/build/cargo -ffile-prefix-map=/root/.rustup=/build/rustup"
+export CXXFLAGS="$CFLAGS"
 cargo build --release --locked --target x86_64-unknown-linux-musl
 chown -R "$HOST_UID:$HOST_GID" /w/target/static

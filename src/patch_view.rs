@@ -108,10 +108,15 @@ pub fn expand(view: &str) -> Result<String> {
     let mut finished = false;
     for row in body.split_terminator('\n') {
         if finished {
+            // `[tee:<id>] lm-resizer tee read <id>` (ou l'ancien `[tee:<id>]`, ou `[raw: <id>]`).
             let hint = row
                 .strip_prefix("[tee:")
                 .or_else(|| row.strip_prefix("[raw: "))
-                .and_then(|s| s.strip_suffix(']'));
+                .and_then(|s| s.split_once(']'))
+                .filter(|(id, rest)| {
+                    rest.is_empty() || *rest == format!(" lm-resizer tee read {id}")
+                })
+                .map(|(id, _)| id);
             anyhow::ensure!(
                 row.is_empty()
                     || hint.is_some_and(

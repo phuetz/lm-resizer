@@ -412,10 +412,22 @@ fn pipe_recovery_hint_resolves_through_the_lm_command() {
     use std::io::Write;
     use std::process::Stdio;
     let dir = tempfile::tempdir().unwrap();
-    let raw = "commit abcdef\n".to_owned() + &"    complete commit detail\n".repeat(100);
+    // `pipe --filter git-log` ne raccourcit plus (aucun format fiable) ; un filtre qui raccourcit
+    // réellement suffit à ce test, dont l'objet est que le rappel `tee` se relit.
+    let raw = (0..100)
+        .map(|n| format!("test module::case_{n:03} ... ok\n"))
+        .collect::<String>()
+        + "test result: ok. 100 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n";
     let mut child = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
         .env("LM_RESIZER_STATE_DIR", dir.path())
-        .args(["pipe", "--filter", "git-log", "--json", "--exit-code", "2"])
+        .args([
+            "pipe",
+            "--filter",
+            "cargo-test",
+            "--json",
+            "--exit-code",
+            "2",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()

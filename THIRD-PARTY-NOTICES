@@ -1,5 +1,6 @@
-Inspiré de RTK (Apache-2.0). Aucun code de ce projet n’est inclus dans le produit.
+Inspiré d'un outil de filtrage de sorties de commandes sous licence Apache-2.0, nommé dans bench/NOTICES.md. Aucun code de ce projet n’est inclus dans le produit.
 Inspiré de Headroom (Apache-2.0). Les stratégies de vues structurées sont réécrites indépendamment en Rust.
 
 Les plans de code Rust utilisent syn 2 et proc-macro2 (MIT OR Apache-2.0) et conservent les tranches de source originales.
+`smart --ast` embarque tree-sitter 0.25, tree-sitter-python 0.25, tree-sitter-javascript 0.25, tree-sitter-typescript 0.23 et tree-sitter-language 0.1 (MIT), ainsi que streaming-iterator 0.1 (MIT OR Apache-2.0) ; l'analyse se fait localement, sans modèle ni réseau.
 Les dépendances de comparaison et leurs licences sont documentées dans bench/.

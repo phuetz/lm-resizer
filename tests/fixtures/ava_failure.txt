@@ -1,0 +1,21 @@
+
+  ✘ [fail]: main
+  ─
+
+  main
+
+  test.js:14
+
+   13: test('main', t => {                  
+   14:   t.false(isPlainObject({}));        
+   15:   t.true(isPlainObject({foo: true}));
+
+  Value is not `false`:
+
+  true
+
+  › file://test.js:14:9
+
+  ─
+
+  1 test failed

@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix='windows contract été ') as folder:
         ("'mocha' n’est pas reconnu en tant que commande interne\r\n", 1, "'mocha'"),
         ('  111 passing (30ms)\r\n', 0, '111 passing'),
     ]:
-        report = json.loads(run(['tool-output', '--json', '--command', 'npm.cmd test', '--exit-code', str(code)], data=text.encode()))
+        report = json.loads(run(['tool-output', '--json', '--command', 'npm.cmd test', '--exit-code', str(code)], data=text.encode(), code=code))
         assert sentinel in report['output']
         assert 'completed' not in report['output']
         results.append(dict(case='npm-missing' if code else 'npm-passing', diagnostic_retained=True))

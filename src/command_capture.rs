@@ -1,13 +1,19 @@
-//! One producer and one shared pipe for both output channels. Drain before
-//! waiting, without a byte limit or per-stream reconstruction; EOF also covers
-//! inherited writers that outlive the immediate producer.
-use std::io::Read;
+//! Producer capture with either one shared pipe or two provenance-preserving
+//! pipes. Drain before waiting, without a byte limit; EOF also covers inherited
+//! writers that outlive the immediate producer.
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 
 pub struct Capture {
     pub raw: Vec<u8>,
+    pub streams: Option<Streams>,
     pub code: i32,
     pub launch_error: Option<String>,
+}
+
+pub struct Streams {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
 /// Windows `cmd.exe /c <line>` re-parses its own command line: Rust's usual
@@ -150,43 +156,346 @@ pub fn build_command(program: &std::path::Path, args: &[String]) -> Command {
     command
 }
 
+fn spawn_producer(command: &mut Command) -> std::io::Result<std::process::Child> {
+    // Install last: StrictExec snapshots argv and replaces the final exec,
+    // after all caller configuration and any other pre_exec callbacks.
+    die_with_parent(command);
+    command.spawn()
+}
+
+/// Linux : l'enfant reçoit SIGKILL quand `lm-resizer` meurt, même par `kill -9`, au lieu de lui
+/// survivre rattaché à un autre parent (`PR_SET_PDEATHSIG`). Le signal part à la mort du fil qui a
+/// lancé l'enfant : chaque appelant attend l'enfant sur ce fil. Les petits-enfants ne sont pas
+/// couverts (`sh -c 'sleep 40'` : `sh` meurt, `sleep` reste).
+#[cfg(target_os = "linux")]
+fn die_with_parent(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    let parent = rustix::process::getpid();
+    let image = StrictExec::prepare(command);
+    // SAFETY: tout est préparé dans le parent. L'enfant ne fait que prctl, getppid et execv,
+    // sans allocation ni verrou ; les erreurs sont des codes OS bruts.
+    unsafe {
+        command.pre_exec(move || {
+            rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::KILL))?;
+            // Le parent est mort entre fork et prctl : le signal ne viendra plus.
+            if rustix::process::getppid() != Some(parent) {
+                return Err(rustix::io::Errno::SRCH.into());
+            }
+            match &image {
+                Ok(image) => Err(image.exec()),
+                Err(error) => Err((*error).into()),
+            }
+        });
+    }
+}
+
+/// A pre_exec forces Rust's fork/execvp path, whose ENOEXEC fallback runs /bin/sh.
+/// Replace that final exec with execv: the kernel accepts or rejects the image,
+/// including shebangs and binfmt_misc, and an error never reaches execvp.
+#[cfg(target_os = "linux")]
+struct StrictExec {
+    program: std::ffi::CString,
+    // Own the immutable buffers referenced by argv, including its argv[0].
+    _args: Vec<std::ffi::CString>,
+    argv: Vec<*const std::ffi::c_char>,
+}
+
+// SAFETY: argv points only into this object's owned CString buffers. Moving the
+// object leaves those heap allocations stable; neither the buffers nor pointers
+// are mutated or exposed. Concurrent exec calls only read them.
+#[cfg(target_os = "linux")]
+unsafe impl Send for StrictExec {}
+#[cfg(target_os = "linux")]
+unsafe impl Sync for StrictExec {}
+
+#[cfg(target_os = "linux")]
+impl StrictExec {
+    fn prepare(command: &Command) -> Result<Self, rustix::io::Errno> {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let requested = command.get_program();
+        let program = if requested.as_bytes().contains(&b'/') {
+            std::path::PathBuf::from(requested)
+        } else {
+            // execv does not search PATH. Resolve here, never accidentally
+            // executing a file in cwd when PATH did not select it.
+            requested
+                .to_str()
+                .and_then(crate::resolve_command_path)
+                .ok_or(rustix::io::Errno::NOENT)?
+        };
+        let program =
+            CString::new(program.as_os_str().as_bytes()).map_err(|_| rustix::io::Errno::INVAL)?;
+        let args: Vec<CString> = std::iter::once(requested)
+            .chain(command.get_args())
+            .map(|arg| CString::new(arg.as_bytes()).map_err(|_| rustix::io::Errno::INVAL))
+            .collect::<Result<_, _>>()?;
+        let argv = args
+            .iter()
+            .map(|arg| arg.as_ptr())
+            .chain(std::iter::once(std::ptr::null()))
+            .collect();
+        Ok(Self {
+            program,
+            _args: args,
+            argv,
+        })
+    }
+
+    fn exec(&self) -> std::io::Error {
+        extern "C" {
+            fn execv(
+                path: *const std::ffi::c_char,
+                argv: *const *const std::ffi::c_char,
+            ) -> std::ffi::c_int;
+        }
+        // SAFETY: path and argv are live, NUL-terminated and immutable. execv
+        // is async-signal-safe and inherits the environment configured by Rust
+        // before pre_exec. Success never returns; failure sets errno.
+        unsafe { execv(self.program.as_ptr(), self.argv.as_ptr()) };
+        std::io::Error::last_os_error()
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn die_with_parent(_command: &mut Command) {}
+
 pub fn run(command: &[String]) -> anyhow::Result<Capture> {
+    run_shared(command)
+}
+
+/// Capture stdout and stderr independently for the displayed view while the
+/// raw tee receives the unlabelled chunks in the order observed by the two
+/// drain workers. Streaming retains each channel's native destination.
+pub fn run_separated(command: &[String], stream: bool) -> anyhow::Result<Capture> {
+    #[derive(Clone, Copy)]
+    enum Channel {
+        Stdout,
+        Stderr,
+    }
+
+    fn drain<R: Read>(
+        mut reader: R,
+        channel: Channel,
+        sender: std::sync::mpsc::Sender<(Channel, Vec<u8>)>,
+    ) -> std::io::Result<()> {
+        let mut chunk = [0u8; 8192];
+        loop {
+            let count = match reader.read(&mut chunk) {
+                Ok(count) => count,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            };
+            if count == 0 {
+                return Ok(());
+            }
+            if sender.send((channel, chunk[..count].to_vec())).is_err() {
+                return Ok(());
+            }
+        }
+    }
+
+    let (program, args) = command
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("missing producer"))?;
+    let resolved = crate::resolve_command_path(program).unwrap_or_else(|| program.into());
+    let mut producer = build_command(&resolved, args);
+    producer
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let grouped = crate::capture_interrupt::configure_process_group(&mut producer);
+    let interrupt_guard = crate::capture_interrupt::relay_interruptions(grouped)
+        .map_err(|error| anyhow::anyhow!("cannot install producer interruption relay: {error}"))?;
+    let result = spawn_producer(&mut producer);
+    drop(producer);
+    let mut child = match result {
+        Ok(child) => child,
+        Err(error) => return Ok(launch_failure(program, &error)),
+    };
+    if let Err(error) = interrupt_guard.set_child(&child) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(anyhow::anyhow!(
+            "cannot register producer interruption relay: {error}"
+        ));
+    }
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("failed to capture stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("failed to capture stderr"))?;
+    let mut tee = crate::capture_interrupt::DurableTee::create();
+    let mut raw = Vec::new();
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
+    let mut show_stdout = stream;
+    let mut show_stderr = stream;
+
+    let drained = std::thread::scope(|scope| -> anyhow::Result<()> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let stdout_worker = scope.spawn({
+            let sender = sender.clone();
+            move || drain(stdout, Channel::Stdout, sender)
+        });
+        let stderr_worker = scope.spawn({
+            let sender = sender.clone();
+            move || drain(stderr, Channel::Stderr, sender)
+        });
+        drop(sender);
+
+        for (channel, chunk) in receiver {
+            tee.append(&chunk);
+            raw.extend_from_slice(&chunk);
+            match channel {
+                Channel::Stdout => {
+                    stdout_bytes.extend_from_slice(&chunk);
+                    if show_stdout {
+                        let mut output = std::io::stdout().lock();
+                        if output
+                            .write_all(&chunk)
+                            .and_then(|()| output.flush())
+                            .is_err()
+                        {
+                            show_stdout = false;
+                        }
+                    }
+                }
+                Channel::Stderr => {
+                    stderr_bytes.extend_from_slice(&chunk);
+                    if show_stderr {
+                        let mut output = std::io::stderr().lock();
+                        if output
+                            .write_all(&chunk)
+                            .and_then(|()| output.flush())
+                            .is_err()
+                        {
+                            show_stderr = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        stdout_worker
+            .join()
+            .map_err(|_| anyhow::anyhow!("stdout capture worker panicked"))??;
+        stderr_worker
+            .join()
+            .map_err(|_| anyhow::anyhow!("stderr capture worker panicked"))??;
+        Ok(())
+    });
+    if let Err(error) = drained {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = tee.finish(&raw);
+        return Err(error);
+    }
+
+    let status = child.wait()?;
+    let _ = tee.finish(&raw);
+    Ok(Capture {
+        raw,
+        streams: Some(Streams {
+            stdout: stdout_bytes,
+            stderr: stderr_bytes,
+        }),
+        code: crate::child_exit_code(status),
+        launch_error: None,
+    })
+}
+
+fn run_shared(command: &[String]) -> anyhow::Result<Capture> {
     let (program, args) = command
         .split_first()
         .ok_or_else(|| anyhow::anyhow!("missing producer"))?;
     let resolved = crate::resolve_command_path(program).unwrap_or_else(|| program.into());
     let (mut reader, writer) = std::io::pipe()?;
-    let result = build_command(&resolved, args)
+    let mut producer = build_command(&resolved, args);
+    producer
         .stdin(Stdio::inherit())
         .stdout(Stdio::from(writer.try_clone()?))
-        .stderr(Stdio::from(writer))
-        .spawn();
+        .stderr(Stdio::from(writer));
+    let grouped = crate::capture_interrupt::configure_process_group(&mut producer);
+    // Install before spawn so a signal cannot terminate lm-resizer in the
+    // interval between creating the producer and registering the relay.
+    let interrupt_guard = crate::capture_interrupt::relay_interruptions(grouped)
+        .map_err(|error| anyhow::anyhow!("cannot install producer interruption relay: {error}"))?;
+    let result = spawn_producer(&mut producer);
+    // `Command` retains its configured Stdio handles after spawn. Close those
+    // parent-side writer copies so EOF reflects the producer group exiting.
+    drop(producer);
     match result {
         Ok(mut child) => {
+            if let Err(error) = interrupt_guard.set_child(&child) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(anyhow::anyhow!(
+                    "cannot register producer interruption relay: {error}"
+                ));
+            }
+            let mut tee = crate::capture_interrupt::DurableTee::create();
             let mut raw = Vec::new();
-            reader.read_to_end(&mut raw)?;
+            let mut chunk = [0u8; 8192];
+            loop {
+                let count = match reader.read(&mut chunk) {
+                    Ok(count) => count,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => {
+                        // A broken capture pipe can otherwise leave a producer
+                        // blocked forever. End it, reap it, and keep the
+                        // incrementally flushed tee available for diagnosis.
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        let _ = tee.finish(&raw);
+                        return Err(error.into());
+                    }
+                };
+                if count == 0 {
+                    break;
+                }
+                tee.append(&chunk[..count]);
+                raw.extend_from_slice(&chunk[..count]);
+            }
             let status = child.wait()?;
+            let _ = tee.finish(&raw);
             Ok(Capture {
                 raw,
+                streams: None,
                 code: crate::child_exit_code(status),
                 launch_error: None,
             })
         }
-        Err(error) => Ok(Capture {
-            raw: Vec::new(),
-            code: if error.kind() == std::io::ErrorKind::PermissionDenied {
-                126
-            } else {
-                127
-            },
-            launch_error: Some(launch_error_message(program, &error)),
-        }),
+        Err(error) => Ok(launch_failure(program, &error)),
     }
 }
 
 /// Message d'échec de lancement. Pour une commande introuvable, on nomme la
 /// commande et on dit où elle a été cherchée, au lieu du seul « os error 2 »
 /// qui laisse croire à un fichier d'lm-resizer manquant.
+pub fn launch_failure(program: &str, error: &std::io::Error) -> Capture {
+    #[cfg(windows)]
+    let invalid_image = matches!(error.raw_os_error(), Some(193 | 216));
+    #[cfg(unix)]
+    let invalid_image = error.raw_os_error() == Some(8); // ENOEXEC
+    #[cfg(not(any(windows, unix)))]
+    let invalid_image = false;
+    Capture {
+        raw: Vec::new(),
+        streams: None,
+        code: if error.kind() == std::io::ErrorKind::PermissionDenied || invalid_image {
+            126
+        } else {
+            127
+        },
+        launch_error: Some(launch_error_message(program, error)),
+    }
+}
+
 fn launch_error_message(program: &str, error: &std::io::Error) -> String {
     if error.kind() == std::io::ErrorKind::NotFound {
         format!(

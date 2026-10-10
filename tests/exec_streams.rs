@@ -1,7 +1,9 @@
 //! Child stream provenance, failure output and Unix signal contracts.
 #![cfg(unix)]
+mod support;
 use serde_json::Value;
 use std::process::Command;
+use support::is_interleaving;
 
 #[test]
 fn mixed_streams_keep_execution_order_and_exit_code_survives() {
@@ -85,15 +87,30 @@ fn legacy_filter_cannot_discard_the_stderr_boundary() {
     let npm = state.path().join("npm");
     std::fs::write(&npm, "#!/bin/sh\nprintf 'warning: preserve this diagnostic\\ncontext 1\\ncontext 2\\ncontext 3\\nstdout detail\\n'\nprintf 'separate stream detail\\n' >&2\n").unwrap();
     std::fs::set_permissions(&npm, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
-        .env("LM_RESIZER_STATE_DIR", state.path().join("state"))
-        .env("LM_RESIZER_NO_TOML_FILTERS", "1")
-        .args(["exec", "--raw-on-failure", "--json", "--"])
-        .arg(npm)
-        .args(["run", "build"])
-        .output()
-        .unwrap();
-    assert!(out.status.success());
+    // Un script écrit à l'instant peut ne pas démarrer (« text file busy », ETXTBSY) quand un test
+    // parallèle fait un fork : seul ce cas est rejoué, tout autre échec est rapporté tel quel.
+    let mut out = None;
+    for _ in 0..5 {
+        let attempt = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
+            .env("LM_RESIZER_STATE_DIR", state.path().join("state"))
+            .env("LM_RESIZER_NO_TOML_FILTERS", "1")
+            .args(["exec", "--raw-on-failure", "--json", "--"])
+            .arg(&npm)
+            // `npm run …` lance une recette de l'utilisateur, rendue brute : `install` garde la vue.
+            .args(["install"])
+            .output()
+            .unwrap();
+        let busy = String::from_utf8_lossy(&attempt.stdout).contains("ext file busy")
+            || String::from_utf8_lossy(&attempt.stderr).contains("ext file busy");
+        let done = attempt.status.success() || !busy;
+        out = Some(attempt);
+        if done {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let out = out.unwrap();
+    assert!(out.status.success(), "{out:?}");
     let report: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(report["filter"], "native:packages");
     assert!(report["output"]
@@ -134,6 +151,15 @@ fn non_utf8_bytes_survive_tee_in_captured_and_streamed_execution() {
         assert!(view.contains("non-UTF-8 capture"));
         assert!(view.contains("caf\\xE9_budget.txt"));
         assert!(!view.contains('\u{fffd}'));
+        if stream {
+            assert!(view.contains("[stderr]\nerr\\xFF\n"));
+            assert_eq!(report["streams"]["stdout_bytes"], 16);
+            assert_eq!(report["streams"]["stderr_bytes"], 5);
+            assert_eq!(&out.stdout[..start], b"caf\xe9_budget.txt\n");
+            assert_eq!(out.stderr, b"err\xff\n");
+        } else {
+            assert!(report["streams"].is_null());
+        }
         let hint = report["tee_hint"].as_str().unwrap();
         let hash = hint
             .strip_prefix("[raw: ")
@@ -148,14 +174,16 @@ fn non_utf8_bytes_survive_tee_in_captured_and_streamed_execution() {
             .output()
             .unwrap();
         assert!(recovered.status.success());
-        assert_eq!(
-            recovered.stdout,
-            if stream {
-                &b"caf\xe9_budget.txt\n\n[stderr]\nerr\xff\n"[..]
-            } else {
-                &b"caf\xe9_budget.txt\nerr\xff\n"[..]
-            }
-        );
+        if stream {
+            // Separate pipes: exact streams, drain order between them.
+            assert!(
+                is_interleaving(&recovered.stdout, b"caf\xe9_budget.txt\n", b"err\xff\n"),
+                "{:?}",
+                recovered.stdout
+            );
+        } else {
+            assert_eq!(recovered.stdout, b"caf\xe9_budget.txt\nerr\xff\n");
+        }
     }
 }
 

@@ -199,3 +199,35 @@ mod redis_tests {
         assert_eq!(store.get(&hash).as_deref(), Some(payload));
     }
 }
+
+/// macOS : le dossier temporaire passe par `/var -> /private/var`, et un HOME peut passer par un
+/// lien. Un lien dans un dossier PARENT ne doit pas empêcher d'ouvrir la base ; seul un lien à la
+/// place du fichier de la base est refusé.
+#[cfg(unix)]
+#[test]
+fn sqlite_opens_through_a_symlinked_parent_but_not_a_symlinked_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let real = dir.path().join("reel");
+    std::fs::create_dir(&real).expect("dossier réel");
+    let link = dir.path().join("lien");
+    std::os::unix::fs::symlink(&real, &link).expect("lien vers le dossier");
+
+    let store = SqliteCcrStore::open(link.join("ccr.sqlite"), 300)
+        .expect("un lien dans un dossier parent ne doit pas bloquer l'ouverture");
+    let hash = compute_key(b"via le lien");
+    store.put(&hash, "via le lien");
+    assert_eq!(store.get(&hash).as_deref(), Some("via le lien"));
+    assert!(
+        real.join("ccr.sqlite").is_file(),
+        "la base est dans le dossier réel"
+    );
+
+    let target = dir.path().join("cible.sqlite");
+    std::fs::write(&target, b"").expect("cible");
+    let file_link = real.join("piege.sqlite");
+    std::os::unix::fs::symlink(&target, &file_link).expect("lien vers un fichier");
+    assert!(
+        SqliteCcrStore::open(&file_link, 300).is_err(),
+        "un lien à la place du fichier de la base reste refusé"
+    );
+}

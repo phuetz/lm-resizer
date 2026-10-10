@@ -25,13 +25,34 @@ pub fn rewrite(value: &Value, exe: &str, event: &str, client: &str) -> Option<Va
     Some(match client {
         "gemini" => json!({"hookSpecificOutput":{"hookEventName":"BeforeTool","tool_input":input}}),
         "copilot" => json!({"modifiedArgs":input}),
-        "cursor" => json!({"permission":"allow","updated_input":input}),
-        _ => result,
+        // Cursor (documentation Hooks lue le 9 octobre 2026) : `allow` laisse passer, une réponse
+        // hors schéma bloque l'action et `permission` n'y est pas marqué optionnel. `ask` est la
+        // seule valeur valide qui ne donne pas de feu vert ; elle l'emporte sur l'`allow` d'un autre
+        // crochet (`deny` > `ask` > `allow`). La documentation dit `ask` « non appliqué pour
+        // preToolUse aujourd'hui » et ne dit pas si `updated_input` l'est alors : voir SECURITY.md.
+        "cursor" => json!({"permission":"ask","updated_input":input}),
+        // Codex exige `permissionDecision: "allow"` (voir `pretooluse_rewrite_json`). Tout autre
+        // client ne la reçoit pas : avec `allow`, Claude Code exécute la commande réécrite sans
+        // demander l'accord de l'utilisateur, et l'invite d'approbation disparaît.
+        "codex" => result,
+        _ => {
+            let mut result = result;
+            if let Some(Value::Object(output)) = result.get_mut("hookSpecificOutput") {
+                output.remove("permissionDecision");
+                output.remove("permissionDecisionReason");
+            }
+            result
+        }
     })
 }
 
 pub fn config(exe: &str, client: &str) -> Option<Value> {
-    let command = |event: &str| format!("\"{exe}\" hook --client {client} --event {event}");
+    let command = |event: &str| {
+        format!(
+            "{} hook --client {client} --event {event}",
+            quote_program(exe)
+        )
+    };
     // Only pre-execution rewriting is installed: the wrapped exec already
     // records measured savings, so a post hook would count the same run twice.
     Some(match client {
@@ -51,6 +72,52 @@ pub fn config(exe: &str, client: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_codex_receives_a_permission_decision() {
+        let value = json!({"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cargo test"}});
+        for client in ["claude", "unknown", "claude-code"] {
+            let out = rewrite(&value, "/opt/lm", "PreToolUse", client).unwrap();
+            let output = out.get("hookSpecificOutput").unwrap();
+            assert!(
+                output.get("permissionDecision").is_none(),
+                "{client}: {out}"
+            );
+            assert!(output.get("permissionDecisionReason").is_none(), "{client}");
+            assert_eq!(
+                output
+                    .pointer("/updatedInput/command")
+                    .and_then(Value::as_str),
+                Some("\"/opt/lm\" exec -- cargo test"),
+                "{client}"
+            );
+        }
+        let codex = rewrite(&value, "/opt/lm", "PreToolUse", "codex").unwrap();
+        assert_eq!(
+            codex
+                .pointer("/hookSpecificOutput/permissionDecision")
+                .and_then(Value::as_str),
+            Some("allow")
+        );
+    }
+    /// Audit du 9 octobre 2026 : le crochet Cursor répondait `permission: allow`, que la
+    /// documentation de Cursor définit comme « proceed ». Le crochet ne donne jamais un feu vert que
+    /// l'utilisateur n'a pas donné.
+    #[test]
+    fn cursor_never_answers_allow() {
+        for tool in ["Shell", "Bash"] {
+            let value = json!({"hook_event_name":"preToolUse","tool_name":tool,"tool_input":{"command":"cargo test","working_directory":"/tmp"}});
+            let out = rewrite(&value, "/opt/lm", "preToolUse", "cursor").unwrap();
+            assert_eq!(out["permission"], "ask", "{tool}: {out}");
+            assert_eq!(
+                out.pointer("/updated_input/command")
+                    .and_then(Value::as_str),
+                Some("\"/opt/lm\" exec -- cargo test"),
+                "{tool}"
+            );
+            assert_eq!(out["updated_input"]["working_directory"], "/tmp");
+        }
+    }
+
     #[test]
     fn adapters_preserve_tool_arguments_and_do_not_rewrite_other_tools() {
         for (client, tool, path) in [
@@ -95,5 +162,41 @@ mod tests {
             config("lm-resizer", "cursor").unwrap()["hooks"]["preToolUse"][0]["matcher"],
             "^Shell$"
         );
+    }
+}
+
+/// Chemin du programme tel qu'il est écrit dans une ligne de commande de hook. Entre guillemets
+/// doubles (format historique, seul accepté par `cmd.exe`) ; sous Unix, un chemin qui contient
+/// `"`, `$`, un accent grave, `\` ou `!` serait réinterprété par le shell : il est alors cité en
+/// apostrophes.
+pub fn quote_program(exe: &str) -> String {
+    if cfg!(unix) && exe.contains(['"', '$', '`', '\\', '!', '\n']) {
+        format!("'{}'", exe.replace('\'', "'\\''"))
+    } else {
+        format!("\"{exe}\"")
+    }
+}
+
+#[cfg(all(test, unix))]
+mod quote_program_tests {
+    use super::quote_program;
+
+    #[test]
+    fn ordinary_paths_keep_the_historical_double_quotes() {
+        assert_eq!(
+            quote_program("/opt/lm/bin/lm-resizer"),
+            "\"/opt/lm/bin/lm-resizer\""
+        );
+        assert_eq!(quote_program("/opt/my tools/lm"), "\"/opt/my tools/lm\"");
+    }
+
+    #[test]
+    fn paths_the_shell_would_reinterpret_are_single_quoted() {
+        assert_eq!(
+            quote_program("/tmp/a\"b;touch pwned;#"),
+            "'/tmp/a\"b;touch pwned;#'"
+        );
+        assert_eq!(quote_program("/tmp/$(id)/lm"), "'/tmp/$(id)/lm'");
+        assert_eq!(quote_program("/tmp/it's$x"), "'/tmp/it'\\''s$x'");
     }
 }

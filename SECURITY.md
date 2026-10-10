@@ -27,6 +27,98 @@ Some commands can store raw command output locally for recovery:
 Set `LM_RESIZER_TEE=0` to disable raw-output recovery and
 `LM_RESIZER_TRACKING=0` to disable local history/retrieval counters.
 
+On Unix, creation requests mode 0700 for the state directory and mode 0600 for its
+files (raw-output archives, `exec-history.jsonl`, the CCR database). A restrictive
+umask can remove owner permissions. Existing directories keep their old
+mode. Existing history files, state logs and CCR files are tightened to 0600 if group or
+other permissions are their only fault; an archive with those permissions is refused
+and keeps its mode. Run `chmod -R go-rwx ~/lm-resizer` (or your `LM_RESIZER_STATE_DIR`)
+once for existing directories and archives. The history stores
+command lines as typed and is not redacted: treat it like a shell history file.
+
+A raw-output archive (`tee/<sha256>.log`) is created with `O_CREAT|O_EXCL|O_NOFOLLOW` and never
+follows a symbolic link. A file that already exists under that name is used only if the open
+descriptor shows a regular file with a single link, owned by the current user, with no group or
+other permission; its content is then compared with the new output and rewritten if it differs (a
+file of the right length but altered content was announced as the original). Otherwise nothing
+is written, no `[tee:]` is shown and a warning names the file: symbolic link, hard link, FIFO,
+directory (before 0.2.6, a link planted in a writable tee directory received the raw output,
+secrets included). The history (`exec-history.jsonl`), the hook counter file
+(`hook-audit.jsonl`), the other state logs and the CCR database (`ccr.sqlite3`, opened with
+`SQLITE_OPEN_NOFOLLOW`, and its `-wal` and `-shm` files) are not opened through a symbolic link
+either. They are used only if the open descriptor shows a regular file with a single link owned by
+the current user; otherwise nothing is written (`exec` names a refused history or database and
+goes on without it). Unlike a raw-output archive, such a file whose only fault is a group- or
+world-accessible mode (left by a version before 0.2.6) is tightened to 0600 on that descriptor and
+used (decision of 10 October 2026); an archive in that state is still refused.
+
+The local proxy (`serve`, `wrap`) has no client authentication. It listens on loopback only
+unless `--allow-non-loopback` is given, answers only requests whose `Host` is local, and
+follows no upstream redirect. Any local account that can reach the port can still use the
+upstream key it holds: do not run it on a shared machine. Give the key through
+`LM_RESIZER_API_KEY` or `--api-key-file`, never on the command line. On Unix, the key
+file is refused if any group or other permission is set (`mode & 0o077 != 0`).
+Mode 0600 is recommended; modes such as 0400 or 0700 also pass this check.
+
+## Successful test runners
+
+A test runner named in the command line (`cargo test`, pytest, `go test`, jest, vitest, `dotnet
+test`, Maven or Gradle test tasks, `npm test`… and their wrapped forms such as `npx`, `npm exec`,
+`python3.12 -m pytest`) that exits with code 0 is returned raw, byte for byte, by `exec`,
+`tool-output`, `pipe` and the MCP tool (rule validated on 9 October 2026). A passing test can
+print a security warning (`Permission denied`, a CVE line) or a child process's output that a
+summary would hide. A single recognition of test runners serves both this rule and the reduced
+views, so no form reduced on failure escapes it. A failing run keeps the reduced view; what it
+drops is measured in `docs/KNOWN-MISSES.md`.
+
+## Agent hooks and permission rules
+
+The native hooks (`init-native-hooks`, `install-hooks`) rewrite a supported Bash command
+into `lm-resizer exec -- <command>` through `updatedInput`.
+
+- For Claude Code the hook does not send `permissionDecision`: the rewritten command goes
+  through the normal approval prompt. Only the Codex handler answers `allow`, because Codex
+  marks the hook as failed otherwise. Before 0.2.6 the Claude hook answered `allow` as well,
+  and Claude Code ran the rewritten command without asking.
+- For Cursor the hook answers `permission: "ask"` with `updated_input`. Before 0.2.6 it answered
+  `allow`, which the Cursor Hooks documentation (read on 9 October 2026) defines as "proceed".
+  What that documentation says: `allow` proceeds, `deny` blocks, `ask` "is accepted by the schema
+  but not enforced for `preToolUse` today"; a response that does not match the schema blocks the
+  action, and `permission` is not marked optional; across hooks `deny` wins over `ask` and `ask`
+  over `allow`. `ask` is therefore the only valid answer that grants nothing and cannot override
+  another hook's refusal. What it does not say, and was not checked in a running Cursor: whether
+  `updated_input` is applied with `ask`, whether Cursor then asks the user or proceeds, and how an
+  empty output (the hook prints nothing for a command it does not rewrite) is treated. To keep
+  Cursor's own approval only, do not install the Cursor hook, or remove it with
+  `uninstall-hooks --client cursor`.
+- A command received as a JSON array is an argument vector: the rewritten command stays an array
+  (`["<lm-resizer>", "exec", "--", …]`), run without a shell. Before 0.2.6 the elements were
+  joined with spaces, so `*` was expanded and `--format=%h %s` split in two. An array with a
+  non-text element is not always refused: the fallback may extract a command from it and replace
+  the array with a string, so `["cargo test", 1]` may be rewritten from `cargo test`, without the
+  number. No known client sends an array (Claude, Cursor and Codex document a string).
+- The hook rewrites only a command that a view really reduces, and never one that can read its
+  input or not end: `exec` keeps the output until the process exits, so a `Password:` prompt, a
+  host-key question or a server log would never show. A script (`npm test`, `npm run server`,
+  `make run-server`), a program without a view (`php -S`, `docker run`) and a Git subcommand
+  without a view (`git credential fill`, `git lfs pull`) run directly; so do, even with a view,
+  `git push|pull|fetch|clone`, every `docker|podman run|exec|…` and `compose run|exec` (with or
+  without `-T`), `kubectl exec|run|debug`, `sudo`, `ssh`, `scp`, Terraform without `-input=false`,
+  `pytest --pdb`, `pip uninstall` without `-y`… (rule read from `argv`, full list in
+  `docs/KNOWN-MISSES.md`). A command with a view that prompts and is not in the list is still
+  captured until it exits.
+- `uninstall-hooks --client all` removes the native hook files of all five clients (Codex,
+  Claude, Gemini, Copilot, Cursor) when they still match the content generated for the current
+  binary or for the binary path written in the file (installed from another location); before
+  0.2.6 it left the Cursor hook. `uninstall --client all --scope all` removes the MCP server
+  entries of both scopes.
+- A permission rule matches the command text. After the rewrite the text is
+  `lm-resizer exec -- <command>`, so a `deny` rule written for the original, such as
+  `Bash(cargo test)`, no longer applies. Checked on Claude Code 2.1.294 with `allow: Bash` and
+  `deny: Bash(cargo test)`: the rewritten command ran. Adding `Bash(*exec -- cargo test*)` to
+  `deny` blocked it. Add such a rule for every command you deny, or do not install the hook.
+  An `allow` rule for the original form likewise stops matching.
+
 ## Supply Chain
 
 The WASM package is published manually through a protected GitHub Actions

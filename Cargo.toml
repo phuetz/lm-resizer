@@ -30,7 +30,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 
 [package]
 name = "lm-resizer"
-version = "0.2.5"
+version = "0.2.6"
 edition.workspace = true
 rust-version = "1.91"
 license.workspace = true
@@ -48,6 +48,10 @@ magika = ["lm-resizer-core/magika"]
 [dependencies]
 syn = { version = "2", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
+tree-sitter = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.25"
 tempfile = "3"
 anyhow = { workspace = true }
 axum = { workspace = true }
@@ -71,7 +75,7 @@ toml = "0.8"
 walkdir = "2"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = ["fs"] }
+rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
 tempfile = "3"

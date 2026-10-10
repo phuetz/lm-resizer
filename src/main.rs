@@ -40,6 +40,7 @@ use walkdir::WalkDir;
 
 mod advice_cli;
 mod agent_hooks;
+mod capture_interrupt;
 mod command_capture;
 mod command_filters;
 mod command_views;
@@ -57,6 +58,9 @@ mod patch_view;
 mod provider_usage;
 mod reversible_views;
 mod shared_context;
+#[cfg(test)]
+mod shell_rewrite_tests;
+mod smart_ast;
 mod structured_views;
 mod test_views;
 mod token_metrics;
@@ -270,6 +274,9 @@ enum Commands {
     Smart {
         /// Source file to summarize.
         input: PathBuf,
+        /// Résumer la structure syntaxique localement, avec signatures et lignes.
+        #[arg(long)]
+        ast: bool,
         /// User query used by relevance-aware compressors.
         #[arg(short, long, default_value = "")]
         query: String,
@@ -793,6 +800,20 @@ enum Commands {
         #[arg(long)]
         store: Option<PathBuf>,
     },
+    /// Remove the lm-resizer MCP server entry written by `install`, keeping the rest of each file.
+    Uninstall {
+        /// Client to unconfigure: claude, codex, cursor, vscode, all.
+        #[arg(long, default_value = "claude")]
+        client: String,
+        /// Scope: project, global, or all (both). Codex is user-scoped: `--client codex` requires
+        /// `--scope global` or `all`, and `--client all` cleans `~/.codex/config.toml` even with
+        /// `project`.
+        #[arg(long, default_value = "project")]
+        scope: String,
+        /// Project directory for project-scoped config files.
+        #[arg(long)]
+        project_dir: Option<PathBuf>,
+    },
     /// Run a small HTTP API.
     Serve {
         #[arg(long, default_value = "127.0.0.1:8787")]
@@ -801,9 +822,19 @@ enum Commands {
         #[arg(long, env = "LM_RESIZER_UPSTREAM")]
         upstream: Option<String>,
         /// Optional bearer token for the upstream provider. Its value is never
-        /// shown by `--help`, even when taken from the environment.
+        /// shown by `--help`, even when taken from the environment. Prefer
+        /// `LM_RESIZER_API_KEY` or `--api-key-file`: a value given on the command
+        /// line is readable by every local account through `ps`.
         #[arg(long, env = "LM_RESIZER_API_KEY", hide_env_values = true)]
         api_key: Option<String>,
+        /// File holding the upstream token (first line). On Unix it must not be
+        /// readable by group or others (mode 0600). Takes precedence over `--api-key`.
+        #[arg(long, env = "LM_RESIZER_API_KEY_FILE")]
+        api_key_file: Option<PathBuf>,
+        /// Accept a non-loopback `--bind` address. The proxy has no client authentication:
+        /// anyone who can reach it can spend the upstream key.
+        #[arg(long)]
+        allow_non_loopback: bool,
         /// Upstream provider header mode: openai, anthropic, bedrock, or vertex.
         #[arg(long, env = "LM_RESIZER_PROVIDER", default_value = "openai")]
         provider: String,
@@ -828,9 +859,19 @@ enum Commands {
         #[arg(long, env = "LM_RESIZER_UPSTREAM")]
         upstream: Option<String>,
         /// Optional bearer token for the upstream provider. Its value is never
-        /// shown by `--help`, even when taken from the environment.
+        /// shown by `--help`, even when taken from the environment. Prefer
+        /// `LM_RESIZER_API_KEY` or `--api-key-file`: a value given on the command
+        /// line is readable by every local account through `ps`.
         #[arg(long, env = "LM_RESIZER_API_KEY", hide_env_values = true)]
         api_key: Option<String>,
+        /// File holding the upstream token (first line). On Unix it must not be
+        /// readable by group or others (mode 0600). Takes precedence over `--api-key`.
+        #[arg(long, env = "LM_RESIZER_API_KEY_FILE")]
+        api_key_file: Option<PathBuf>,
+        /// Accept a non-loopback `--bind` address. The proxy has no client authentication:
+        /// anyone who can reach it can spend the upstream key.
+        #[arg(long)]
+        allow_non_loopback: bool,
         /// Upstream provider header mode: openai, anthropic, bedrock, or vertex.
         #[arg(long, env = "LM_RESIZER_PROVIDER", default_value = "openai")]
         provider: String,
@@ -1390,6 +1431,8 @@ struct AppState {
     provider: ProviderKind,
     client: Client,
     dashboard_enabled: bool,
+    /// Adresse d'écoute à laquelle `Host` doit correspondre (anti rebinding DNS).
+    host_guard: Option<SocketAddr>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -1558,7 +1601,7 @@ async fn run(cli: Cli) -> Result<()> {
                 print!("{}", report.output);
             }
             if report.exit_code != 0 {
-                std::process::exit(report.exit_code);
+                std::process::exit(process_exit_code(report.exit_code));
             }
         }
         Commands::Json { input } => {
@@ -1644,7 +1687,7 @@ async fn run(cli: Cli) -> Result<()> {
             let report = run_native_command(&command)?;
             print!("{}", report.output);
             if report.exit_code != 0 {
-                std::process::exit(report.exit_code);
+                std::process::exit(process_exit_code(report.exit_code));
             }
         }
 
@@ -1693,13 +1736,44 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Commands::Smart {
             input,
+            ast,
             query,
             json,
             store,
         } => {
             let source = read_input(Some(input.as_path())).await?;
+            let fallback = if ast {
+                match smart_ast::summarize(&input, &source) {
+                    Ok(output) => {
+                        if json {
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&json!({
+                                    "content_type": "source_code",
+                                    "original_bytes": source.len(),
+                                    "compressed_bytes": output.len(),
+                                    "bytes_saved": source.len().saturating_sub(output.len()),
+                                    "original_tokens": source.len() as f64 / 4.0,
+                                    "compressed_tokens": output.len() as f64 / 4.0,
+                                    "token_count_method": "approximate",
+                                    "tokenizer": "bytes/4",
+                                    "steps_applied": ["smart_ast"],
+                                    "cache_keys": [],
+                                    "output": output
+                                }))?
+                            );
+                        } else {
+                            print!("{output}");
+                        }
+                        return Ok(());
+                    }
+                    Err(reason) => Some(reason.marker()),
+                }
+            } else {
+                None
+            };
             let store = open_store(store)?;
-            let (report, advice) = compress_with_optional_advice(
+            let (mut report, advice) = compress_with_optional_advice(
                 &source,
                 Some(input.as_path()),
                 &query,
@@ -1708,6 +1782,13 @@ async fn run(cli: Cli) -> Result<()> {
                 None,
                 true,
             )?;
+            if let Some(marker) = fallback {
+                report.output.insert_str(0, marker);
+                report.compressed_bytes = report.output.len();
+                report.bytes_saved = source.len().saturating_sub(report.output.len());
+                report.tokens = TokenCounts::measure(&source, &report.output);
+                report.steps_applied.insert(0, "smart_ast:fallback".into());
+            }
             if json {
                 let mut value = serde_json::to_value(&report)?;
                 if let Some(advice) = advice {
@@ -1786,7 +1867,7 @@ async fn run(cli: Cli) -> Result<()> {
                 print!("{}", report.output);
             }
             if exit_code != 0 {
-                std::process::exit(exit_code);
+                std::process::exit(process_exit_code(exit_code));
             }
         }
         Commands::Expand { input } => {
@@ -1802,7 +1883,7 @@ async fn run(cli: Cli) -> Result<()> {
             let report = run_exec_command(&command, "", false, false, store.as_deref())?;
             print!("{}", report.output);
             if report.exit_code != 0 {
-                std::process::exit(report.exit_code);
+                std::process::exit(process_exit_code(report.exit_code));
             }
         }
         Commands::Exec {
@@ -1825,7 +1906,7 @@ async fn run(cli: Cli) -> Result<()> {
                 eprintln!("\n[lm-resizer filtered output]\n{}", report.output);
             }
             if exit_code != 0 {
-                std::process::exit(exit_code);
+                std::process::exit(process_exit_code(exit_code));
             }
         }
         Commands::ToolOutput {
@@ -1855,6 +1936,11 @@ async fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 print!("{}", report.output);
+            }
+            // Comme `exec` et `pipe` : le processus sort avec le code de la commande d'origine.
+            if exit_code != 0 {
+                std::io::stdout().flush()?;
+                std::process::exit(process_exit_code(exit_code));
             }
         }
         Commands::Rewrite { json, command } => {
@@ -2328,9 +2414,19 @@ async fn run(cli: Cli) -> Result<()> {
             event,
             json,
         } => {
+            // Le nom du client est lu sans tenir compte de la casse (`Cursor`, `CURSOR`).
+            let client = client.to_ascii_lowercase();
             // PreToolUse: rewrite a supported Bash command to run through `lm-resizer exec --`
             // (in-place output substitution, the native role). PostToolUse: measure-only telemetry.
-            if event.eq_ignore_ascii_case("PreToolUse") || event == "BeforeTool" {
+            if event == "Capabilities" {
+                // Side-effect-free handshake for clients requiring these contracts.
+                println!(
+                    "{}",
+                    json!({"hook_capabilities": {
+                        "schema_version": 1, "live_commands_raw": true, "launch_failure_status": true
+                    }})
+                );
+            } else if event.eq_ignore_ascii_case("PreToolUse") || event == "BeforeTool" {
                 emit_pretooluse_rewrite(&event, &client);
             } else {
                 let report = run_native_hook(&client, &event);
@@ -2390,7 +2486,15 @@ async fn run(cli: Cli) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!("Removed {} lm-resizer hook blocks", report.removed);
+                let plural = |count: usize, word: &str| {
+                    format!("{count} {word}{}", if count == 1 { "" } else { "s" })
+                };
+                println!(
+                    "Removed {}, {} and {}",
+                    plural(report.removed, "instruction block"),
+                    plural(report.helpers_removed.len(), "helper file"),
+                    plural(report.native_files_removed.len(), "native hook file")
+                );
                 for file in report.instruction_files {
                     println!("  updated {file}");
                 }
@@ -2412,24 +2516,50 @@ async fn run(cli: Cli) -> Result<()> {
             project_dir,
             store,
         } => install_mcp(&client, &scope, project_dir, store)?,
+        Commands::Uninstall {
+            client,
+            scope,
+            project_dir,
+        } => uninstall_mcp(&client, &scope, project_dir)?,
         Commands::Serve {
             bind,
             upstream,
             api_key,
+            api_key_file,
+            allow_non_loopback,
             provider,
             store,
             dashboard,
-        } => run_http(bind, upstream, api_key, provider.parse()?, store, dashboard).await?,
+        } => {
+            warn_if_api_key_on_command_line();
+            ensure_loopback_bind(bind, allow_non_loopback)?;
+            let api_key = resolve_api_key(api_key, api_key_file)?;
+            run_http(
+                bind,
+                upstream,
+                api_key,
+                provider.parse()?,
+                store,
+                dashboard,
+                allow_non_loopback,
+            )
+            .await?
+        }
         Commands::Wrap {
             agent,
             args,
             bind,
             upstream,
             api_key,
+            api_key_file,
+            allow_non_loopback,
             provider,
             store,
             timeout_sec,
         } => {
+            warn_if_api_key_on_command_line();
+            ensure_loopback_bind(bind, allow_non_loopback)?;
+            let api_key = resolve_api_key(api_key, api_key_file)?;
             wrap_agent(
                 agent,
                 args,
@@ -2439,6 +2569,7 @@ async fn run(cli: Cli) -> Result<()> {
                 provider.parse()?,
                 store,
                 timeout_sec,
+                allow_non_loopback,
             )
             .await?
         }
@@ -2456,6 +2587,153 @@ async fn read_input(path: Option<&Path>) -> Result<String> {
     let mut stdin = tokio::io::stdin();
     tokio::io::AsyncReadExt::read_to_string(&mut stdin, &mut input).await?;
     Ok(input)
+}
+
+/// Crée `dir` et ses parents manquants. Sous Unix, chaque dossier créé est en 0700 : l'état
+/// contient les lignes de commande et les sorties brutes, lisibles sinon selon le umask.
+fn create_private_dir_all(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)
+    }
+}
+
+/// Ouvre `path` en ajout ; un fichier créé ici l'est en 0600 sous Unix. Sous Unix, un lien
+/// symbolique n'est jamais suivi (`O_NOFOLLOW`), le fichier ouvert doit être ordinaire, à un seul
+/// lien et à soi (sinon rien n'y est écrit), et un mode trop ouvert est resserré à 0600 (voir
+/// [`refuse_unless_private`]).
+fn open_private_append(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+        );
+        let file = options
+            .open(path)
+            .map_err(|error| refused_open(path, error))?;
+        refuse_unless_private(&file, path, LooseMode::Tighten)?;
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    {
+        options.open(path)
+    }
+}
+
+/// Refus d'un fichier d'état : erreur `PermissionDenied` sans code système, qui nomme le fichier.
+#[cfg(unix)]
+fn refused_state_file(path: &Path, why: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!("{} {why}", path.display()),
+    )
+}
+
+/// Erreur d'ouverture sans suivre de lien : lien symbolique (`ELOOP`), FIFO sans lecteur
+/// (`ENXIO`) et dossier (`EISDIR`) deviennent des refus nommés.
+#[cfg(unix)]
+fn refused_open(path: &Path, error: std::io::Error) -> std::io::Error {
+    match error.raw_os_error() {
+        Some(code) if code == rustix::io::Errno::LOOP.raw_os_error() => {
+            refused_state_file(path, "est un lien symbolique")
+        }
+        Some(code)
+            if code == rustix::io::Errno::ISDIR.raw_os_error()
+                || code == rustix::io::Errno::NXIO.raw_os_error() =>
+        {
+            refused_state_file(path, "n'est pas un fichier ordinaire")
+        }
+        _ => error,
+    }
+}
+
+/// Que faire d'un fichier d'état à soi, ordinaire, à un seul lien, dont seul le mode est trop
+/// ouvert.
+#[cfg(unix)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LooseMode {
+    /// Le resserrer à 0600 sur le descripteur déjà contrôlé (`fchmod`) : historique, journaux,
+    /// base CCR (décision du 10 octobre 2026).
+    Tighten,
+    /// Le refuser : archive tee (point 7 de l'audit du 9 octobre).
+    Refuse,
+}
+
+/// Un fichier d'état ouvert n'est utilisé que s'il est ordinaire, à un seul lien et à l'utilisateur
+/// courant ; sinon il est refusé. Ouvert au groupe ou aux autres, il est resserré ou refusé selon
+/// `loose`. Contrôle sur le descripteur, pas sur le chemin.
+#[cfg(unix)]
+fn refuse_unless_private(
+    file: &std::fs::File,
+    path: &Path,
+    loose: LooseMode,
+) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    if !metadata.file_type().is_file() {
+        return Err(refused_state_file(path, "n'est pas un fichier ordinaire"));
+    }
+    if metadata.nlink() != 1 {
+        return Err(refused_state_file(
+            path,
+            &format!("a {} liens durs", metadata.nlink()),
+        ));
+    }
+    if metadata.uid() != rustix::process::geteuid().as_raw() {
+        return Err(refused_state_file(path, "appartient à un autre compte"));
+    }
+    if metadata.mode() & 0o077 != 0 {
+        if loose == LooseMode::Tighten {
+            use std::os::unix::fs::PermissionsExt;
+            return file.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        return Err(refused_state_file(
+            path,
+            &format!(
+                "a le mode {:o}, ouvert au groupe ou aux autres",
+                metadata.mode() & 0o777
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Un fichier d'état qui existe peut-être déjà (`-wal`, `-shm` de la base CCR) : ouvert sans le
+/// créer ni suivre de lien, mêmes contrôles, mode resserré.
+#[cfg(unix)]
+fn secure_existing_state_file(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    if std::fs::symlink_metadata(path).is_err() {
+        return Ok(());
+    }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .open(path)
+        .map_err(|error| refused_open(path, error))?;
+    refuse_unless_private(&file, path, LooseMode::Tighten)
+}
+
+/// Écrit `bytes` dans `path` (hors Unix ; sous Unix, voir [`write_private_archive`]).
+#[cfg(not(unix))]
+fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)?
+        .write_all(bytes)
 }
 
 fn default_store_path() -> Result<PathBuf> {
@@ -2480,7 +2758,18 @@ fn default_state_dir() -> Result<PathBuf> {
 fn open_store(path: Option<PathBuf>) -> Result<Box<dyn CcrStore>> {
     let path = path.unwrap_or(default_store_path()?);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        create_private_dir_all(parent)?;
+    }
+    // Créée vide en 0600 avant SQLite (ses fichiers `-wal` et `-shm` héritent de ce mode), ou
+    // contrôlée si elle existe : jamais à travers un lien symbolique ni un lien dur, jamais à un
+    // autre compte, mode resserré à 0600 (avant : `exists()` suivait le lien, et une base en 0644
+    // le restait). Les `-wal` et `-shm` déjà présents passent les mêmes contrôles.
+    open_private_append(&path)?;
+    #[cfg(unix)]
+    for suffix in ["-wal", "-shm"] {
+        let mut companion = path.clone().into_os_string();
+        companion.push(suffix);
+        secure_existing_state_file(Path::new(&companion))?;
     }
     let cfg = CcrBackendConfig::sqlite_default(path);
     Ok(from_config(&cfg)?)
@@ -2517,8 +2806,17 @@ fn open_store_or_warn(path: Option<PathBuf>) -> Option<Box<dyn CcrStore>> {
         .unwrap_or_else(|| PathBuf::from("lm-resizer"));
     match open_store(path) {
         Ok(store) => Some(store),
-        Err(_) => {
-            warn_state_unwritable(&shown);
+        Err(error) => {
+            match error.downcast_ref::<std::io::Error>() {
+                // Refus nommé (lien, lien dur, autre compte, type) : l'erreur n'a pas de code système.
+                Some(io)
+                    if io.kind() == std::io::ErrorKind::PermissionDenied
+                        && io.raw_os_error().is_none() =>
+                {
+                    eprintln!("lm-resizer: base CCR refusée, réduction sans base : {io}");
+                }
+                _ => warn_state_unwritable(&shown),
+            }
             None
         }
     }
@@ -2892,20 +3190,10 @@ fn run_inspected_command(
                 "native:observe".into(),
                 inspection_views::summarize(mode, &raw, captured.code),
             )
+        } else if successful_test_run(command, captured.code) {
+            ("lossless:test-success".to_string(), raw.clone())
         } else {
-            let (filter, view) = filter_command_output(command, &raw);
-            if filter == "lossless:generic" {
-                (
-                    "generic:summary".into(),
-                    inspection_views::summarize(
-                        inspection_views::Mode::Summary,
-                        &raw,
-                        captured.code,
-                    ),
-                )
-            } else {
-                (filter, view)
-            }
+            filter_executed_command_output(command, &raw)
         }
     };
     let filter = if filter.starts_with("native:")
@@ -2915,6 +3203,13 @@ fn run_inspected_command(
         filter
     } else {
         format!("native:{filter}")
+    };
+    // Garde finale : une vue qui perd un hash de commit ou un sujet est remplacée par le brut.
+    let filter = if mode.is_none() && command_views::lost_git_identity(&raw, &output) {
+        output = raw.clone();
+        "native:git-identity-guard".to_string()
+    } else {
+        filter
     };
     let filtered_bytes = output.len();
     let mut compression_steps = Vec::new();
@@ -2930,6 +3225,11 @@ fn run_inspected_command(
         }
     }
     if !matches!(mode, Some(inspection_views::Mode::Raw)) {
+        // Une vue raccourcie finit par un retour à la ligne (l'invite ne se colle pas à sa dernière
+        // ligne) ; une sortie rendue à l'identique garde ses octets.
+        if output != raw && !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
         prepend_failure_status(&mut output, captured.code);
     }
     let tee_hint = archive_raw_bytes(&captured.raw)?;
@@ -2966,29 +3266,31 @@ fn run_exec_command(
         return run_inspected_command(command, None, store, query);
     }
     let started = Instant::now();
-    let (program, args) = command.split_first().context("missing command for exec")?;
-    let resolved_program = resolve_command_path(program).unwrap_or_else(|| PathBuf::from(program));
-    let (exit_code, raw_bytes, streams) = if stream {
-        run_command_streaming(&resolved_program, args, &command.join(" "))?
-    } else {
-        let output = command_capture::build_command(&resolved_program, args)
-            .stdin(Stdio::inherit())
-            .output()
-            .with_context(|| format!("failed to execute '{}'", command.join(" ")))?;
-        (
-            child_exit_code(output.status),
-            combine_command_bytes(&output.stdout, &output.stderr),
-            CapturedStreams::new(&output.stdout, &output.stderr),
-        )
-    };
-
-    let raw = display_captured_bytes(&raw_bytes);
+    let captured = command_capture::run_separated(command, stream)?;
+    let exit_code = captured.code;
+    let raw_bytes = captured.raw;
+    let view_bytes = captured
+        .streams
+        .as_ref()
+        .map(|streams| combine_command_bytes(&streams.stdout, &streams.stderr))
+        .unwrap_or_else(|| raw_bytes.clone());
+    let streams = captured
+        .streams
+        .as_ref()
+        .map(|streams| CapturedStreams::new(&streams.stdout, &streams.stderr));
+    let launch_error = captured.launch_error;
+    let failed_to_launch = launch_error.is_some();
+    let raw = launch_error.unwrap_or_else(|| display_captured_bytes(&view_bytes));
     perf_stage("capture", started.elapsed());
     let phase = Instant::now();
-    let (filter, mut filtered) = if raw_on_failure && exit_code != 0 {
+    let (filter, mut filtered) = if failed_to_launch {
+        ("native:launch-error".to_string(), raw.clone())
+    } else if raw_on_failure && exit_code != 0 {
         ("raw_on_failure".to_string(), raw.clone())
+    } else if successful_test_run(command, exit_code) {
+        ("lossless:test-success".to_string(), raw.clone())
     } else {
-        filter_command_output(command, &raw)
+        filter_executed_command_output(command, &raw)
     };
     if !raw.trim().is_empty() && filtered.trim().is_empty() {
         filtered = raw.clone();
@@ -3067,9 +3369,17 @@ fn run_exec_command(
     }
     // La pipeline peut réduire une sortie que le filtre n'a pas modifiée.
     // Le tee doit couvrir les omissions de toutes les étapes d'exec.
-    let tee_hint = tee_raw_bytes_if_useful(&raw_bytes, &compressed.output)?;
+    if command_views::lost_git_identity(&raw, &compressed.output) {
+        compressed.output = raw.clone();
+        compressed.steps_applied.clear();
+        compressed.cache_keys.clear();
+    }
+    let tee_hint = archive_raw_bytes(&raw_bytes)?;
     let mut final_output = compressed.output;
-    if streams.stdout_bytes > 0 && streams.stderr_bytes > 0 {
+    if streams
+        .as_ref()
+        .is_some_and(|streams| streams.stdout_bytes > 0 && streams.stderr_bytes > 0)
+    {
         if !final_output.ends_with('\n') {
             final_output.push('\n');
         }
@@ -3083,15 +3393,15 @@ fn run_exec_command(
     perf_stage("tee", phase.elapsed());
     let phase = Instant::now();
     let report = ExecReport {
-        streams: Some(streams),
+        streams,
         tokens: TokenCounts::measure(&raw, &final_output),
         command: command.join(" "),
         exit_code,
         filter,
-        original_bytes: raw_bytes.len(),
+        original_bytes: view_bytes.len(),
         filtered_bytes: filtered.len(),
         compressed_bytes: final_output.len(),
-        bytes_saved: raw_bytes.len().saturating_sub(final_output.len()),
+        bytes_saved: view_bytes.len().saturating_sub(final_output.len()),
         compression_steps: compressed.steps_applied,
         cache_keys: compressed.cache_keys,
         tee_hint,
@@ -3113,16 +3423,10 @@ fn process_captured_output(
     let keep_raw = raw_on_failure && exit_code != 0;
     let (filter, mut filtered) = if keep_raw {
         ("raw_on_failure".to_string(), raw.to_string())
+    } else if successful_test_run(command, exit_code) {
+        ("lossless:test-success".to_string(), raw.to_string())
     } else {
-        let (filter, view) = filter_command_output(command, raw);
-        if filter == "lossless:generic" {
-            (
-                "generic:summary".into(),
-                inspection_views::summarize(inspection_views::Mode::Summary, raw, exit_code),
-            )
-        } else {
-            (filter, view)
-        }
+        filter_command_output(command, raw)
     };
     if !raw.trim().is_empty() && filtered.trim().is_empty() {
         filtered = raw.to_string();
@@ -3165,6 +3469,12 @@ fn process_captured_output(
         steps.clear();
         keys.clear();
     }
+    // Garde finale : une vue qui perd un hash de commit ou un sujet est remplacée par le brut.
+    if !keep_raw && command_views::lost_git_identity(raw, &output) {
+        output = raw.to_string();
+        steps.clear();
+        keys.clear();
+    }
     if output != raw {
         let key = lm_resizer_core::ccr::compute_key(raw.as_bytes());
         store.put(&key, raw);
@@ -3172,6 +3482,11 @@ fn process_captured_output(
             output = output.replace(&format!("hash={intermediate}]"), &format!("hash={key}]"));
         }
         keys = vec![key];
+    }
+    // Une vue raccourcie finit par un retour à la ligne (l'invite ne se colle pas à sa dernière
+    // ligne) ; une sortie rendue à l'identique garde ses octets.
+    if output != raw && !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
     }
     prepend_failure_status(&mut output, exit_code);
     Ok(ExecReport {
@@ -3191,6 +3506,42 @@ fn process_captured_output(
     })
 }
 
+/// Un lanceur de tests (voir [`test_views::runner`]), direct ou seul derrière `sh -c`, s'est
+/// terminé par le code 0 : sa sortie est rendue intacte (`lossless:test-success`). Décision lue dans
+/// l'`argv` et le code de sortie, jamais dans le contenu de la sortie.
+fn successful_test_run(command: &[String], exit_code: i32) -> bool {
+    if exit_code != 0 {
+        return false;
+    }
+    if command.len() == 3
+        && matches!(
+            command_basename(&command[0]).as_str(),
+            "bash" | "sh" | "zsh"
+        )
+        && matches!(command[1].as_str(), "-c" | "-lc")
+    {
+        if let [ShellToken::Segment(segment)] = split_shell_operators(&command[2]).as_slice() {
+            if let Some(words) = split_shell_words(segment) {
+                return test_views::runner(&words).is_some();
+            }
+        }
+    }
+    test_views::runner(command).is_some()
+}
+
+/// Code de sortie du processus pour le code `code` de la commande. Sous Unix, seul l'octet bas
+/// d'un code de sortie survit : `256` deviendrait `0`, un succès. Un code non nul garde son octet
+/// bas s'il n'est pas nul, `1` sinon (`-1` → 255, `256` → 1). Le rapport JSON garde le code donné.
+fn process_exit_code(code: i32) -> i32 {
+    if code == 0 || !cfg!(unix) {
+        return code;
+    }
+    match code.rem_euclid(256) {
+        0 => 1,
+        low => low,
+    }
+}
+
 fn prepend_failure_status(output: &mut String, exit_code: i32) {
     if exit_code != 0
         && !output.starts_with("[FAIL] Command failed (exit code: ")
@@ -3201,63 +3552,6 @@ fn prepend_failure_status(output: &mut String, exit_code: i32) {
             &format!("[FAIL] Command failed (exit code: {exit_code})\n"),
         );
     }
-}
-
-fn run_command_streaming(
-    program: &Path,
-    args: &[String],
-    display: &str,
-) -> Result<(i32, Vec<u8>, CapturedStreams)> {
-    let mut child = command_capture::build_command(program, args)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("failed to execute '{display}'"))?;
-
-    let stdout = child.stdout.take().context("failed to capture stdout")?;
-    let stderr = child.stderr.take().context("failed to capture stderr")?;
-    let streams = std::thread::scope(|scope| {
-        let workers = [
-            scope.spawn(|| stream_reader(stdout, false)),
-            scope.spawn(|| stream_reader(stderr, true)),
-        ];
-        workers
-            .into_iter()
-            .map(|worker| {
-                worker
-                    .join()
-                    .map_err(|_| anyhow::anyhow!("output capture worker panicked"))?
-            })
-            .collect::<Result<Vec<_>>>()
-    })?;
-    let status = child.wait()?;
-    Ok((
-        child_exit_code(status),
-        combine_command_bytes(&streams[0], &streams[1]),
-        CapturedStreams::new(&streams[0], &streams[1]),
-    ))
-}
-
-fn stream_reader<R: std::io::Read>(reader: R, stderr: bool) -> Result<Vec<u8>> {
-    let mut reader = std::io::BufReader::new(reader);
-    let mut captured = Vec::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        let read = std::io::Read::read(&mut reader, &mut buf)?;
-        if read == 0 {
-            break;
-        }
-        captured.extend_from_slice(&buf[..read]);
-        if stderr {
-            std::io::stderr().write_all(&buf[..read])?;
-            std::io::stderr().flush()?;
-        } else {
-            std::io::stdout().write_all(&buf[..read])?;
-            std::io::stdout().flush()?;
-        }
-    }
-    Ok(captured)
 }
 
 fn child_exit_code(status: std::process::ExitStatus) -> i32 {
@@ -3284,6 +3578,25 @@ fn combine_command_bytes(stdout: &[u8], stderr: &[u8]) -> Vec<u8> {
 }
 
 fn display_captured_bytes(bytes: &[u8]) -> String {
+    // Decode only a complete, valid BOM-tagged UTF-16 capture. The tee always
+    // retains the original bytes, including the BOM and Windows line endings.
+    let utf16_le = bytes.starts_with(&[0xff, 0xfe]);
+    let utf16_be = bytes.starts_with(&[0xfe, 0xff]);
+    if (utf16_le || utf16_be) && bytes.len().is_multiple_of(2) {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|pair| {
+                if utf16_le {
+                    u16::from_le_bytes([pair[0], pair[1]])
+                } else {
+                    u16::from_be_bytes([pair[0], pair[1]])
+                }
+            })
+            .collect();
+        if let Ok(text) = String::from_utf16(&units) {
+            return text;
+        }
+    }
     if let Ok(text) = std::str::from_utf8(bytes) {
         return text.to_string();
     }
@@ -3342,7 +3655,12 @@ fn rewrite_command_report(command: &[String]) -> RewriteReport {
     }
 
     let (filter, _) = filter_command_output(command, "");
-    let supported = !matches!(filter.as_str(), "none" | "generic" | "lossless:generic");
+    // N'est réécrite qu'une commande qu'une vue réduit vraiment. Un filtre `lossless:*` rend la
+    // sortie telle quelle (script choisi par l'utilisateur, sortie des tests demandée, identité),
+    // `git-passthrough` aussi : l'enveloppe n'y gagnerait rien et retiendrait la sortie jusqu'à la
+    // fin du processus (invite d'identifiants, journal d'un serveur).
+    let supported = !matches!(filter.as_str(), "none" | "generic" | "git-passthrough")
+        && !filter.starts_with("lossless:");
     let mut argv = vec![
         "lm-resizer".to_string(),
         "exec".to_string(),
@@ -3360,7 +3678,58 @@ fn rewrite_command_report(command: &[String]) -> RewriteReport {
     }
 }
 
+/// Rogne les espaces de bord d'un segment de commande, sauf une espace échappée finale : dans
+/// `ls dossier\ ` la dernière espace fait partie du mot (le shell lit `dossier `), la rogner
+/// laisserait une barre oblique inverse en fin de ligne.
+fn trim_shell(text: &str) -> &str {
+    let start = text.trim_start();
+    let end = start.trim_end();
+    let backslashes = end.bytes().rev().take_while(|byte| *byte == b'\\').count();
+    if backslashes % 2 == 1 && end.len() < start.len() {
+        if let Some(next) = start[end.len()..].chars().next() {
+            return &start[..end.len() + next.len_utf8()];
+        }
+    }
+    end
+}
+
+/// Vrai si la ligne contient une nouvelle ligne hors citation (ou une barre oblique inverse
+/// devant une nouvelle ligne) : pour le shell c'est un séparateur de commandes ou une
+/// continuation, que la reconstruction segment par segment ne sait pas reproduire.
+fn has_unquoted_newline(command: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for ch in trim_shell(command).chars() {
+        if matches!(ch, '\n' | '\r') && (escaped || (!in_single && !in_double)) {
+            return true;
+        }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn rewrite_shell_report(command: &str) -> RewriteShellReport {
+    // Une nouvelle ligne séparant deux commandes serait perdue par la reconstruction (les
+    // segments sont rognés) : `A \n && B` est une erreur de syntaxe pour le shell, mais la ligne
+    // réécrite `A && B` exécuterait B. Dans le doute, la ligne reste telle quelle.
+    if has_unquoted_newline(command) {
+        return RewriteShellReport {
+            command: command.to_string(),
+            changed: false,
+            rewritten: trim_shell(command).to_string(),
+            rewrites: Vec::new(),
+        };
+    }
     let tokens = split_shell_operators(command);
     let mut output = String::new();
     let mut rewrites = Vec::new();
@@ -3377,7 +3746,7 @@ fn rewrite_shell_report(command: &str) -> RewriteShellReport {
                 after_pipe = operator_consumes_output(op);
             }
             ShellToken::Segment(segment) => {
-                let trimmed = segment.trim();
+                let trimmed = trim_shell(segment);
                 if trimmed.is_empty() {
                     continue;
                 }
@@ -3410,13 +3779,19 @@ fn rewrite_shell_report(command: &str) -> RewriteShellReport {
 
     // Aucun segment réécrit : rendre la ligne d'origine, sans normaliser les espaces.
     let rewritten = if rewrites.is_empty() {
-        command.trim().to_string()
+        trim_shell(command).to_string()
     } else {
-        output.trim().to_string()
+        // `output` se termine par l'espace de séparation ajoutée ci-dessus, pas par une espace
+        // échappée d'origine : la retirer seule, sans rogner davantage.
+        let mut text = output;
+        if text.ends_with(' ') {
+            text.pop();
+        }
+        text.trim_start().to_string()
     };
     RewriteShellReport {
         command: command.to_string(),
-        changed: rewritten != command.trim(),
+        changed: rewritten != trim_shell(command),
         rewritten,
         rewrites,
     }
@@ -3432,9 +3807,11 @@ fn rewrite_shell_segment(segment: &str) -> Option<(String, String)> {
     if segment_must_not_be_rewritten(segment) {
         return None;
     }
-    let args = split_shell_words(segment.trim())?;
-    // `shell_join` ne sait pas rendre des apostrophes. Un mot `$(...)` ou `` `...` ``
-    // qui était littéral le redeviendrait une substitution entre guillemets doubles.
+    let segment = trim_shell(segment);
+    // Découpage POSIX strict : s'il refuse la ligne (citation non fermée, opérateur non cité,
+    // commentaire, nouvelle ligne), la ligne d'origine reste telle quelle.
+    let args = posix_split(segment)?;
+    // Un mot `$(...)` ou `` `...` `` qui était littéral ne doit jamais devenir une substitution.
     if args
         .iter()
         .any(|word| word.contains("$(") || word.contains('`'))
@@ -3442,8 +3819,140 @@ fn rewrite_shell_segment(segment: &str) -> Option<(String, String)> {
         return None;
     }
     let report = rewrite_command_report(&args);
-    let rewritten = report.rewritten?;
+    let rewritten_args = report.rewritten.as_ref()?;
+    let rewritten = if report.argv.first().map(String::as_str) == Some("lm-resizer")
+        && report.argv.get(1).map(String::as_str) == Some("exec")
+    {
+        // Enveloppe d'une commande inchangée : les octets d'origine sont recollés tels
+        // quels, comme le fait le hook. Aucun mot n'est re-cité, donc aucune citation
+        // ne peut être cassée ni une expansion (`$HOME`, `*.rs`) figée.
+        let wrapped = format!("lm-resizer exec -- {segment}");
+        let mut expected = vec![
+            "lm-resizer".to_string(),
+            "exec".to_string(),
+            "--".to_string(),
+        ];
+        expected.extend(args.iter().cloned());
+        if posix_split(&wrapped).as_ref() != Some(&expected) {
+            return None;
+        }
+        wrapped
+    } else {
+        // Commande construite à partir de données (`head -n 1 FICHIER` devient
+        // `lm-resizer read FICHIER --head-lines 1`) : les arguments sont re-cités en
+        // apostrophes POSIX, seulement s'ils sont des littéraux, et la chaîne produite doit
+        // se redécouper en exactement ces arguments.
+        if segment_has_expansion(segment) {
+            return None;
+        }
+        if posix_split(rewritten_args).as_ref() != Some(&report.argv) {
+            return None;
+        }
+        rewritten_args.clone()
+    };
     Some((rewritten, report.filter))
+}
+
+/// Vrai si le shell interpréterait quelque chose dans ce segment (variable, substitution,
+/// globbing, tilde, accolades) : ses mots ne sont alors pas des littéraux.
+fn segment_has_expansion(segment: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for ch in segment.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '$' | '`' if !in_single => return true,
+            '*' | '?' | '[' | '{' | '~' if !in_single && !in_double => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Découpage POSIX strict d'une ligne de commande simple, sans aucune expansion : les
+/// mots rendus sont les octets que verrait le programme si le texte ne contenait ni `$` ni
+/// glob. Refuse (`None`) tout ce qui n'est pas un mot ordinaire : citation non fermée,
+/// nouvelle ligne ou opérateur non cité, commentaire, parenthèse, barre oblique inverse
+/// finale.
+fn posix_split(text: &str) -> Option<Vec<String>> {
+    #[derive(PartialEq)]
+    enum State {
+        Plain,
+        Single,
+        Double,
+    }
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut state = State::Plain;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match state {
+            State::Single => {
+                if ch == '\'' {
+                    state = State::Plain;
+                } else {
+                    current.push(ch);
+                }
+            }
+            State::Double => match ch {
+                '"' => state = State::Plain,
+                '\\' => match chars.next()? {
+                    '\n' => return None,
+                    next @ ('$' | '`' | '"' | '\\') => current.push(next),
+                    next => {
+                        current.push('\\');
+                        current.push(next);
+                    }
+                },
+                _ => current.push(ch),
+            },
+            State::Plain => match ch {
+                ' ' | '\t' => {
+                    if in_word {
+                        words.push(std::mem::take(&mut current));
+                        in_word = false;
+                    }
+                }
+                '\n' | '\r' | ';' | '&' | '|' | '<' | '>' | '(' | ')' => return None,
+                '#' if !in_word => return None,
+                '\'' => {
+                    state = State::Single;
+                    in_word = true;
+                }
+                '"' => {
+                    state = State::Double;
+                    in_word = true;
+                }
+                '\\' => {
+                    let next = chars.next()?;
+                    if next == '\n' {
+                        return None;
+                    }
+                    current.push(next);
+                    in_word = true;
+                }
+                _ => {
+                    current.push(ch);
+                    in_word = true;
+                }
+            },
+        }
+    }
+    if state != State::Plain {
+        return None;
+    }
+    if in_word {
+        words.push(current);
+    }
+    Some(words)
 }
 
 fn split_trailing_redirects(segment: &str) -> (&str, &str) {
@@ -3576,7 +4085,7 @@ fn split_shell_operators(command: &str) -> Vec<ShellToken> {
 
 fn push_shell_segment(tokens: &mut Vec<ShellToken>, segment: &str) {
     if !segment.trim().is_empty() {
-        tokens.push(ShellToken::Segment(segment.trim().to_string()));
+        tokens.push(ShellToken::Segment(trim_shell(segment).to_string()));
     }
 }
 
@@ -3627,19 +4136,25 @@ fn split_shell_words(segment: &str) -> Option<Vec<String>> {
     Some(words)
 }
 
+/// Cite un argument pour un shell POSIX : tel quel s'il ne contient que des caractères
+/// sans signification pour le shell, sinon entre apostrophes (`'` devient `'\''`). Rien
+/// n'est interprété entre apostrophes, ni `\`, ni `"`, ni `$`.
+fn shell_quote(arg: &str) -> String {
+    if !arg.is_empty()
+        && arg.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '-' | '_' | '.' | '/' | ':' | ',' | '+' | '@' | '%' | '=')
+        })
+    {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\\''"))
+    }
+}
+
 fn shell_join(args: &[String]) -> String {
     args.iter()
-        .map(|arg| {
-            if arg.is_empty() {
-                String::from("\"\"")
-            } else if arg.chars().all(|c| {
-                c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '\\' | ':')
-            }) {
-                arg.clone()
-            } else {
-                format!("\"{}\"", arg.replace('"', "\\\""))
-            }
-        })
+        .map(|arg| shell_quote(arg))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -3648,7 +4163,54 @@ fn pipe_filter_command(name: &str) -> Option<Vec<String>> {
     command_views::pipe_command(name)
 }
 
+/// Lanceur d'une recette ou d'un script choisi par l'utilisateur : `make`/`gmake` (toute cible),
+/// `npm|pnpm|yarn|bun run|test|start|stop|restart` (ou une option inconnue avant la sous-commande),
+/// `cargo run`, `go run`, `uv|poetry|pipenv|pdm|hatch|rye run`, `just`, `task`. La recette peut
+/// produire n'importe quoi, `git log` compris : aucun format n'est établi, la sortie est rendue
+/// brute. Un lanceur de tests nommé dans l'argv (`npm run vitest`, `uv run pytest`) est reconnu
+/// avant, par `test_views::runner`.
+fn runs_a_user_script(command: &[String]) -> bool {
+    let Some(program) = command.first().map(|p| command_basename(p)) else {
+        return false;
+    };
+    let sub = command.get(1).map(String::as_str).unwrap_or("");
+    match program.as_str() {
+        "make" | "gmake" | "just" | "task" => true,
+        // Sous-commande lue après les options ; une option inconnue la rend illisible : script.
+        "npm" | "pnpm" | "yarn" | "bun" => test_views::package_manager_subcommand(&command[1..])
+            .is_none_or(|sub| {
+                matches!(
+                    sub,
+                    "run"
+                        | "run-script"
+                        | "rum"
+                        | "urn"
+                        | "test"
+                        | "t"
+                        | "tst"
+                        | "start"
+                        | "stop"
+                        | "restart"
+                )
+            }),
+        "cargo" | "go" => sub == "run",
+        "uv" | "poetry" | "pipenv" | "pdm" | "hatch" | "rye" => sub == "run",
+        _ => false,
+    }
+}
+
+/// Vue d'une sortie déjà produite (tube, `tool-output`, hook, découverte) : la commande n'est pas
+/// lancée par nous, rien ne prouve son format.
 fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
+    filter_command_output_as(command, raw, false)
+}
+
+/// Vue de la sortie d'une commande que `lm-resizer` lance lui-même (`exec`).
+fn filter_executed_command_output(command: &[String], raw: &str) -> (String, String) {
+    filter_command_output_as(command, raw, true)
+}
+
+fn filter_command_output_as(command: &[String], raw: &str, executed: bool) -> (String, String) {
     // Only unwrap a single simple shell command. Never execute/rewrite the
     // shell expression, nor guess the producer of pipelines or compound lists.
     if command.len() == 3
@@ -3661,9 +4223,46 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
         if let [ShellToken::Segment(segment)] = split_shell_operators(&command[2]).as_slice() {
             if let Some(words) = split_shell_words(segment) {
                 if !words.is_empty() {
-                    return filter_command_output(&words, raw);
+                    // Une commande passée par un shell n'est pas un appel direct à git.
+                    return filter_command_output_as(&words, raw, false);
                 }
             }
+        }
+    }
+    // Lanceurs de tests : une seule reconnaissance, `test_views::runner`, la même que la porte
+    // « code 0 = brut ». Aucune route plus bas ne reconnaît un lanceur de tests.
+    if let Some(runner) = test_views::runner(command) {
+        if let Some(view) = test_runner_view(&runner, raw) {
+            return view;
+        }
+    }
+    if runs_a_user_script(command) {
+        return ("lossless:script-runner".to_string(), raw.to_string());
+    }
+    // Git : la sous-commande se lit après les options globales (`--no-pager`, `-C`, `-c`…). Une
+    // sous-commande sans vue native (liste de commits, alias, `branch`, `blame`…) reste brute :
+    // le résumé générique supprime des lignes sans signal, donc des entrées.
+    if command
+        .first()
+        .is_some_and(|program| command_basename(program) == "git")
+    {
+        match command_views::git_without_globals(command) {
+            Some(plain) if plain.get(1).map(String::as_str) == Some("log") => {
+                return command_views::git_log_filter(command, raw, executed);
+            }
+            Some(plain) if plain.as_slice() != command => {
+                return filter_command_output_as(&plain, raw, executed);
+            }
+            Some(plain)
+                if !matches!(
+                    plain.get(1).map(String::as_str),
+                    Some("log" | "diff" | "show" | "status")
+                ) =>
+            {
+                return ("git-passthrough".to_string(), raw.to_string());
+            }
+            None => return ("git-passthrough".to_string(), raw.to_string()),
+            Some(_) => {}
         }
     }
     if let Some(result) = command_views::filter(command, raw) {
@@ -3680,17 +4279,16 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
         return ("native_owned".to_string(), raw.to_owned());
     }
     // Never post-process a command covered by native: extra views apply only
-    // to other producers, after the exact pipe dispatch above.
+    // to other producers, after the exact pipe dispatch above. Le producteur n'est pas connu (script,
+    // `env …`, `timeout …`, commande assemblée) : seule une sortie entièrement structurée (un document
+    // JSON, au moins vingt lignes toutes préfixées par un niveau de journal) prend un codec où chaque
+    // ligne distincte reste visible. Les plis de chemins, le retrait des lignes `index` d'un diff et le
+    // contour de code réécrivent ou retirent des lignes : brut.
     if command_views::direct_args(command).is_none() {
         if let Some((name, view)) = structured_views::compress(raw) {
-            let filter = if name == "diff-metadata" {
-                "summary:diff-metadata".to_string()
-            } else if name == "code-outline:rust" {
-                "code-outline:rust".to_string()
-            } else {
-                format!("lossless:{name}")
-            };
-            return (filter, view);
+            if matches!(name, "json-table" | "json-compact" | "log-runs") {
+                return (format!("lossless:{name}"), view);
+            }
         }
     }
     if command_requests_json(command) && serde_json::from_str::<Value>(raw).is_ok() {
@@ -3703,6 +4301,12 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
     if name == "generic" {
         return ("lossless:generic".to_string(), output);
     }
+    guard_routed_output(name, raw, output)
+}
+
+/// Gardes d'une vue de route : séparation stdout/stderr perdue, ligne d'échec perdue, vue plus
+/// longue que le brut. Chaque cas rend le brut.
+fn guard_routed_output(name: String, raw: &str, output: String) -> (String, String) {
     if raw.lines().any(|line| line == "[stderr]") && !output.lines().any(|line| line == "[stderr]")
     {
         return (format!("{name}:stream-guard"), raw.to_string());
@@ -3717,6 +4321,38 @@ fn filter_command_output(command: &[String], raw: &str) -> (String, String) {
         return (name, raw.to_string());
     }
     (name, output)
+}
+
+/// Vue d'un lanceur de tests reconnu par [`test_views::runner`] : brut quand l'argv demande la
+/// sortie des tests ou que le lanceur n'a pas de capture ; brut pour un script de tests ; sinon la
+/// vue de sa famille, la même quel que soit le lanceur (`npx`, `npm exec`, `cargo.cmd`…). `None` :
+/// pas de vue dédiée, la sortie suit les autres routes (`gradle` : filtre `jvm-build`).
+fn test_runner_view(runner: &test_views::Runner, raw: &str) -> Option<(String, String)> {
+    use test_views::Kind;
+    if runner.shows_output() {
+        return Some(("lossless:test-output".to_string(), raw.to_string()));
+    }
+    let (name, candidate) = match runner.kind {
+        Kind::Script => return Some(("lossless:script-runner".to_string(), raw.to_string())),
+        Kind::Nextest => {
+            let nextest = ["cargo".to_string(), "nextest".to_string()];
+            let (name, output) = command_filters::filter(&nextest, raw)?;
+            return Some(guard_routed_output(name.to_string(), raw, output));
+        }
+        Kind::Cargo => ("native:cargo-test", test_views::cargo(raw)),
+        Kind::Pytest => ("native:pytest", test_views::pytest(raw)),
+        Kind::Go => ("native:go-test", test_views::go(raw)),
+        Kind::Js => ("native:js-test", test_views::javascript(raw)),
+        Kind::Dotnet => ("native:dotnet-test", test_views::dotnet(raw)),
+        Kind::Maven | Kind::Gradle | Kind::Ruby | Kind::Playwright | Kind::Other => return None,
+    };
+    // Même règle que les vues natives : une vue qui coûte plus de jetons que le brut est refusée.
+    let output = if candidate == raw || TokenCounts::measure(raw, &candidate).tokens_saved >= 0 {
+        candidate
+    } else {
+        raw.to_string()
+    };
+    Some((name.to_string(), output))
 }
 
 fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
@@ -3748,34 +4384,6 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
         .is_some_and(|program| command_basename(program) == "psql")
     {
         return ("psql".to_string(), filter_psql(raw));
-    }
-    let cargo_test = command
-        .first()
-        .is_some_and(|program| command_basename(program) == "cargo")
-        && command.get(1).is_some_and(|verb| verb == "test");
-    if cargo_test
-        && raw.lines().any(|line| {
-            let trimmed = line.trim_start().to_ascii_lowercase();
-            trimmed.starts_with("warning:") || trimmed.starts_with("error:")
-        })
-    {
-        return ("cargo_test_diagnostics".to_string(), raw.to_string());
-    }
-    if cargo_test
-        && raw.lines().any(|line| line.starts_with("test result: ok."))
-        && !raw
-            .lines()
-            .any(|line| line.starts_with("test result: FAILED."))
-    {
-        let summaries: Vec<_> = raw
-            .lines()
-            .filter(|line| line.starts_with("test result: ok."))
-            .collect();
-        if summaries.len() == 1 {
-            let summary = summaries[0].trim_start_matches("test result: ok. ");
-            let counts = summary.split(';').take(3).collect::<Vec<_>>().join(";");
-            return ("cargo_test".to_string(), format!("{counts}\n"));
-        }
     }
     if command
         .first()
@@ -3811,12 +4419,6 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     };
     let sub = command.get(1).map(String::as_str).unwrap_or("");
 
-    // JS test runners (vitest/jest) — directly or via npx/pnpm/yarn/bunx. This is the single
-    // biggest token sink in agent sessions; route it before the generic fallback.
-    if command_runs_js_test(command) {
-        return ("js_test_runner".to_string(), filter_vitest(raw));
-    }
-
     // `docker build` sous ses quatre formes. Les filtres intégrés couvraient
     // `docker ps` et `docker logs` ; le build, lui, tombait dans le générique
     // alors que c'est la commande docker la plus bavarde.
@@ -3827,7 +4429,6 @@ fn route_command_filter(command: &[String], raw: &str) -> (String, String) {
     match (program.as_str(), sub) {
         ("diff", _) => ("diff_summary".to_string(), filter_diff_summary(raw)),
         ("cargo", "clippy") => ("cargo_diagnostics".to_string(), filter_diagnostics(raw)),
-        ("yarn", "test" | "run") => ("js_test".to_string(), filter_diagnostics(raw)),
         ("fd" | "dir", _) => ("listing".to_string(), filter_listing(raw)),
         _ => ("generic".to_string(), filter_generic(raw)),
     }
@@ -4487,21 +5088,22 @@ fn is_sensitive_key(key: &str) -> bool {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .collect::<String>()
         .to_ascii_lowercase();
-    matches!(
-        normalized.as_str(),
-        "apikey"
-            | "authorization"
-            | "bearer"
-            | "token"
-            | "accesstoken"
-            | "refreshtoken"
-            | "secret"
-            | "secretkey"
-            | "clientsecret"
-            | "password"
-            | "privatekey"
-            | "signature"
-    )
+    // Noms d'en-têtes et de variables composés : `x-api-key`, `x-goog-api-key`,
+    // `openai_api_key`, `aws_secret_access_key`, `proxy-authorization`, `db_password`…
+    const CONTAINS: &[&str] = &[
+        "apikey",
+        "authorization",
+        "secret",
+        "password",
+        "privatekey",
+        "credential",
+    ];
+    if CONTAINS.iter().any(|part| normalized.contains(part)) {
+        return true;
+    }
+    // `token` isolé ou suffixe (`accesstoken`, `x-amz-security-token`), jamais le pluriel :
+    // `max_tokens`, `input_tokens` sont des compteurs que les fixtures doivent garder.
+    normalized.ends_with("token") || matches!(normalized.as_str(), "bearer" | "signature")
 }
 
 fn looks_like_json_payload(text: &str) -> bool {
@@ -5076,99 +5678,6 @@ fn filter_docker_build(raw: &str) -> String {
     }
 }
 
-/// True when the command invokes the vitest/jest JS test runners — directly (`vitest run`,
-/// `jest`) or via a JS launcher (`npx vitest`, `bunx jest`, `pnpm exec vitest`, `yarn jest`).
-/// Deliberately does NOT match `grep vitest` / `cat jest.config.js`: the runner must be the
-/// program itself or an argument to a known launcher, never an arbitrary search pattern/path.
-fn command_runs_js_test(command: &[String]) -> bool {
-    let Some(first) = command.first().map(|s| command_basename(s)) else {
-        return false;
-    };
-    if first == "vitest" || first == "jest" {
-        return true;
-    }
-    const LAUNCHERS: [&str; 6] = ["npx", "bunx", "pnpm", "yarn", "npm", "bun"];
-    if LAUNCHERS.contains(&first.as_str()) {
-        return command
-            .iter()
-            .skip(1)
-            .map(|tok| command_basename(tok))
-            .any(|b| b == "vitest" || b == "jest");
-    }
-    false
-}
-
-/// Filter vitest/jest output down to the real signal: failing files/tests, assertion diffs,
-/// stack frames, and the final `Test Files` / `Tests` summary. Passing-noise, the RUN banner,
-/// deprecation notices and timing footers are dropped. When everything passed, collapse hard to
-/// just the summary line(s) — matching native's `vitest run` semantic collapse.
-fn filter_vitest(raw: &str) -> String {
-    let mut kept = Vec::new();
-    let mut keep_following = 0usize;
-    let mut skipped = 0usize;
-    let mut saw_failure = false;
-
-    for line in raw.lines() {
-        let trimmed = line.trim();
-
-        // Final counters (vitest: "Test Files …" / "Tests …"; jest: "Tests:" / "Test Suites:").
-        let is_summary = trimmed.starts_with("Test Files")
-            || trimmed.starts_with("Test Suites")
-            || trimmed.starts_with("Tests")
-            || trimmed.starts_with("Snapshots:");
-
-        // Failure markers across vitest + jest output shapes.
-        let is_failure = trimmed.starts_with("FAIL ")
-            || trimmed.starts_with('\u{00D7}') // × vitest failed test
-            || trimmed.starts_with('\u{2715}') // ✕ jest failed test
-            || trimmed.starts_with('\u{276F}') // ❯ vitest failing file header / stack frame
-            || trimmed.starts_with('\u{25CF}') // ● jest failure header
-            || trimmed.contains("Failed Tests")
-            || trimmed.contains("AssertionError")
-            || trimmed.contains("Error:")
-            || trimmed.contains("Expected")
-            || trimmed.contains("Received")
-            || trimmed.starts_with("expect(");
-
-        if is_summary {
-            kept.push(line.to_string());
-            keep_following = 0; // final counters end the failure block; drop trailing Start at/Duration
-        } else if is_failure {
-            saw_failure = true;
-            kept.push(line.to_string());
-            keep_following = 3; // grab a little trailing context (diff/stack/code frame)
-        } else if keep_following > 0 && !trimmed.is_empty() {
-            kept.push(line.to_string());
-            keep_following -= 1;
-        } else {
-            keep_following = keep_following.saturating_sub(1);
-            skipped += 1;
-        }
-    }
-
-    if kept.is_empty() {
-        return "vitest: passed\n".to_string();
-    }
-    if !saw_failure {
-        // All green: collapse to the summary counters only.
-        let summary: Vec<String> = kept
-            .into_iter()
-            .filter(|l| {
-                let t = l.trim();
-                t.starts_with("Test Files")
-                    || t.starts_with("Test Suites")
-                    || t.starts_with("Tests")
-            })
-            .collect();
-        return if summary.is_empty() {
-            "vitest: passed\n".to_string()
-        } else {
-            summary.join("\n") + "\n"
-        };
-    }
-    append_omitted(kept, skipped)
-}
-
 fn filter_listing(raw: &str) -> String {
     let mut out = Vec::new();
     let mut skipped = 0usize;
@@ -5228,7 +5737,7 @@ fn append_recovery_instruction(output: &mut String, hint: &str, raw: &str) {
     if !candidate.ends_with('\n') && !candidate.is_empty() {
         candidate.push('\n');
     }
-    candidate.push_str(&format!("[tee:{id}]\n"));
+    candidate.push_str(&format!("[tee:{id}] lm-resizer tee read {id}\n"));
     // Storage and JSON metadata remain available even when the visible hint
     // would consume more tokens than the reduction pays for. Reserve a visible
     // trailer for substantial savings: at least 30% including the trailer.
@@ -5263,12 +5772,76 @@ fn archive_raw_bytes(raw: &[u8]) -> Result<Option<String>> {
     let tee_dir = state_dir.join("tee");
     let digest = format!("{:x}", Sha256::digest(raw));
     let path = tee_dir.join(format!("{digest}.log"));
-    let written = std::fs::create_dir_all(&tee_dir).and_then(|()| std::fs::write(&path, raw));
-    if written.is_err() {
+    if create_private_dir_all(&tee_dir).is_err() {
         warn_state_unwritable(&state_dir);
         return Ok(None);
     }
-    Ok(Some(format!("[raw: {}]", &digest[..12])))
+    match write_private_archive(&path, raw) {
+        Ok(()) => Ok(Some(format!("[raw: {}]", &digest[..12]))),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!(
+                "lm-resizer: archive tee refusée, sortie brute non archivée : {error}. \
+                 Supprimez le fichier ou lancez `chmod -R go-rwx {}`",
+                state_dir.display()
+            );
+            Ok(None)
+        }
+        Err(_) => {
+            warn_state_unwritable(&state_dir);
+            Ok(None)
+        }
+    }
+}
+
+/// Écrit une archive tee sans jamais suivre de lien symbolique. Un fichier neuf est créé en 0600
+/// (`O_CREAT|O_EXCL|O_NOFOLLOW`). Un fichier déjà là n'est utilisé que s'il est ordinaire, à un seul
+/// lien, à l'utilisateur courant et fermé au groupe et aux autres (contrôle sur le descripteur
+/// ouvert, pas sur le chemin) ; son contenu est alors comparé au nouveau et réécrit s'il diffère.
+/// Sinon il est refusé (`PermissionDenied`) et rien n'y est écrit : lien symbolique, lien dur,
+/// FIFO, dossier.
+fn write_private_archive(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let nofollow = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(nofollow)
+            .open(path)
+        {
+            Ok(mut file) => return file.write_all(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+        use std::io::Seek;
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(nofollow | rustix::fs::OFlags::NONBLOCK.bits() as i32)
+            .open(path)
+            .map_err(|error| refused_open(path, error))?;
+        refuse_unless_private(&file, path, LooseMode::Refuse)?;
+        let metadata = file.metadata()?;
+        // Le nom est l'empreinte du contenu, mais rien ne garantit que le fichier déjà là la
+        // respecte (écriture interrompue, fichier altéré) : son contenu est relu et comparé, puis
+        // réécrit s'il diffère. La longueur seule ne suffit pas (revue du 9 octobre).
+        let mut existing = Vec::new();
+        if metadata.len() == bytes.len() as u64 {
+            file.read_to_end(&mut existing)?;
+        }
+        if existing != bytes {
+            file.seek(std::io::SeekFrom::Start(0))?;
+            file.set_len(0)?;
+            file.write_all(bytes)?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        write_private_file(path, bytes)
+    }
 }
 
 fn run_tee_command(command: TeeCommand) -> Result<()> {
@@ -5390,15 +5963,28 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     if std::env::var("LM_RESIZER_TRACKING").ok().as_deref() == Some("0") {
         return Ok(());
     }
-    if write_exec_history(report, elapsed).is_err() {
-        warn_state_unwritable(&state_path_for_warning(None));
+    if let Err(error) = write_exec_history(report, elapsed) {
+        match error.downcast_ref::<std::io::Error>() {
+            // Refus nommé (lien, lien dur, droits) : l'erreur n'a pas de code système.
+            Some(io)
+                if io.kind() == std::io::ErrorKind::PermissionDenied
+                    && io.raw_os_error().is_none() =>
+            {
+                eprintln!(
+                    "lm-resizer: historique non écrit, fichier refusé : {io}. Supprimez-le, \
+                     un nouvel historique privé sera créé ({})",
+                    state_path_for_warning(None).display()
+                );
+            }
+            _ => warn_state_unwritable(&state_path_for_warning(None)),
+        }
     }
     Ok(())
 }
 
 fn write_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
     let dir = default_state_dir()?;
-    std::fs::create_dir_all(&dir)?;
+    create_private_dir_all(&dir)?;
     let path = dir.join("exec-history.jsonl");
     let record = ExecHistoryRecord {
         cwd: std::env::current_dir()?.to_string_lossy().into_owned(),
@@ -5413,10 +5999,7 @@ fn write_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
         bytes_saved: report.bytes_saved,
         duration_ms: elapsed.as_millis(),
     };
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut file = open_private_append(&path)?;
     writeln!(file, "{}", serde_json::to_string(&record)?)?;
     Ok(())
 }
@@ -5512,6 +6095,29 @@ fn command_is_interactive(words: &[String]) -> bool {
         return false;
     };
     let base = command_basename(program);
+    // `bash -lc '<ligne>'` (forme des commandes en tableau) : chaque segment de la ligne compte.
+    if matches!(base.as_str(), "bash" | "sh" | "zsh" | "dash")
+        && words.len() == 3
+        && matches!(words[1].as_str(), "-c" | "-lc" | "-ic")
+    {
+        return words[1] == "-ic"
+            || split_shell_operators(&words[2]).iter().any(
+                |token| matches!(token, ShellToken::Segment(seg) if segment_is_interactive(seg)),
+            );
+    }
+    // Même lecture que la reconnaissance des lanceurs de tests : enveloppes retirées (`npx`,
+    // `npm exec`, `pnpm dlx|exec`, `uv run`, `python -m`…), nom normalisé. Une enveloppe illisible
+    // (`npx -c '<ligne>'`, option inconnue) : on ne sait pas ce qui tourne, la commande part
+    // directement.
+    let Some(inner) = test_views::after_wrappers(words) else {
+        return true;
+    };
+    if inner.len() < words.len() && command_is_interactive(inner) {
+        return true;
+    }
+    if command_requires_live_output(&test_views::program_name(program), &words[1..]) {
+        return true;
+    }
     const ALWAYS: &[&str] = &[
         "vim",
         "nvim",
@@ -5560,7 +6166,197 @@ fn command_is_interactive(words: &[String]) -> bool {
     if base == "git" {
         return git_command_is_interactive(words);
     }
-    false
+    prompts_or_never_ends(&base, &words[1..])
+}
+
+/// Commande qui peut lire le terminal (mot de passe, confirmation, éditeur) ou qui ne se termine
+/// pas d'elle-même (programme ou serveur lancé) : `exec` garde la sortie jusqu'à la fin du
+/// processus, l'invite ou le journal n'apparaîtrait jamais. Décision lue sur l'argv seul.
+fn prompts_or_never_ends(base: &str, args: &[String]) -> bool {
+    let first = args.first().map(String::as_str).unwrap_or("");
+    let has = |word: &str| args.iter().any(|arg| arg == word);
+    let has_any = |words: &[&str]| args.iter().any(|arg| words.contains(&arg.as_str()));
+    // Débogueur interactif de pytest, quel que soit le lanceur (`python -m pytest --pdb`).
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--pdb" | "--trace") || arg.starts_with("--pdbcls"))
+    {
+        return true;
+    }
+    match base {
+        "scp" | "sudo" | "su" | "doas" | "passwd" | "login" | "gpg" | "gpg2" | "ssh-add"
+        | "ssh-keygen" | "ssh-copy-id" | "mosh" => true,
+        "cargo" => matches!(first, "run" | "r" | "login"),
+        "go" | "dotnet" => first == "run",
+        "npm" | "pnpm" | "yarn" | "bun" => {
+            has_any(&["init", "create", "login", "adduser", "publish"])
+        }
+        "next" => matches!(first, "dev" | "start"),
+        "docker" | "podman" => container_run_is_interactive(args),
+        "kubectl" => {
+            has_any(&[
+                "attach",
+                "port-forward",
+                "proxy",
+                "edit",
+                "exec",
+                "run",
+                "debug",
+            ]) || (has("get") && has_any(&["-w", "--watch-only"]))
+        }
+        // Toute commande Terraform peut demander une variable manquante ou une confirmation, sauf
+        // avec `-input=false` ; `console` et `login` lisent toujours le terminal.
+        "terraform" | "tofu" => has_any(&["console", "login"]) || !has("-input=false"),
+        "pip" | "pip3" => has("uninstall") && !has_any(&["-y", "--yes"]),
+        "aws" => {
+            (first == "configure" && args.len() <= 2 && !has("list"))
+                || (has("sso") && has("login"))
+                || (has("ssm") && has("start-session"))
+                || (has("ecs") && has("execute-command"))
+        }
+        "gh" => {
+            let sub = args.get(1).map(String::as_str).unwrap_or("");
+            match (first, sub) {
+                ("auth", "login") | ("run", "watch") => true,
+                ("pr" | "issue" | "repo", "create") => !args.iter().any(|arg| {
+                    matches!(
+                        arg.as_str(),
+                        "--fill"
+                            | "--fill-first"
+                            | "--fill-verbose"
+                            | "--title"
+                            | "-t"
+                            | "--web"
+                            | "-w"
+                    ) || arg.starts_with("--title=")
+                }),
+                ("pr", "merge") => !has_any(&[
+                    "--merge",
+                    "-m",
+                    "--squash",
+                    "-s",
+                    "--rebase",
+                    "-r",
+                    "--auto",
+                    "--disable-auto",
+                ]),
+                _ => false,
+            }
+        }
+        "make" | "gmake" | "just" | "task" => {
+            has_any(&["run", "serve", "server", "dev", "start", "watch", "up"])
+        }
+        "mvn" | "mvnw" => args.iter().any(|arg| {
+            matches!(
+                arg.as_str(),
+                "spring-boot:run"
+                    | "exec:java"
+                    | "exec:exec"
+                    | "jetty:run"
+                    | "quarkus:dev"
+                    | "liberty:dev"
+            )
+        }),
+        "gradle" | "gradlew" => args.iter().any(|arg| {
+            matches!(arg.as_str(), "--continuous" | "-t")
+                || matches!(
+                    arg.rsplit(':').next(),
+                    Some("run" | "bootRun" | "appRun" | "quarkusDev" | "jettyRun")
+                )
+        }),
+        _ => false,
+    }
+}
+
+/// `docker|podman run|create|start|exec|attach|login` : un conteneur lance n'importe quel
+/// programme (un serveur, un shell), au premier plan ou non ; `compose run|exec|attach` : l'entrée
+/// reste ouverte même avec `-T`, qui ne retire que le pseudo-terminal (revue du 9 octobre) ;
+/// `… prune` sans `-f` demande une confirmation.
+fn container_run_is_interactive(args: &[String]) -> bool {
+    let has_any = |words: &[&str]| args.iter().any(|arg| words.contains(&arg.as_str()));
+    has_any(&["run", "create", "start", "exec", "attach", "login"])
+        || (has("prune", args) && !has_any(&["-f", "--force"]))
+}
+
+fn has(word: &str, args: &[String]) -> bool {
+    args.iter().any(|arg| arg == word)
+}
+
+/// Capturing until exit hides output from followers, watchers and foreground
+/// servers. Keep this policy in the engine so every native hook shares it.
+fn command_requires_live_output(base: &str, args: &[String]) -> bool {
+    if args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "--watch" | "--watchAll" | "--follow" | "--looponfail"
+        ) || arg.starts_with("--watch=")
+            || arg.starts_with("--watchAll=")
+            || arg.starts_with("--follow=")
+    }) {
+        return true;
+    }
+    let short_follow = args.iter().any(|arg| {
+        arg.starts_with('-')
+            && !arg.starts_with("--")
+            && (arg.contains('f') || (base == "tail" && arg.contains('F')))
+    });
+    if matches!(base, "tail" | "journalctl") && short_follow {
+        return true;
+    }
+    if matches!(base, "docker" | "podman" | "kubectl")
+        && args.iter().any(|arg| arg == "logs")
+        && short_follow
+    {
+        return true;
+    }
+    // `pytest -f` (looponfail), seul ou groupé (`-fv`, `-xf`).
+    if matches!(base, "pytest" | "py.test") && test_views::pytest_short_option(args, 'f') {
+        return true;
+    }
+    // `-w` ne veut dire « watch » que pour ces programmes ; ailleurs il veut dire autre chose
+    // (`grep -w`, `git diff -w`, `curl -w`) et ne décide rien. `jest -w` est `--maxWorkers`, mais
+    // la forme est trop proche d'une veille pour être lue sûrement : elle part directement.
+    if matches!(
+        base,
+        "tsc" | "vitest" | "mocha" | "webpack" | "rollup" | "babel" | "nodemon" | "jest"
+    ) && args.iter().any(|arg| arg == "-w")
+    {
+        return true;
+    }
+    if matches!(base, "cargo" | "dotnet") && args.first().is_some_and(|arg| arg == "watch") {
+        return true;
+    }
+    if base == "cat"
+        && (args.iter().all(|arg| arg.starts_with('-')) || args.iter().any(|arg| arg == "-"))
+    {
+        return !args
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "--help" | "--version"));
+    }
+    if matches!(base, "npm" | "pnpm" | "yarn" | "bun") {
+        let server_script = |arg: &str| {
+            matches!(
+                arg.split(':').next(),
+                Some("dev" | "start" | "serve" | "watch" | "preview")
+            )
+        };
+        if args.iter().any(|arg| server_script(arg)) {
+            return true;
+        }
+    }
+    if (base == "docker-compose"
+        || (matches!(base, "docker" | "podman") && args.iter().any(|arg| arg == "compose")))
+        && args.iter().any(|arg| arg == "up")
+        && !args
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "-d" | "--detach" | "--detach=true"))
+    {
+        return true;
+    }
+    base == "vitest"
+        && !args
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "run" | "--run" | "--help" | "--version"))
 }
 
 fn repl_without_script(words: &[String]) -> bool {
@@ -5619,6 +6415,12 @@ fn git_command_is_interactive(words: &[String]) -> bool {
     let flags = &words[sub_index + 1..];
     match sub {
         "difftool" | "mergetool" => true,
+        // Réseau : invite d'identifiants, de phrase de passe SSH ou d'empreinte d'hôte.
+        "push" | "pull" | "fetch" | "clone" | "ls-remote" | "submodule" | "send-email" | "svn"
+        | "p4" => true,
+        "remote" => flags
+            .iter()
+            .any(|word| matches!(word.as_str(), "update" | "prune" | "show")),
         "rebase" => flags
             .iter()
             .any(|word| word == "-i" || word == "--interactive"),
@@ -5669,7 +6471,8 @@ fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
     if segment_must_not_be_rewritten(seg) {
         return None;
     }
-    let words = split_shell_words(seg)?;
+    // Découpage POSIX strict : refuse citation non fermée, commentaire, nouvelle ligne.
+    let words = posix_split(seg)?;
     // empty, or our own exec invocation (anti-recursion) → leave raw
     if words.is_empty() || command_basename(&words[0]) == "lm-resizer" {
         return None;
@@ -5677,7 +6480,7 @@ fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
     if !rewrite_command_report(&words).supported {
         return None;
     }
-    Some(format!("\"{exe}\" exec -- {seg}"))
+    Some(format!("{} exec -- {seg}", agent_hooks::quote_program(exe)))
 }
 
 /// Build the PreToolUse `hookSpecificOutput` that rewrites a supported Bash command to run
@@ -5685,6 +6488,13 @@ fn rewrite_command_for_hook(command: &str, exe: &str) -> Option<String> {
 /// nothing → run raw) when the command is unsupported/compound/redirected or is our own exec
 /// invocation. Pure/testable: takes the parsed event + resolved exe path.
 fn pretooluse_rewrite_json(value: &Value, exe: &str, event: &str) -> Option<Value> {
+    if value
+        .pointer("/tool_input/run_in_background")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        return None;
+    }
     let command = extract_hook_command(value)?;
     let mut rewritten = rewrite_command_for_hook(&command, exe)?;
     let shell = value
@@ -5708,7 +6518,16 @@ fn pretooluse_rewrite_json(value: &Value, exe: &str, event: &str) -> Option<Valu
             } else {
                 "command"
             };
-            map.insert(key.to_string(), Value::String(rewritten));
+            // Un tableau reçu reste un tableau : l'argv est exécuté sans shell, rien n'est recollé.
+            let replacement = match map.get(key).and_then(value_to_argv) {
+                Some(argv) => {
+                    let mut wrapped = vec![exe.to_string(), "exec".into(), "--".into()];
+                    wrapped.extend(argv);
+                    json!(wrapped)
+                }
+                None => Value::String(rewritten),
+            };
+            map.insert(key.to_string(), replacement);
             Value::Object(map)
         }
         _ => serde_json::json!({ "command": rewritten }),
@@ -5745,11 +6564,8 @@ fn emit_pretooluse_rewrite(event: &str, client: &str) {
             // Local counters only; no command arguments or remote telemetry.
             let _ = (|| -> Result<()> {
                 let dir = default_state_dir()?;
-                std::fs::create_dir_all(&dir)?;
-                let mut file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(dir.join("hook-audit.jsonl"))?;
+                create_private_dir_all(&dir)?;
+                let mut file = open_private_append(&dir.join("hook-audit.jsonl"))?;
                 writeln!(
                     file,
                     "{}",
@@ -5882,23 +6698,25 @@ fn extract_hook_exit_code(value: Option<&Value>) -> Option<i32> {
     None
 }
 
+/// Une commande en tableau est un argv : chaque argument est cité (apostrophes POSIX), jamais
+/// recollé avec des espaces, pour que `*` reste littéral et qu'un argument avec espace reste entier.
+/// Un élément qui n'est pas du texte : pas de commande lisible.
 fn value_to_command_string(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
-        Value::Array(items) => {
-            let parts = items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>();
-            if parts.is_empty() {
-                None
-            } else {
-                Some(parts.join(" "))
-            }
-        }
+        Value::Array(_) => value_to_argv(value).map(|argv| shell_join(&argv)),
         _ => None,
     }
+}
+
+/// Les éléments d'un tableau JSON non vide dont chaque élément est du texte.
+fn value_to_argv(value: &Value) -> Option<Vec<String>> {
+    let items = value.as_array()?;
+    let argv = items
+        .iter()
+        .map(|item| item.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()?;
+    (!argv.is_empty()).then_some(argv)
 }
 
 fn value_to_output_string(value: &Value) -> Option<String> {
@@ -5963,7 +6781,7 @@ fn record_retrieval_feedback(hash: &str, bytes: usize, source: &str) -> Result<(
         return Ok(());
     }
     let dir = default_state_dir()?;
-    std::fs::create_dir_all(&dir)?;
+    create_private_dir_all(&dir)?;
     let path = dir.join("retrieval-feedback.jsonl");
     let record = json!({
         "timestamp_unix": unix_timestamp(),
@@ -5971,10 +6789,7 @@ fn record_retrieval_feedback(hash: &str, bytes: usize, source: &str) -> Result<(
         "bytes": bytes,
         "source": source,
     });
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut file = open_private_append(&path)?;
     writeln!(file, "{}", serde_json::to_string(&record)?)?;
     Ok(())
 }
@@ -6934,7 +7749,10 @@ fn native_hooks_json(
 ) -> Result<String> {
     let mut hooks = serde_json::Map::new();
     for event in events {
-        let command = format!("\"{exe_path}\" hook --client {client} --event {event}");
+        let command = format!(
+            "{} hook --client {client} --event {event}",
+            agent_hooks::quote_program(exe_path)
+        );
         let mut hook = json!({
             "type": "command",
             "command": command,
@@ -7049,9 +7867,10 @@ exit /b %ERRORLEVEL%
 fn command_shim_sh(exe_path: &str, original: &Path) -> String {
     format!(
         r#"#!/usr/bin/env sh
-exec "{exe_path}" exec -- "{original}" "$@"
+exec {exe} exec -- {original} "$@"
 "#,
-        original = original.display()
+        exe = agent_hooks::quote_program(exe_path),
+        original = agent_hooks::quote_program(&original.display().to_string())
     )
 }
 
@@ -7067,11 +7886,14 @@ fn shim_path_hint(shim_dir: &Path) -> String {
 }
 
 fn hook_rewrite_sh(exe_path: &str) -> String {
+    // Chemin cité par `quote_program` : un `$(...)` ou un guillemet dans un nom de dossier
+    // ne doit pas être exécuté par le script.
+    let exe_word = agent_hooks::quote_program(exe_path);
     format!(
         r#"#!/usr/bin/env sh
 set -eu
 
-LM_RESIZER_BIN="${{LM_RESIZER_BIN:-{exe_path}}}"
+[ -n "${{LM_RESIZER_BIN:-}}" ] || LM_RESIZER_BIN={exe_word}
 if [ "$#" -eq 1 ]; then
   exec "$LM_RESIZER_BIN" rewrite-shell "$1"
 fi
@@ -7262,20 +8084,41 @@ fn uninstall_native_hook_files(client: &str, project_dir: &Path) -> Result<Vec<S
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "lm-resizer".to_string());
     let mut removed = Vec::new();
-    for target in native_hook_targets(client, project_dir)? {
+    // `all` retire les cinq configurations natives ; à l'installation, `all` garde sa portée
+    // historique Codex + Claude.
+    let targets = if client == "all" {
+        let mut targets = native_hook_targets("all", project_dir)?;
+        for name in ["gemini", "copilot", "cursor"] {
+            targets.extend(native_hook_targets(name, project_dir)?);
+        }
+        targets
+    } else {
+        native_hook_targets(client, project_dir)?
+    };
+    for target in targets {
         if !target.path.exists() {
             continue;
         }
-        let expected = match target.client.as_str() {
-            "codex" => codex_native_hooks_json(&exe_path)?,
-            "claude" => claude_native_hooks_json(&exe_path)?,
-            name => serde_json::to_string_pretty(
-                &agent_hooks::config(&exe_path, name).context("unknown hook schema")?,
-            )?,
+        let generated = |exe: &str| -> Result<String> {
+            Ok(match target.client.as_str() {
+                "codex" => codex_native_hooks_json(exe)?,
+                "claude" => claude_native_hooks_json(exe)?,
+                name => serde_json::to_string_pretty(
+                    &agent_hooks::config(exe, name).context("unknown hook schema")?,
+                )?,
+            })
         };
         let existing = std::fs::read_to_string(&target.path)?;
-        if existing != expected {
-            // Leave a hand-edited or foreign config alone; uninstall stays safe.
+        // Contenu généré pour le binaire courant, ou pour le chemin de binaire que le fichier
+        // contient (installation faite depuis un autre emplacement). Un fichier modifié à la main
+        // ne correspond à aucun des deux : il reste.
+        let mut ours = generated(&exe_path)? == existing;
+        if !ours {
+            if let Some(other) = generated_hook_program(&existing) {
+                ours = generated(&other)? == existing;
+            }
+        }
+        if !ours {
             continue;
         }
         std::fs::remove_file(&target.path)?;
@@ -7292,6 +8135,33 @@ fn uninstall_native_hook_files(client: &str, project_dir: &Path) -> Result<Vec<S
     Ok(removed)
 }
 
+/// Chemin du binaire écrit dans un fichier de crochets généré : la commande
+/// `<programme cité> hook --client … --event …` du premier crochet.
+fn generated_hook_program(text: &str) -> Option<String> {
+    fn find(value: &Value) -> Option<&str> {
+        match value {
+            Value::Object(map) => map.iter().find_map(|(key, value)| match value {
+                Value::String(text)
+                    if matches!(key.as_str(), "command" | "bash")
+                        && text.contains(" hook --client ") =>
+                {
+                    Some(text.as_str())
+                }
+                other => find(other),
+            }),
+            Value::Array(items) => items.iter().find_map(find),
+            _ => None,
+        }
+    }
+    let value: Value = serde_json::from_str(text).ok()?;
+    let command = find(&value)?;
+    let program = &command[..command.find(" hook --client ")?];
+    match split_shell_words(program)?.as_slice() {
+        [single] => Some(single.clone()),
+        _ => None,
+    }
+}
+
 /// Write `content` when missing; leave identical content alone; refuse a divergent
 /// file unless `force` overwrites it. Creates parent directories as needed.
 fn write_managed_text_file(path: &Path, content: &str, force: bool, kind: &str) -> Result<()> {
@@ -7302,7 +8172,7 @@ fn write_managed_text_file(path: &Path, content: &str, force: bool, kind: &str) 
         }
         if !force {
             anyhow::bail!(
-                "{kind} already exists: {} (rerun with --force to overwrite)",
+                "{kind} already exists: {} (--force overwrites the whole file, including any permissions or other hooks in it: back it up first)",
                 path.display()
             );
         }
@@ -7395,8 +8265,16 @@ fn upsert_marked_block(path: &Path, block: &str) -> Result<()> {
     } else {
         String::new()
     };
-    let stripped = strip_marked_block(&existing);
-    let mut next = stripped.trim_end().to_string();
+    let mut next = existing.clone();
+    if let Some(start) = existing.find(HOOK_BLOCK_START) {
+        if let Some(end) = existing[start..].find(HOOK_BLOCK_END) {
+            let end = start + end + HOOK_BLOCK_END.len();
+            next.replace_range(start..end, block.trim());
+            std::fs::write(path, next)?;
+            return Ok(());
+        }
+    }
+    next = next.trim_end().to_string();
     if !next.is_empty() {
         next.push_str("\n\n");
     }
@@ -7679,7 +8557,7 @@ fn record_proxy_history(
         return Ok(());
     }
     let dir = default_state_dir()?;
-    std::fs::create_dir_all(&dir)?;
+    create_private_dir_all(&dir)?;
     let history_path = dir.join("proxy-history.jsonl");
     // `bytes_saved` is measured (bytes in, bytes out). `provider_usage` is what
     // the provider reported. They are never added together.
@@ -7693,10 +8571,7 @@ fn record_proxy_history(
     });
     let line = serde_json::to_string(&record)?;
     use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_path)?;
+    let mut file = open_private_append(&history_path)?;
     writeln!(file, "{line}")?;
     Ok(())
 }
@@ -8701,6 +9576,125 @@ fn install_mcp(
     }
 }
 
+/// Inverse d'[`install_mcp`] : retire la seule entrée `lm-resizer` (table `mcp_servers.lm_resizer`
+/// pour Codex) et garde le reste du fichier ; un fichier qui ne contient plus rien est supprimé.
+fn uninstall_mcp(client: &str, scope: &str, project_dir: Option<PathBuf>) -> Result<()> {
+    let project_dir = project_dir.unwrap_or(std::env::current_dir()?);
+    // `all` : les deux portées. Codex n'a que la portée globale, VS Code que la portée projet.
+    if scope == "all" {
+        return match client {
+            "codex" => uninstall_codex(),
+            "vscode" | "vs-code" => uninstall_mcp(client, "project", Some(project_dir)),
+            _ => {
+                uninstall_mcp(client, "project", Some(project_dir.clone()))?;
+                uninstall_mcp(client, "global", Some(project_dir))
+            }
+        };
+    }
+    match client {
+        "claude" | "claude-code" => uninstall_json_mcp(scope, ClientConfig::Claude, &project_dir),
+        "codex" => {
+            if scope != "global" {
+                anyhow::bail!("Codex MCP config is user-scoped; use --client codex --scope global");
+            }
+            uninstall_codex()
+        }
+        "cursor" => uninstall_json_mcp(scope, ClientConfig::Cursor, &project_dir),
+        "vscode" | "vs-code" => uninstall_json_mcp(scope, ClientConfig::VsCode, &project_dir),
+        "all" => {
+            uninstall_json_mcp(scope, ClientConfig::Claude, &project_dir)?;
+            uninstall_codex()?;
+            uninstall_json_mcp(scope, ClientConfig::Cursor, &project_dir)?;
+            if scope == "global" {
+                println!("VS Code MCP config is project-scoped only: nothing to remove globally");
+                Ok(())
+            } else {
+                uninstall_json_mcp(scope, ClientConfig::VsCode, &project_dir)
+            }
+        }
+        other => {
+            anyhow::bail!("unsupported client '{other}'. Use claude, codex, cursor, vscode, or all")
+        }
+    }
+}
+
+fn uninstall_json_mcp(scope: &str, client: ClientConfig, project_dir: &Path) -> Result<()> {
+    let config_path = client.path(scope, project_dir)?;
+    if !config_path.exists() {
+        println!(
+            "No {} MCP config at {}",
+            client.name(),
+            config_path.display()
+        );
+        return Ok(());
+    }
+    let mut config: Value = serde_json::from_str(&std::fs::read_to_string(&config_path)?)
+        .with_context(|| format!("invalid JSON in {}", config_path.display()))?;
+    let root_key = client.root_key();
+    let removed = config
+        .get_mut(root_key)
+        .and_then(Value::as_object_mut)
+        .and_then(|servers| servers.remove("lm-resizer"))
+        .is_some();
+    if !removed {
+        println!(
+            "No lm-resizer MCP server in {} config at {}",
+            client.name(),
+            config_path.display()
+        );
+        return Ok(());
+    }
+    if config
+        .get(root_key)
+        .and_then(Value::as_object)
+        .is_some_and(serde_json::Map::is_empty)
+    {
+        if let Some(map) = config.as_object_mut() {
+            map.remove(root_key);
+        }
+    }
+    if config.as_object().is_some_and(serde_json::Map::is_empty) {
+        std::fs::remove_file(&config_path)?;
+        if let Some(parent) = config_path.parent().filter(|dir| dir != &project_dir) {
+            let _ = std::fs::remove_dir(parent);
+        }
+    } else {
+        std::fs::write(&config_path, serde_json::to_string_pretty(&config)?)?;
+    }
+    println!(
+        "Removed {} MCP server from {}",
+        client.name(),
+        config_path.display()
+    );
+    Ok(())
+}
+
+fn uninstall_codex() -> Result<()> {
+    let config_path = codex_home_dir()?.join("config.toml");
+    if !config_path.exists() {
+        println!("No Codex MCP config at {}", config_path.display());
+        return Ok(());
+    }
+    let existing = std::fs::read_to_string(&config_path)?;
+    if !existing
+        .lines()
+        .any(|line| line.trim() == "[mcp_servers.lm_resizer]")
+    {
+        println!("No lm-resizer MCP server in {}", config_path.display());
+        return Ok(());
+    }
+    let mut content = remove_toml_table(&existing, "mcp_servers.lm_resizer");
+    trim_blank_suffix(&mut content);
+    if content.trim().is_empty() {
+        std::fs::remove_file(&config_path)?;
+    } else {
+        content.push('\n');
+        std::fs::write(&config_path, content)?;
+    }
+    println!("Removed Codex MCP server from {}", config_path.display());
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum ClientConfig {
     Claude,
@@ -8876,9 +9870,10 @@ async fn wrap_agent(
     provider: ProviderKind,
     store: Option<PathBuf>,
     timeout_sec: Option<u64>,
+    allow_non_loopback: bool,
 ) -> Result<()> {
     let proxy_url = format!("http://{bind}");
-    let mut proxy = spawn_proxy(bind, upstream, api_key, provider, store)?;
+    let mut proxy = spawn_proxy(bind, upstream, api_key, provider, store, allow_non_loopback)?;
     if let Err(err) = wait_for_proxy(&proxy_url).await {
         let _ = proxy.kill();
         return Err(err);
@@ -8925,24 +9920,102 @@ fn spawn_proxy(
     api_key: Option<String>,
     provider: ProviderKind,
     store: Option<PathBuf>,
+    allow_non_loopback: bool,
 ) -> Result<Child> {
     let exe = std::env::current_exe().context("could not resolve current executable")?;
-    let mut cmd = Command::new(exe);
-    cmd.arg("serve").arg("--bind").arg(bind.to_string());
-    if let Some(upstream) = upstream {
-        cmd.arg("--upstream").arg(upstream);
-    }
-    if let Some(api_key) = api_key {
-        cmd.arg("--api-key").arg(api_key);
-    }
-    cmd.arg("--provider").arg(provider_label(provider));
-    if let Some(store) = store {
-        cmd.arg("--store").arg(store);
-    }
+    let mut cmd = proxy_command(
+        &exe,
+        bind,
+        upstream,
+        api_key,
+        provider,
+        store,
+        allow_non_loopback,
+    );
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::null());
     cmd.spawn().context("failed to start lm-resizer proxy")
+}
+
+/// Ligne de commande du proxy lancé par `wrap`. La clé d'API n'y figure jamais : `/proc/<pid>/cmdline`
+/// est lisible par tous les comptes locaux, `/proc/<pid>/environ` seulement par le propriétaire.
+/// Le fils la reçoit par `LM_RESIZER_API_KEY`, que `serve` lit déjà.
+fn proxy_command(
+    exe: &Path,
+    bind: SocketAddr,
+    upstream: Option<String>,
+    api_key: Option<String>,
+    provider: ProviderKind,
+    store: Option<PathBuf>,
+    allow_non_loopback: bool,
+) -> Command {
+    let mut cmd = Command::new(exe);
+    cmd.arg("serve").arg("--bind").arg(bind.to_string());
+    if allow_non_loopback {
+        cmd.arg("--allow-non-loopback");
+    }
+    if let Some(upstream) = upstream {
+        cmd.arg("--upstream").arg(upstream);
+    }
+    match api_key {
+        Some(api_key) => {
+            cmd.env("LM_RESIZER_API_KEY", api_key);
+        }
+        None => {
+            cmd.env_remove("LM_RESIZER_API_KEY");
+        }
+    }
+    // Le fichier de clé a déjà été lu par le parent ; le fils n'a pas à le relire.
+    cmd.env_remove("LM_RESIZER_API_KEY_FILE");
+    cmd.arg("--provider").arg(provider_label(provider));
+    if let Some(store) = store {
+        cmd.arg("--store").arg(store);
+    }
+    cmd
+}
+
+/// Clé d'API : `--api-key-file` l'emporte sur `--api-key` / `LM_RESIZER_API_KEY`. Le fichier
+/// doit rester privé (0600) ; sa première ligne est la clé.
+fn resolve_api_key(api_key: Option<String>, file: Option<PathBuf>) -> Result<Option<String>> {
+    let Some(file) = file else {
+        return Ok(api_key);
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&file)
+            .with_context(|| format!("cannot read API key file {}", file.display()))?
+            .permissions()
+            .mode();
+        if mode & 0o077 != 0 {
+            anyhow::bail!(
+                "API key file {} is accessible to other accounts (mode {:04o}); run `chmod 600 {}`",
+                file.display(),
+                mode & 0o7777,
+                file.display()
+            );
+        }
+    }
+    let text = std::fs::read_to_string(&file)
+        .with_context(|| format!("cannot read API key file {}", file.display()))?;
+    let key = text.lines().next().unwrap_or("").trim().to_string();
+    anyhow::ensure!(!key.is_empty(), "API key file {} is empty", file.display());
+    Ok(Some(key))
+}
+
+/// Une clé donnée par `--api-key` reste dans la ligne de commande de CE processus, donc visible
+/// par `ps` : le signaler plutôt que de laisser croire que l'aide masque aussi la ligne de commande.
+fn warn_if_api_key_on_command_line() {
+    let given = std::env::args_os().skip(1).any(|arg| {
+        arg.to_str()
+            .is_some_and(|a| a == "--api-key" || a.starts_with("--api-key="))
+    });
+    if given {
+        eprintln!(
+            "lm-resizer: --api-key est visible par tous les comptes locaux (ps, /proc). Préférez LM_RESIZER_API_KEY ou --api-key-file."
+        );
+    }
 }
 
 async fn wait_for_proxy(proxy_url: &str) -> Result<()> {
@@ -9067,15 +10140,22 @@ async fn run_http(
     provider: ProviderKind,
     store: Option<PathBuf>,
     dashboard_enabled: bool,
+    allow_non_loopback: bool,
 ) -> Result<()> {
-    let state = AppState {
+    let state = Arc::new(AppState {
         store_path: store.unwrap_or(default_store_path()?),
         upstream,
         api_key,
         provider,
-        client: Client::new(),
+        // Jamais de redirection : l'amont choisirait l'hôte qui reçoit `x-api-key`, que
+        // reqwest ne retire pas quand l'origine change (audit du 08/10/2026).
+        client: Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?,
         dashboard_enabled,
-    };
+        // Hors boucle locale explicitement voulue, les noms d'hôte légitimes sont inconnus.
+        host_guard: (!allow_non_loopback).then_some(bind),
+    });
     let app = Router::new()
         .route("/health", get(|| async { Json(json!({"ok": true})) }))
         .route("/compress", post(http_compress))
@@ -9102,12 +10182,74 @@ async fn run_http(
             "/v1beta/projects/:project/locations/:location/publishers/:publisher/models/*model_method",
             post(http_provider_original_uri),
         )
-        .with_state(Arc::new(state));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_local_host,
+        ))
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind).await?;
     println!("lm-resizer listening on http://{bind}");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn ensure_loopback_bind(bind: SocketAddr, allow_non_loopback: bool) -> Result<()> {
+    if bind.ip().is_loopback() || allow_non_loopback {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "refusing to listen on {bind}: the proxy has no client authentication, so anyone who can reach it can spend the upstream API key; use a loopback address or pass --allow-non-loopback"
+    )
+}
+
+/// Nom d'hôte d'un en-tête `Host` (sans port, crochets d'IPv6 retirés).
+fn host_name(value: &str) -> &str {
+    let value = value.trim();
+    if let Some(rest) = value.strip_prefix('[') {
+        return rest.split(']').next().unwrap_or(rest);
+    }
+    value.rsplit_once(':').map_or(value, |(host, port)| {
+        if port.chars().all(|c| c.is_ascii_digit()) {
+            host
+        } else {
+            value
+        }
+    })
+}
+
+/// Refuse une requête dont `Host` n'est pas la boucle locale ou l'adresse d'écoute : une page
+/// web qui rebinde son nom DNS vers 127.0.0.1 joindrait sinon le proxy depuis le navigateur.
+async fn require_local_host(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let Some(bind) = state.host_guard else {
+        return next.run(request).await;
+    };
+    let host = request
+        .headers()
+        .get(axum::http::header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .or_else(|| request.uri().authority().map(|a| a.to_string()));
+    let allowed = host.as_deref().is_none_or(|host| {
+        let name = host_name(host).to_ascii_lowercase();
+        name == "localhost" || name == bind.ip().to_string() || {
+            name.parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
+        }
+    });
+    if allowed {
+        next.run(request).await
+    } else {
+        (
+            axum::http::StatusCode::MISDIRECTED_REQUEST,
+            Json(json!({"error": "host not allowed: this proxy only answers on its loopback address"})),
+        )
+            .into_response()
+    }
 }
 
 async fn http_compress(
@@ -11033,10 +12175,8 @@ command = "node"
 
         // psql scripté et commande simple : toujours réécrits. Le hook enveloppe tel quel.
         let scripted = rewrite_shell_report("psql -c 'select 1'");
-        assert_eq!(
-            scripted.rewritten,
-            "lm-resizer exec -- psql -c \"select 1\""
-        );
+        // Les octets d'origine sont recollés : plus de re-citation en guillemets doubles.
+        assert_eq!(scripted.rewritten, "lm-resizer exec -- psql -c 'select 1'");
         assert_eq!(
             rewrite_command_for_hook("psql -c 'select 1'", "/opt/lm").as_deref(),
             Some("\"/opt/lm\" exec -- psql -c 'select 1'")
@@ -11058,13 +12198,16 @@ command = "node"
         let store = InMemoryCcrStore::default();
         let raw = "PASS [ 0.01s] app::ok\nFAIL [ 0.02s] app::bad\npanicked at src/lib.rs:42:9\nSummary: 1 failed\n";
         let command = vec!["cargo".into(), "nextest".into(), "run".into()];
+        // Code 0 d'un lanceur de tests : la sortie passe intacte.
         let success = process_captured_output(&command, raw, 0, false, "", &store).unwrap();
-        assert_eq!(success.filter, "cargo-nextest");
-        assert!(success.output.contains("app::bad"));
-        assert!(success.output.contains("src/lib.rs:42:9"));
-        assert!(success.output.len() <= raw.len());
-        if success.output != raw {
-            let key = success.cache_keys.last().expect("raw recovery key");
+        assert_eq!(success.filter, "lossless:test-success");
+        assert_eq!(success.output, raw);
+        let reduced = process_captured_output(&command, raw, 1, false, "", &store).unwrap();
+        assert_eq!(reduced.filter, "cargo-nextest");
+        assert!(reduced.output.contains("app::bad"));
+        assert!(reduced.output.contains("src/lib.rs:42:9"));
+        if reduced.output != raw {
+            let key = reduced.cache_keys.last().expect("raw recovery key");
             assert_eq!(store.get(key).as_deref(), Some(raw));
         }
         let failure = process_captured_output(&command, raw, 1, true, "", &store).unwrap();
@@ -11135,7 +12278,7 @@ command = "node"
                 .unwrap();
         assert_eq!(misleading["result"]["isError"], true);
         assert_eq!(payload["exit_code"], 7);
-        assert_eq!(payload["filter"], "generic:summary");
+        assert_eq!(payload["filter"], "lossless:generic");
         assert!(payload["output"]
             .as_str()
             .unwrap()
@@ -11767,6 +12910,74 @@ unknown_action = true
     }
 
     #[test]
+    fn sensitive_keys_cover_header_spellings_but_not_token_counters() {
+        // Audit du 08/10/2026 : `x-api-key` et `x-goog-api-key` restaient en clair.
+        for key in [
+            "x-api-key",
+            "X-Goog-Api-Key",
+            "api-key",
+            "api_key",
+            "apiKey",
+            "Authorization",
+            "proxy-authorization",
+            "x-amz-security-token",
+            "access_token",
+            "id_token",
+            "client_secret",
+            "x-webhook-secret",
+            "db_password",
+            "private_key",
+            "openai_api_key",
+            "aws_secret_access_key",
+            "credentials",
+        ] {
+            assert!(is_sensitive_key(key), "{key} devrait être masqué");
+        }
+        // Compteurs et champs ordinaires d'un fixture : à garder lisibles.
+        for key in [
+            "max_tokens",
+            "input_tokens",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "cache_creation_input_tokens",
+            "model",
+            "content",
+            "role",
+            "stop_reason",
+            "tokenizer",
+            "authors",
+        ] {
+            assert!(!is_sensitive_key(key), "{key} ne devrait pas être masqué");
+        }
+    }
+
+    #[test]
+    fn sanitize_provider_fixture_redacts_header_style_keys() {
+        let root = tempfile::tempdir().unwrap();
+        let input = root.path().join("input.json");
+        let output = root.path().join("fixture.json");
+        std::fs::write(
+            &input,
+            serde_json::to_string(&json!({
+                "headers": {"x-api-key": "sk-fixture-1", "x-goog-api-key": "sk-fixture-2"},
+                "max_tokens": 64,
+                "usage": {"input_tokens": 12}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let report =
+            sanitize_provider_fixture(ProviderKind::Anthropic, &input, &output, 10).unwrap();
+        assert_eq!(report.redacted_fields, 2);
+        let text = std::fs::read_to_string(output).unwrap();
+        assert!(!text.contains("sk-fixture"), "{text}");
+        let value: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value["max_tokens"], 64);
+        assert_eq!(value["usage"]["input_tokens"], 12);
+    }
+
+    #[test]
     fn sanitize_provider_fixture_redacts_secrets_and_long_strings() {
         let root = std::env::temp_dir().join(format!(
             "lm-resizer-provider-sanitize-{}",
@@ -11889,15 +13100,31 @@ expected = "error: bad\n"
     }
 
     #[test]
-    fn exec_builtin_toml_filter_handles_make_errors() {
-        let (filter, text) = filter_command_output(
-            &["make".into()],
-            "cc main.c\nwarning: unused\nerror: failed\n",
+    fn exec_make_runs_user_recipes_and_returns_them_raw() {
+        // Une recette `make` peut lancer n'importe quoi (`git log --format=%s` compris) : brut.
+        let raw = "cc main.c\nwarning: unused\nerror: failed\n";
+        for command in [
+            vec!["make"],
+            vec!["make", "-j", "8", "build"],
+            vec!["gmake", "log"],
+            vec!["npm", "run", "hist"],
+            vec!["npm", "test"],
+            vec!["pnpm", "run", "build"],
+            vec!["yarn", "start"],
+            vec!["cargo", "run"],
+            vec!["uv", "run", "./script"],
+        ] {
+            let command: Vec<String> = command.iter().map(|s| s.to_string()).collect();
+            let (filter, text) = filter_command_output(&command, raw);
+            assert_eq!(filter, "lossless:script-runner", "{command:?}");
+            assert_eq!(text, raw, "{command:?}");
+        }
+        // Un harnais nommé dans l'argv garde sa vue.
+        let (filter, _) = filter_command_output(
+            &["uv".into(), "run".into(), "pytest".into()],
+            "1 passed in 0.01s\n",
         );
-        assert_eq!(filter, "toml:make");
-        assert!(text.contains("warning: unused"));
-        assert!(text.contains("error: failed"));
-        assert!(!text.contains("cc main.c"));
+        assert_ne!(filter, "lossless:script-runner");
     }
 
     #[test]
@@ -11914,7 +13141,8 @@ expected = "error: bad\n"
                 "native:dotnet-test",
             ),
             (
-                vec!["mvn", "test"],
+                // `mvn test` affiche la sortie des tests (brut) ; la compilation garde le filtre.
+                vec!["mvn", "compile"],
                 "Downloading dependency\n[ERROR] Failed to execute goal\nBUILD FAILURE\n",
                 "toml:jvm-build",
             ),
@@ -11983,66 +13211,6 @@ expected = "error: bad\n"
         let filtered = test_views::cargo(raw);
         assert!(filtered.contains("test result: ok"));
         assert!(!filtered.contains("Compiling demo"));
-    }
-
-    #[test]
-    fn command_runs_js_test_matches_runners_not_search() {
-        let v = |args: &[&str]| {
-            command_runs_js_test(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
-        };
-        assert!(v(&["vitest", "run"]));
-        assert!(v(&["jest"]));
-        assert!(v(&["npx", "vitest", "run"]));
-        assert!(v(&["bunx", "jest"]));
-        assert!(v(&["pnpm", "exec", "vitest"]));
-        assert!(v(&["node_modules/.bin/vitest"]));
-        // must NOT misfire when vitest/jest is a search pattern or a config path
-        assert!(!v(&["grep", "vitest", "src/"]));
-        assert!(!v(&["cat", "jest.config.js"]));
-        assert!(!v(&["npm", "run", "build"]));
-    }
-
-    #[test]
-    fn filter_vitest_collapses_passing_run_to_summary() {
-        let raw = " RUN  v4.1.9 /repo\n\n \u{2713} tests/a.test.ts (24 tests) 6ms\n\n Test Files  1 passed (1)\n      Tests  24 passed (24)\n   Start at  20:27:57\n   Duration  132ms (transform 41ms)\n";
-        let filtered = filter_vitest(raw);
-        assert!(filtered.contains("Tests  24 passed (24)"));
-        assert!(filtered.contains("Test Files  1 passed (1)"));
-        assert!(!filtered.contains("RUN  v4.1.9"));
-        assert!(!filtered.contains("Duration"));
-        // hard collapse: dramatically smaller than the raw
-        assert!(filtered.len() < raw.len() / 2);
-    }
-
-    #[test]
-    fn filter_vitest_keeps_failure_signal_drops_noise() {
-        // Real vitest v4 failing output shape (captured live).
-        let raw = concat!(
-            " DEPRECATED  `test.poolOptions` was removed in Vitest 4. See migration guide...\n\n",
-            " RUN  v4.1.9 /repo\n\n",
-            " \u{276F} tests/x.test.ts (3 tests | 1 failed) 6ms\n",
-            "     \u{00D7} fails on purpose 4ms\n\n",
-            "\u{23AF}\u{23AF}\u{23AF} Failed Tests 1 \u{23AF}\u{23AF}\u{23AF}\n\n",
-            " FAIL  tests/x.test.ts > scratch shape > fails on purpose\n",
-            "AssertionError: expected 2 to be 3 // Object.is equality\n\n",
-            "- Expected\n+ Received\n\n- 3\n+ 2\n\n",
-            " \u{276F} tests/x.test.ts:5:48\n",
-            " Test Files  1 failed (1)\n      Tests  1 failed | 2 passed (3)\n",
-            "   Start at  20:35:19\n   Duration  117ms\n",
-        );
-        let filtered = filter_vitest(raw);
-        // signal kept
-        assert!(filtered.contains("fails on purpose"));
-        assert!(filtered.contains("AssertionError: expected 2 to be 3"));
-        assert!(filtered.contains("Failed Tests 1"));
-        assert!(filtered.contains("tests/x.test.ts:5:48"));
-        assert!(filtered.contains("Tests  1 failed | 2 passed (3)"));
-        // noise dropped
-        assert!(!filtered.contains("DEPRECATED"));
-        assert!(!filtered.contains("RUN  v4.1.9"));
-        assert!(!filtered.contains("Duration  117ms"));
-        // and it is genuinely shorter than the raw
-        assert!(filtered.len() < raw.len());
     }
 
     /// Un `docker build` BuildKit qui se termine bien.
@@ -12508,7 +13676,8 @@ Successfully tagged localhost/app:latest\n";
             .collect();
         let raw = " Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Duration  10ms\n";
         let (name, filtered) = filter_command_output(&command, raw);
-        assert_eq!(name, "lossless:npm-test");
+        // Une vue par famille de lanceur, quel que soit le lanceur : celle de `vitest run`.
+        assert_eq!(name, "native:js-test");
         assert!(filtered.contains("Tests  3 passed (3)"));
         assert!(filtered.contains("Duration"));
     }
@@ -12665,6 +13834,400 @@ Successfully tagged localhost/app:latest\n";
         assert!(rewrite_command_for_hook("echo hello", "/opt/lm").is_none());
         // supported single command → wrapped
         assert!(rewrite_command_for_hook("vitest run", "/opt/lm").is_some());
+    }
+
+    #[test]
+    fn native_hook_keeps_followers_servers_watchers_and_stdin_raw() {
+        for command in [
+            "tail -f output.log",
+            "tail -F output.log",
+            "tail --follow=name output.log",
+            "journalctl -xf",
+            "docker logs -f web",
+            "kubectl logs --follow=true pod",
+            "npm run dev",
+            "npm --prefix app start",
+            "pnpm run --filter app dev",
+            "npm run start:dev",
+            "yarn serve",
+            "bun run watch",
+            "docker compose up",
+            "docker compose -f compose.yaml up",
+            "docker-compose up",
+            "cat",
+            "cat -",
+            "pytest --looponfail",
+            "cargo watch -x test",
+            "dotnet watch run",
+            "npm run preview",
+            "npm test -- --watch",
+            "vitest",
+            "vitest --watch",
+        ] {
+            assert!(
+                rewrite_command_for_hook(command, "/opt/lm").is_none(),
+                "{command}"
+            );
+        }
+        for command in ["cargo test", "pytest tests", "docker ps", "vitest run"] {
+            assert!(
+                rewrite_command_for_hook(command, "/opt/lm").is_some(),
+                "{command}"
+            );
+        }
+        // Sortie brute de toute façon (fichier, script choisi par l'utilisateur) : l'enveloppe ne
+        // réduirait rien et retiendrait la sortie jusqu'à la fin.
+        for command in [
+            "tail -n 20 output.log",
+            "cat output.log",
+            "npm run build",
+            "npm test",
+            "docker compose up -d",
+        ] {
+            assert!(
+                rewrite_command_for_hook(command, "/opt/lm").is_none(),
+                "{command}"
+            );
+        }
+    }
+
+    /// Audit du 9 octobre 2026 : `git push`, `cargo run` et `go run` étaient enveloppés ; `exec`
+    /// garde la sortie jusqu'à la fin du processus, l'invite (`Password:`, une confirmation) ou le
+    /// journal d'un serveur n'apparaissait jamais. Une commande qui peut lire le terminal ou ne pas
+    /// se terminer part telle quelle, décision lue sur l'argv.
+    #[test]
+    fn native_hook_never_wraps_prompting_or_long_running_commands() {
+        let mut failures = Vec::new();
+        for command in [
+            "git push",
+            "git push origin main",
+            "git -C repo pull --rebase",
+            "git fetch --all",
+            "git clone https://example.test/r.git",
+            "git ls-remote origin",
+            "git submodule update --init",
+            "git remote update",
+            "git send-email 0001.patch",
+            "cargo run",
+            "cargo run --bin server",
+            "cargo r",
+            "cargo login",
+            "go run main.go",
+            "go run ./cmd/server",
+            "npm start",
+            "npm run dev",
+            "npm init",
+            "npm login",
+            "npm publish",
+            "yarn create vite",
+            "next dev",
+            "next start",
+            "docker run -it alpine sh",
+            "docker run -i alpine cat",
+            "docker run --tty alpine sh",
+            "podman run -ti alpine sh",
+            "docker attach web",
+            "docker login",
+            "docker compose run web sh",
+            "docker compose exec web sh",
+            "kubectl run -it debug --image=busybox",
+            "kubectl attach pod",
+            "kubectl port-forward svc/web 8080:80",
+            "kubectl proxy",
+            "kubectl edit deploy/web",
+            "kubectl get pods -w",
+            "ssh host",
+            "scp a host:b",
+            "sudo ls",
+            "su -",
+            "terraform apply",
+            "tofu destroy",
+            "terraform console",
+            "terraform login",
+            "aws configure",
+            "aws sso login",
+            "aws ssm start-session --target i-0",
+            "gh auth login",
+            "gh pr create",
+            "gh pr merge 12",
+            "gh run watch",
+            "make run",
+            "make serve",
+            "just dev",
+            "mvn spring-boot:run",
+            "mvn exec:java",
+            "gradle bootRun",
+            "./gradlew run",
+            "gradle build --continuous",
+            "dotnet run",
+            "bash -lc 'git push'",
+            "sh -c 'cargo run'",
+            "bash -c 'cd app && npm start'",
+        ] {
+            if rewrite_command_for_hook(command, "/opt/lm").is_some() {
+                failures.push(format!("enveloppée : {command}"));
+            }
+        }
+        // Témoins : ces formes ne lisent pas le terminal et se terminent, elles restent enveloppées.
+        for command in [
+            "git status",
+            "git log -n 3",
+            "git diff HEAD~1",
+            "cargo test",
+            "cargo build",
+            "go test ./...",
+            "terraform plan -input=false",
+            "kubectl get pods",
+            "gh pr list",
+            "gh pr create --fill",
+            "gh pr merge 12 --squash",
+            "mvn -q compile",
+            "gradle assemble",
+            "bash -c 'cargo test'",
+        ] {
+            if rewrite_command_for_hook(command, "/opt/lm").is_none() {
+                failures.push(format!("laissée : {command}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// Revue indépendante B2 et contre-audit Grok du 9 octobre : `docker compose exec -T` (sans
+    /// pseudo-terminal, mais l'entrée reste ouverte), `git credential fill`, `npm run server`,
+    /// `php -S`, `make run-server` et `docker run` étaient enveloppés ; `exec` retenait l'invite ou
+    /// le journal jusqu'à la fin. Règle prudente : n'est enveloppée qu'une commande qu'une vue réduit
+    /// vraiment, et jamais une commande qui peut lire l'entrée ou ne pas finir.
+    #[test]
+    fn native_hook_wraps_only_finite_commands_that_a_view_reduces() {
+        let mut failures = Vec::new();
+        for command in [
+            "docker compose exec -T app sh",
+            "docker compose run -T app sh",
+            "docker compose exec -d app sh",
+            "docker compose up -d",
+            "docker-compose exec -T app sh",
+            "podman compose exec -T app sh",
+            "git credential fill",
+            "git credential approve",
+            "git lfs pull",
+            "git lfs fetch",
+            "git gui",
+            "git citool",
+            "npm run server",
+            "npm run api",
+            "npm run backend",
+            "npm run start-server",
+            "npm run dev-server",
+            "bun run server",
+            "make run-server",
+            "make test",
+            "php -S 0.0.0.0:8080",
+            "docker run --rm nginx",
+            "docker run -d nginx",
+            "podman run alpine sleep 30",
+            "docker exec web ls",
+            "docker system prune",
+            "kubectl exec pod -- ls",
+            "kubectl debug node/x",
+            "terraform plan",
+            "terraform init",
+            "terraform apply -auto-approve",
+            "tofu plan",
+            "pytest --pdb",
+            "pytest --trace tests",
+            "pip uninstall requests",
+            "cargo test -- --nocapture",
+            "mvn test",
+        ] {
+            if rewrite_command_for_hook(command, "/opt/lm").is_some() {
+                failures.push(format!("enveloppée : {command}"));
+            }
+        }
+        for command in [
+            "git status",
+            "git log -n 3",
+            "cargo test",
+            "cargo build",
+            "go test ./...",
+            "pytest -q",
+            "jest",
+            "npx jest",
+            "dotnet test",
+            "gradle test",
+            "terraform plan -input=false",
+            "kubectl get pods",
+            "gh pr list",
+            "npm install",
+            "pip uninstall -y requests",
+            "docker ps",
+        ] {
+            if rewrite_command_for_hook(command, "/opt/lm").is_none() {
+                failures.push(format!("laissée : {command}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// Contre-audit Grok n° 2 (10 octobre) : `tsc -w`, `npx vitest`, `python3 -m pytest -f`,
+    /// `pytest -fv`… étaient enveloppés et restaient muets à une seconde, alors que `tsc --watch`,
+    /// `vitest` et `pytest -f` partaient directement. La détection de la sortie en direct passe par la
+    /// même lecture que la reconnaissance des lanceurs (enveloppes retirées, nom normalisé) et lit les
+    /// options courtes, seules ou groupées. Propriété : chaque forme de veille, sous chaque enveloppe,
+    /// part directement.
+    #[test]
+    fn native_hook_never_wraps_a_watcher_whatever_the_wrapper() {
+        let watchers = [
+            "tsc -w",
+            "tsc -w --pretty false",
+            "tsc --watch",
+            "vitest",
+            "vitest -w",
+            "vitest --watch",
+            "pytest -f",
+            "pytest -fv",
+            "pytest -vf",
+            "pytest -x -f",
+            "pytest --looponfail",
+            "jest -w",
+            "jest --watch",
+            "jest --watchAll",
+        ];
+        let wrap = |wrapper: &str, form: &str| -> Vec<String> {
+            let mut lines = Vec::new();
+            match wrapper {
+                "" => lines.push(form.to_string()),
+                "python -m" | "python3 -m" => {
+                    if let Some(rest) = form.strip_prefix("pytest") {
+                        lines.push(format!("{wrapper} pytest{rest}"));
+                    }
+                }
+                "bash -c" | "bash -lc" | "sh -c" => lines.push(format!("{wrapper} '{form}'")),
+                prefix => lines.push(format!("{prefix} {form}")),
+            }
+            lines
+        };
+        let wrappers = [
+            "",
+            "npx",
+            "npx --no-install",
+            "npx -y",
+            "npm exec --yes",
+            "npm exec --",
+            "pnpm dlx",
+            "pnpm exec",
+            "yarn exec",
+            "bunx",
+            "uv run",
+            "poetry run",
+            "python -m",
+            "python3 -m",
+            "bash -c",
+            "bash -lc",
+            "sh -c",
+        ];
+        let mut failures = Vec::new();
+        for form in watchers {
+            for wrapper in wrappers {
+                for line in wrap(wrapper, form) {
+                    if rewrite_command_for_hook(&line, "/opt/lm").is_some() {
+                        failures.push(format!("enveloppée : {line}"));
+                    }
+                }
+            }
+        }
+        // Lignes exactes du tableau du contre-audit, en plus des combinaisons ci-dessus.
+        for line in [
+            "bash -lc 'tsc -w'",
+            "bash -lc 'npx vitest'",
+            "bash -c 'npx vitest'",
+            "bash -lc 'python -m pytest -f'",
+            "uv run pytest -f",
+            "uv run vitest",
+            "npx --no-install vitest",
+            "npm exec --yes vitest",
+            "pnpm dlx vitest",
+            "pnpm exec vitest",
+            "npm run vitest",
+            "yarn vitest",
+            "pnpm vitest",
+            "npx tsc -w",
+            "npx -c 'vitest run'",
+        ] {
+            if rewrite_command_for_hook(line, "/opt/lm").is_some() {
+                failures.push(format!("enveloppée : {line}"));
+            }
+        }
+        // Témoins finis, qui ont une vue : ils restent enveloppés. `-w` n'est une veille que pour
+        // les programmes où il veut dire « watch ».
+        for line in [
+            "vitest run",
+            "npx vitest run",
+            "pytest -q",
+            "pytest -k foo",
+            "python -m pytest -q",
+            "uv run pytest -q",
+            "tsc --noEmit",
+            "npx jest",
+            "jest",
+            "cargo test",
+            "grep -w foo src",
+            "git diff -w",
+            "git log -n 3",
+        ] {
+            if rewrite_command_for_hook(line, "/opt/lm").is_none() {
+                failures.push(format!("laissée : {line}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn native_hook_skips_explicit_background_tools() {
+        let value = json!({"tool_input": {"command": "cargo test", "run_in_background": true}});
+        assert!(pretooluse_rewrite_json(&value, "/opt/lm", "PreToolUse").is_none());
+    }
+
+    /// Audit du 9 octobre 2026 : une commande en tableau était recollée avec des espaces, `*` était
+    /// développé par le shell et `--format=%h %s` coupé en deux. Le tableau reste un tableau dans la
+    /// réponse du crochet, et la chaîne lue pour l'analyse cite chaque argument.
+    #[cfg(unix)]
+    #[test]
+    fn native_hook_keeps_an_argument_array_intact() {
+        let argv = ["git", "log", "--format=%h %s", "*"];
+        let value = json!({"tool_name":"Bash","tool_input":{"command":argv,"cwd":"/tmp"}});
+        let line = extract_hook_command(&value).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["aaa", "bbb", "file with space"] {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        let shell = std::process::Command::new("bash")
+            .current_dir(dir.path())
+            .arg("-c")
+            .arg(format!("set -- {line}; printf '<%s>\\n' \"$@\""))
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(shell.stdout).unwrap(),
+            "<git>\n<log>\n<--format=%h %s>\n<*>\n",
+            "{line}"
+        );
+        let out = pretooluse_rewrite_json(&value, "/opt/lm resizer", "PreToolUse").unwrap();
+        assert_eq!(
+            out["hookSpecificOutput"]["updatedInput"]["command"],
+            json!([
+                "/opt/lm resizer",
+                "exec",
+                "--",
+                "git",
+                "log",
+                "--format=%h %s",
+                "*"
+            ])
+        );
+        assert_eq!(out["hookSpecificOutput"]["updatedInput"]["cwd"], "/tmp");
+        // Un élément qui n'est pas du texte : rien n'est réécrit, la commande part telle quelle.
+        let mixed = json!({"tool_name":"Bash","tool_input":{"command":["git","log","-n",3]}});
+        assert!(pretooluse_rewrite_json(&mixed, "/opt/lm", "PreToolUse").is_none());
     }
 
     #[test]
@@ -13603,7 +15166,7 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
         assert_eq!(small_gain, before);
         let mut large_gain = "summary\n".to_string();
         append_recovery_instruction(&mut large_gain, hint, &raw);
-        assert!(large_gain.ends_with("[tee:012345abcdef]\n"));
+        assert!(large_gain.ends_with("[tee:012345abcdef] lm-resizer tee read 012345abcdef\n"));
         assert!(TokenCounts::measure(&raw, &large_gain).tokens_saved > 0);
         let mut expansion = "word ".repeat(120);
         let before = expansion.clone();
@@ -13633,9 +15196,20 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
                 continue;
             }
             let path = entry.path();
-            // Python is a benchmark dependency, never a product runtime dependency.
-            // The real-token benchmark explicitly requires Python tiktoken.
+            // The native CLI remains Rust-only. The optional Claude Code adapter
+            // explicitly documents Python, independently of the CLI runtime.
+            // Keep this exception exact rather than admitting Python across plugins.
             if path.starts_with(root.join("bench/real")) {
+                continue;
+            }
+            if [
+                "plugins/claude-code/scripts/hook.py",
+                "plugins/claude-code/tests/test_hook.py",
+                "plugins/claude-code/tests/test_execution.py",
+            ]
+            .iter()
+            .any(|relative| path == root.join(relative))
+            {
                 continue;
             }
             let file_name = path
@@ -13691,6 +15265,18 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
     fn vue_exec(command: &[&str], raw: &str) -> VueExec {
         let cmd: Vec<String> = command.iter().map(|arg| (*arg).to_string()).collect();
         let (filtre, texte_filtre) = filter_command_output(&cmd, raw);
+        vue_de(filtre, texte_filtre)
+    }
+
+    /// Vue du filtre TOML intégré qui correspond à `command`, appliqué directement : `exec` rend brute
+    /// la sortie d'un lanceur sans capture (`rspec`, minitest), le filtre reste vérifié pour lui-même.
+    fn vue_toml(command: &[&str], raw: &str) -> VueExec {
+        let (filtre, texte_filtre) =
+            apply_toml_filters(&command.join(" "), raw).expect("filtre TOML intégré");
+        vue_de(filtre, texte_filtre)
+    }
+
+    fn vue_de(filtre: String, texte_filtre: String) -> VueExec {
         let store = InMemoryCcrStore::default();
         let compresse = compress_text_with_pipeline_gate(
             &texte_filtre,
@@ -13743,7 +15329,11 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
             ligne.contains("eq(3)"),
             "le fichier de test ne place pas eq(3) à la ligne 5 : {ligne}"
         );
-        let vue = vue_exec(&["rspec", "rspec_test.rb"], RSPEC_RAW);
+        // `rspec` affiche toujours la sortie des tests : `exec` la rend brute.
+        let brut = vue_exec(&["rspec", "rspec_test.rb"], RSPEC_RAW);
+        assert_eq!(brut.filtre, "lossless:test-output");
+        assert_eq!(brut.texte_filtre, RSPEC_RAW);
+        let vue = vue_toml(&["rspec", "rspec_test.rb"], RSPEC_RAW);
         let faits = [
             "1) Math adds numbers",
             "Failure/Error: expect(1 + 1).to eq(3)",
@@ -13791,7 +15381,11 @@ test result: ok. 80 passed; 0 failed; 0 ignored; finished in 0.08s\n";
             soustraction.contains("assert_equal 2, 2 - 1"),
             "{soustraction}"
         );
-        let vue = vue_exec(&["ruby", "minitest_test.rb"], MINITEST_RAW);
+        // minitest affiche toujours la sortie des tests : `exec` la rend brute.
+        let brut = vue_exec(&["ruby", "minitest_test.rb"], MINITEST_RAW);
+        assert_eq!(brut.filtre, "lossless:test-output");
+        assert_eq!(brut.texte_filtre, MINITEST_RAW);
+        let vue = vue_toml(&["ruby", "minitest_test.rb"], MINITEST_RAW);
         let faits = [
             "Run options: --seed 64567",
             "1) Failure:",
@@ -13916,16 +15510,20 @@ Prisma CLI Version : 5.15.0
     #[test]
     fn ruby_prisma_routage_des_lanceurs() {
         let cas = [
-            (vec!["rspec", "rspec_test.rb"], "toml:rspec"),
-            (vec!["bundle", "exec", "rspec", "spec"], "toml:rspec"),
-            (vec!["ruby", "-S", "rspec"], "toml:rspec"),
-            (vec!["ruby", "minitest_test.rb"], "toml:minitest"),
+            // Lanceurs sans capture : la sortie des tests est rendue brute.
+            (vec!["rspec", "rspec_test.rb"], "lossless:test-output"),
+            (
+                vec!["bundle", "exec", "rspec", "spec"],
+                "lossless:test-output",
+            ),
+            (vec!["ruby", "-S", "rspec"], "lossless:test-output"),
+            (vec!["ruby", "minitest_test.rb"], "lossless:test-output"),
             (
                 vec!["bundle", "exec", "ruby", "minitest_test.rb"],
-                "toml:minitest",
+                "lossless:test-output",
             ),
-            (vec!["rake", "test"], "toml:minitest"),
-            (vec!["rails", "test"], "toml:minitest"),
+            (vec!["rake", "test"], "lossless:test-output"),
+            (vec!["rails", "test"], "lossless:test-output"),
             (vec!["prisma", "validate"], "toml:prisma"),
             (vec!["prisma", "migrate", "dev"], "prisma-migrate"),
             (vec!["prisma", "generate"], "toml:prisma"),
