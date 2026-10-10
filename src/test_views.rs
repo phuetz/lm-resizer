@@ -512,13 +512,25 @@ fn runs_ruby_tests(program: &str, args: &[String]) -> bool {
 
 /// `mvn` avec une phase ou un but qui lance les tests.
 fn runs_maven_tests(args: &[String]) -> bool {
-    args.iter().any(|arg| {
-        matches!(
-            arg.as_str(),
-            "test" | "integration-test" | "verify" | "package" | "install" | "deploy"
-        ) || arg.starts_with("surefire:")
-            || arg.starts_with("failsafe:")
-    })
+    let test_phases = [
+        "test",
+        "integration-test",
+        "verify",
+        "package",
+        "install",
+        "deploy",
+    ];
+    for argument in args {
+        if test_phases.contains(&argument.as_str()) {
+            return true;
+        }
+        if let Some((plugin, _goal)) = argument.split_once(':') {
+            if ["surefire", "failsafe"].contains(&plugin) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// `pytest` : options courtes groupées (`-vs`), dont `k m p c o r W n` prennent une valeur (la fin de

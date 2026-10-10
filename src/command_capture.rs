@@ -153,8 +153,14 @@ pub fn build_command(program: &std::path::Path, args: &[String]) -> Command {
         }
     }
     command.args(args);
-    die_with_parent(&mut command);
     command
+}
+
+fn spawn_producer(command: &mut Command) -> std::io::Result<std::process::Child> {
+    // Install last: StrictExec snapshots argv and replaces the final exec,
+    // after all caller configuration and any other pre_exec callbacks.
+    die_with_parent(command);
+    command.spawn()
 }
 
 /// Linux : l'enfant reçoit SIGKILL quand `lm-resizer` meurt, même par `kill -9`, au lieu de lui
@@ -165,8 +171,9 @@ pub fn build_command(program: &std::path::Path, args: &[String]) -> Command {
 fn die_with_parent(command: &mut Command) {
     use std::os::unix::process::CommandExt;
     let parent = rustix::process::getpid();
-    // SAFETY: entre fork et exec, l'enfant n'appelle que prctl et getppid, deux appels système
-    // sans allocation ni verrou ; l'erreur est un code brut (`ESRCH`), sans allocation non plus.
+    let image = StrictExec::prepare(command);
+    // SAFETY: tout est préparé dans le parent. L'enfant ne fait que prctl, getppid et execv,
+    // sans allocation ni verrou ; les erreurs sont des codes OS bruts.
     unsafe {
         command.pre_exec(move || {
             rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::KILL))?;
@@ -174,8 +181,79 @@ fn die_with_parent(command: &mut Command) {
             if rustix::process::getppid() != Some(parent) {
                 return Err(rustix::io::Errno::SRCH.into());
             }
-            Ok(())
+            match &image {
+                Ok(image) => Err(image.exec()),
+                Err(error) => Err((*error).into()),
+            }
         });
+    }
+}
+
+/// A pre_exec forces Rust's fork/execvp path, whose ENOEXEC fallback runs /bin/sh.
+/// Replace that final exec with execv: the kernel accepts or rejects the image,
+/// including shebangs and binfmt_misc, and an error never reaches execvp.
+#[cfg(target_os = "linux")]
+struct StrictExec {
+    program: std::ffi::CString,
+    // Own the immutable buffers referenced by argv, including its argv[0].
+    _args: Vec<std::ffi::CString>,
+    argv: Vec<*const std::ffi::c_char>,
+}
+
+// SAFETY: argv points only into this object's owned CString buffers. Moving the
+// object leaves those heap allocations stable; neither the buffers nor pointers
+// are mutated or exposed. Concurrent exec calls only read them.
+#[cfg(target_os = "linux")]
+unsafe impl Send for StrictExec {}
+#[cfg(target_os = "linux")]
+unsafe impl Sync for StrictExec {}
+
+#[cfg(target_os = "linux")]
+impl StrictExec {
+    fn prepare(command: &Command) -> Result<Self, rustix::io::Errno> {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let requested = command.get_program();
+        let program = if requested.as_bytes().contains(&b'/') {
+            std::path::PathBuf::from(requested)
+        } else {
+            // execv does not search PATH. Resolve here, never accidentally
+            // executing a file in cwd when PATH did not select it.
+            requested
+                .to_str()
+                .and_then(crate::resolve_command_path)
+                .ok_or(rustix::io::Errno::NOENT)?
+        };
+        let program =
+            CString::new(program.as_os_str().as_bytes()).map_err(|_| rustix::io::Errno::INVAL)?;
+        let args: Vec<CString> = std::iter::once(requested)
+            .chain(command.get_args())
+            .map(|arg| CString::new(arg.as_bytes()).map_err(|_| rustix::io::Errno::INVAL))
+            .collect::<Result<_, _>>()?;
+        let argv = args
+            .iter()
+            .map(|arg| arg.as_ptr())
+            .chain(std::iter::once(std::ptr::null()))
+            .collect();
+        Ok(Self {
+            program,
+            _args: args,
+            argv,
+        })
+    }
+
+    fn exec(&self) -> std::io::Error {
+        extern "C" {
+            fn execv(
+                path: *const std::ffi::c_char,
+                argv: *const *const std::ffi::c_char,
+            ) -> std::ffi::c_int;
+        }
+        // SAFETY: path and argv are live, NUL-terminated and immutable. execv
+        // is async-signal-safe and inherits the environment configured by Rust
+        // before pre_exec. Success never returns; failure sets errno.
+        unsafe { execv(self.program.as_ptr(), self.argv.as_ptr()) };
+        std::io::Error::last_os_error()
     }
 }
 
@@ -229,7 +307,7 @@ pub fn run_separated(command: &[String], stream: bool) -> anyhow::Result<Capture
     let grouped = crate::capture_interrupt::configure_process_group(&mut producer);
     let interrupt_guard = crate::capture_interrupt::relay_interruptions(grouped)
         .map_err(|error| anyhow::anyhow!("cannot install producer interruption relay: {error}"))?;
-    let result = producer.spawn();
+    let result = spawn_producer(&mut producer);
     drop(producer);
     let mut child = match result {
         Ok(child) => child,
@@ -347,7 +425,7 @@ fn run_shared(command: &[String]) -> anyhow::Result<Capture> {
     // interval between creating the producer and registering the relay.
     let interrupt_guard = crate::capture_interrupt::relay_interruptions(grouped)
         .map_err(|error| anyhow::anyhow!("cannot install producer interruption relay: {error}"))?;
-    let result = producer.spawn();
+    let result = spawn_producer(&mut producer);
     // `Command` retains its configured Stdio handles after spawn. Close those
     // parent-side writer copies so EOF reflects the producer group exiting.
     drop(producer);

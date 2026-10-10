@@ -40,6 +40,88 @@ fn invalid_executable_is_126_in_every_exec_mode() {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn kernel_rejected_images_never_reach_a_shell() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = sandbox();
+    let executed = dir.path().join("unexpected-interpreter-execution");
+    let interpreter = dir.path().join("headerless-interpreter");
+    std::fs::write(
+        &interpreter,
+        format!("printf executed > '{}'\nexit 23\n", executed.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&interpreter, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // Recognizing a prefix in the parent is insufficient: the kernel can
+    // reject a malformed ELF or the interpreter named by a valid shebang.
+    for (name, contents) in [
+        ("truncated-elf", b"\x7fELF\nexit 23\n".to_vec()),
+        (
+            "bad-interpreter",
+            format!("#!{}\nexit 23\n", interpreter.display()).into_bytes(),
+        ),
+    ] {
+        let image = dir.path().join(name);
+        std::fs::write(&image, contents).unwrap();
+        std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for options in [vec![], vec!["--raw-on-failure"], vec!["--stream"]] {
+            let out = lm(dir.path())
+                .args(["exec", "--json"])
+                .args(options)
+                .arg("--")
+                .arg(&image)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(126), "{name}: {out:?}");
+            assert!(!executed.exists(), "{name}: {out:?}");
+            assert!(report(&out)["output"]
+                .as_str()
+                .unwrap()
+                .contains("cannot execute"));
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn direct_exec_preserves_shebang_arguments_environment_and_path_search() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = sandbox();
+    let script = dir.path().join("path-selected-script");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$1\" \"$2\" \"$LMR_LAUNCH_VALUE\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for options in [vec![], vec!["--raw-on-failure"], vec!["--stream"]] {
+        let out = lm(dir.path())
+            .env("PATH", dir.path())
+            .env("LMR_LAUNCH_VALUE", "env value")
+            .args(["exec", "--json"])
+            .args(options)
+            .args(["--", "path-selected-script", "a b", "'quoted'"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert!(report(&out)["output"]
+            .as_str()
+            .unwrap()
+            .contains("a b|'quoted'|env value"));
+
+        // execv alone would execute this cwd file even with an empty PATH.
+        let out = lm(dir.path())
+            .current_dir(dir.path())
+            .env("PATH", dir.path().join("absent-path-directory"))
+            .args(["exec", "--json"])
+            .args(["--", "path-selected-script"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(127), "{out:?}");
+    }
+}
+
 #[test]
 fn directory_is_not_executable_in_every_exec_mode() {
     let dir = sandbox();
