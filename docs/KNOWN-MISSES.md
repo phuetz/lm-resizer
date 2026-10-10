@@ -4,7 +4,7 @@ Filter migration is still in progress. Earlier measurements do not describe this
 
 ## Hook: commands left as they are
 
-`exec` keeps the output until the process exits (except with `--stream`). The hook (`hook`) and `rewrite-shell` therefore follow a prudent rule, read from `argv`, for the direct command as for the line of `sh|bash|zsh -c` (one of its segments is enough):
+`exec` keeps the output until the process exits (except with `--stream`). The hook (`hook`) and `rewrite-shell` therefore follow a prudent rule, read from `argv`, for the direct command as for the line of `sh|bash|zsh -c` (one of its segments is enough). Since 10 October the command is read the way the test-runner recognition reads it: wrappers removed (`npx`, `npm exec`, `pnpm dlx|exec`, `yarn exec`, `bunx`, `uv|poetry run`, `python -m`) and name normalised; `npx vitest`, `uv run pytest -f` or `python3 -m pytest -f` are judged as `vitest` and `pytest -f`. An unreadable wrapper (`npx -c '<line>'`, unknown option) runs directly:
 
 1. **Only a command that a view really reduces is wrapped.** A command whose output `exec` would return as is runs directly: a script chosen by the user (`npm test`, `npm run <script>`, `make <target>`, `just`, `task`, `cargo run`, `go run`, `uv run`…), requested test output (`cargo test -- --nocapture`, `pytest -s`, `mvn test`, `rspec`), a program without a native view or with an identity view (`php -S`, `docker run`, `docker compose …`, `cat`, `tail`), a Git subcommand without a view (`git credential`, `git lfs`, `git gui`, `git citool`, and any other than `log`, `diff`, `show`, `status`). Wrapping would gain nothing and would hold the prompt or the log until the end.
 2. **Blacklist, even with a view**: any command that can read its input or not end.
@@ -15,7 +15,7 @@ Filter migration is still in progress. Earlier measurements do not describe this
 - debugger: `--pdb`, `--trace`, `--pdbcls` (pytest, also through `python -m pytest`);
 - launched programs and servers: `cargo run`, `cargo r`, `go run`, `dotnet run`, `next dev|start`, `npm|pnpm|yarn|bun` with `dev`, `start`, `serve`, `watch` or `preview`, `make|just|task run|serve|server|dev|start|watch|up`, `mvn spring-boot:run|exec:java|exec:exec|jetty:run|quarkus:dev|liberty:dev`, `gradle run|bootRun|appRun|quarkusDev|jettyRun`, `gradle --continuous`;
 - containers, without exception: `docker|podman run|create|start|exec|attach`, `compose run|exec|attach` (`-T` removes the pseudo-terminal, not the input), `compose up` without `-d`, `kubectl exec|run|debug|attach|port-forward|proxy|edit`, `kubectl get -w`;
-- followers: `tail -f`, `journalctl -f`, `docker|kubectl logs -f`, `--watch`, `--follow`, `cargo watch`, `vitest` without `run`, `cat` without a file.
+- followers and watchers, after the wrappers: `tail -f`, `journalctl -f`, `docker|kubectl logs -f`, `--watch`, `--watchAll`, `--follow`, `--looponfail`, `cargo watch`, `vitest` without `run`, `pytest -f` alone or grouped (`-fv`, `-xf`; in `-kf`, `f` is the value of `-k`), `-w` for `tsc`, `vitest`, `mocha`, `webpack`, `rollup`, `babel`, `nodemon`, `cat` without a file. `jest -w` (`--maxWorkers`) also runs directly: the form is too close to a watch to be read safely. Elsewhere `-w` decides nothing (`grep -w`, `git diff -w` stay wrapped).
 
 Limits: a command that has a view, outside this list, and asks a question (a test reading its input, a `cargo test` that starts a server) is still wrapped and its prompt only shows at the end. `lm-resizer exec --stream` shows the output live.
 
@@ -25,7 +25,7 @@ Limits: a command that has a view, outside this list, and asks a question (a tes
 lm-resizer exec -- sh -c 'sleep 47' & sleep 1; kill -9 $!; sleep 1; pgrep -af '^sleep 47'
 ```
 
-`sh` dies, `sleep 47` remains, reparented. Killing them needs a survivor outside `lm-resizer` (which can no longer act after SIGKILL) and a separate process group, which breaks terminal job control (a child reading the terminal would be stopped by SIGTTIN): it is not fixed cleanly here. The hook's prudent rule reduces the surface: servers, scripts and containers are no longer wrapped. Nothing equivalent on macOS or Windows: the child survives an abrupt stop there.
+`sh` dies, `sleep 47` remains, reparented. Killing them needs a survivor outside `lm-resizer` (which can no longer act after SIGKILL) and a separate process group, which breaks terminal job control (a child reading the terminal would be stopped by SIGTTIN): it is not fixed cleanly here. The hook wraps no server, script, container or watcher it recognises (list above); a watcher it does not recognise, wrapped then killed, can leave its grandchildren. Nothing equivalent on macOS or Windows: the child survives an abrupt stop there.
 
 ## `git log`: what stays raw
 
@@ -72,7 +72,7 @@ printf '%s\n' '=== test session starts ===' 'collected 2 items' 'CVE-2024-99999:
 printf '%s\n' ' FAIL  src/a.test.js' 'CVE-2024-99999: token sk-live-SECRET' '  ● sums › adds' '    Expected: 3' '    Received: 4' 'Tests:       1 failed, 1 total' | lm-resizer tool-output --command 'jest' --exit-code 1
 ```
 
-The CVE line is not in the view. The raw output stays in tee (`lm-resizer tee read <id>`); `exec --raw-on-failure` returns every failure raw.
+The CVE line is not in the view. The raw output stays in tee (`lm-resizer tee read <id>`). The id is shown in the view only when the reduction, pointer included, exceeds 30%; otherwise (as for the jest command above) it is in `--json` (`tee_hint`) and in `lm-resizer tee list`; `exec --raw-on-failure` returns every failure raw.
 
 **Outside the rule, measured** (output that a **failing** test causes to be displayed without any flag; transcripts passed through `tool-output`, 23-commit repository, `git log --format=%s` printed by the test):
 

@@ -6092,7 +6092,17 @@ fn command_is_interactive(words: &[String]) -> bool {
                 |token| matches!(token, ShellToken::Segment(seg) if segment_is_interactive(seg)),
             );
     }
-    if command_requires_live_output(&base, &words[1..]) {
+    // Même lecture que la reconnaissance des lanceurs de tests : enveloppes retirées (`npx`,
+    // `npm exec`, `pnpm dlx|exec`, `uv run`, `python -m`…), nom normalisé. Une enveloppe illisible
+    // (`npx -c '<ligne>'`, option inconnue) : on ne sait pas ce qui tourne, la commande part
+    // directement.
+    let Some(inner) = test_views::after_wrappers(words) else {
+        return true;
+    };
+    if inner.len() < words.len() && command_is_interactive(inner) {
+        return true;
+    }
+    if command_requires_live_output(&test_views::program_name(program), &words[1..]) {
         return true;
     }
     const ALWAYS: &[&str] = &[
@@ -6286,7 +6296,18 @@ fn command_requires_live_output(base: &str, args: &[String]) -> bool {
     {
         return true;
     }
-    if base == "pytest" && args.iter().any(|arg| arg == "-f") {
+    // `pytest -f` (looponfail), seul ou groupé (`-fv`, `-xf`).
+    if matches!(base, "pytest" | "py.test") && test_views::pytest_short_option(args, 'f') {
+        return true;
+    }
+    // `-w` ne veut dire « watch » que pour ces programmes ; ailleurs il veut dire autre chose
+    // (`grep -w`, `git diff -w`, `curl -w`) et ne décide rien. `jest -w` est `--maxWorkers`, mais
+    // la forme est trop proche d'une veille pour être lue sûrement : elle part directement.
+    if matches!(
+        base,
+        "tsc" | "vitest" | "mocha" | "webpack" | "rollup" | "babel" | "nodemon" | "jest"
+    ) && args.iter().any(|arg| arg == "-w")
+    {
         return true;
     }
     if matches!(base, "cargo" | "dotnet") && args.first().is_some_and(|arg| arg == "watch") {
@@ -14021,6 +14042,119 @@ Successfully tagged localhost/app:latest\n";
         ] {
             if rewrite_command_for_hook(command, "/opt/lm").is_none() {
                 failures.push(format!("laissée : {command}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// Contre-audit Grok n° 2 (10 octobre) : `tsc -w`, `npx vitest`, `python3 -m pytest -f`,
+    /// `pytest -fv`… étaient enveloppés et restaient muets à une seconde, alors que `tsc --watch`,
+    /// `vitest` et `pytest -f` partaient directement. La détection de la sortie en direct passe par la
+    /// même lecture que la reconnaissance des lanceurs (enveloppes retirées, nom normalisé) et lit les
+    /// options courtes, seules ou groupées. Propriété : chaque forme de veille, sous chaque enveloppe,
+    /// part directement.
+    #[test]
+    fn native_hook_never_wraps_a_watcher_whatever_the_wrapper() {
+        let watchers = [
+            "tsc -w",
+            "tsc -w --pretty false",
+            "tsc --watch",
+            "vitest",
+            "vitest -w",
+            "vitest --watch",
+            "pytest -f",
+            "pytest -fv",
+            "pytest -vf",
+            "pytest -x -f",
+            "pytest --looponfail",
+            "jest -w",
+            "jest --watch",
+            "jest --watchAll",
+        ];
+        let wrap = |wrapper: &str, form: &str| -> Vec<String> {
+            let mut lines = Vec::new();
+            match wrapper {
+                "" => lines.push(form.to_string()),
+                "python -m" | "python3 -m" => {
+                    if let Some(rest) = form.strip_prefix("pytest") {
+                        lines.push(format!("{wrapper} pytest{rest}"));
+                    }
+                }
+                "bash -c" | "bash -lc" | "sh -c" => lines.push(format!("{wrapper} '{form}'")),
+                prefix => lines.push(format!("{prefix} {form}")),
+            }
+            lines
+        };
+        let wrappers = [
+            "",
+            "npx",
+            "npx --no-install",
+            "npx -y",
+            "npm exec --yes",
+            "npm exec --",
+            "pnpm dlx",
+            "pnpm exec",
+            "yarn exec",
+            "bunx",
+            "uv run",
+            "poetry run",
+            "python -m",
+            "python3 -m",
+            "bash -c",
+            "bash -lc",
+            "sh -c",
+        ];
+        let mut failures = Vec::new();
+        for form in watchers {
+            for wrapper in wrappers {
+                for line in wrap(wrapper, form) {
+                    if rewrite_command_for_hook(&line, "/opt/lm").is_some() {
+                        failures.push(format!("enveloppée : {line}"));
+                    }
+                }
+            }
+        }
+        // Lignes exactes du tableau du contre-audit, en plus des combinaisons ci-dessus.
+        for line in [
+            "bash -lc 'tsc -w'",
+            "bash -lc 'npx vitest'",
+            "bash -c 'npx vitest'",
+            "bash -lc 'python -m pytest -f'",
+            "uv run pytest -f",
+            "uv run vitest",
+            "npx --no-install vitest",
+            "npm exec --yes vitest",
+            "pnpm dlx vitest",
+            "pnpm exec vitest",
+            "npm run vitest",
+            "yarn vitest",
+            "pnpm vitest",
+            "npx tsc -w",
+            "npx -c 'vitest run'",
+        ] {
+            if rewrite_command_for_hook(line, "/opt/lm").is_some() {
+                failures.push(format!("enveloppée : {line}"));
+            }
+        }
+        // Témoins finis, qui ont une vue : ils restent enveloppés. `-w` n'est une veille que pour
+        // les programmes où il veut dire « watch ».
+        for line in [
+            "vitest run",
+            "npx vitest run",
+            "pytest -q",
+            "pytest -k foo",
+            "python -m pytest -q",
+            "uv run pytest -q",
+            "tsc --noEmit",
+            "npx jest",
+            "jest",
+            "cargo test",
+            "grep -w foo src",
+            "git diff -w",
+            "git log -n 3",
+        ] {
+            if rewrite_command_for_hook(line, "/opt/lm").is_none() {
+                failures.push(format!("laissée : {line}"));
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));

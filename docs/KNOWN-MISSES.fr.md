@@ -4,7 +4,7 @@ La migration des filtres est en cours. Les mesures antérieures ne décrivent pa
 
 ## Crochet : commandes laissées telles quelles
 
-`exec` garde la sortie jusqu'à la fin du processus (sauf `--stream`). Le crochet (`hook`) et `rewrite-shell` suivent donc une règle prudente, lue sur l'`argv`, pour la commande directe comme pour la ligne de `sh|bash|zsh -c` (un seul de ses segments suffit) :
+`exec` garde la sortie jusqu'à la fin du processus (sauf `--stream`). Le crochet (`hook`) et `rewrite-shell` suivent donc une règle prudente, lue sur l'`argv`, pour la commande directe comme pour la ligne de `sh|bash|zsh -c` (un seul de ses segments suffit). Depuis le 10 octobre, la commande est lue comme la lit la reconnaissance des lanceurs de tests : enveloppes retirées (`npx`, `npm exec`, `pnpm dlx|exec`, `yarn exec`, `bunx`, `uv|poetry run`, `python -m`) et nom normalisé ; `npx vitest`, `uv run pytest -f` ou `python3 -m pytest -f` sont jugés comme `vitest` et `pytest -f`. Une enveloppe illisible (`npx -c '<ligne>'`, option inconnue) part directement :
 
 1. **Seule une commande qu'une vue réduit vraiment est enveloppée.** Une commande dont `exec` rendrait la sortie telle quelle part directement : script choisi par l'utilisateur (`npm test`, `npm run <script>`, `make <cible>`, `just`, `task`, `cargo run`, `go run`, `uv run`…), sortie des tests demandée (`cargo test -- --nocapture`, `pytest -s`, `mvn test`, `rspec`), programme sans vue native ou à vue identité (`php -S`, `docker run`, `docker compose …`, `cat`, `tail`), sous-commande Git sans vue (`git credential`, `git lfs`, `git gui`, `git citool`, et toute autre que `log`, `diff`, `show`, `status`). L'enveloppe n'y gagnerait rien et retiendrait l'invite ou le journal jusqu'à la fin.
 2. **Liste noire, même avec une vue** : toute commande qui peut lire l'entrée ou ne pas finir.
@@ -15,7 +15,7 @@ La migration des filtres est en cours. Les mesures antérieures ne décrivent pa
 - débogueur : `--pdb`, `--trace`, `--pdbcls` (pytest, aussi par `python -m pytest`) ;
 - programmes et serveurs lancés : `cargo run`, `cargo r`, `go run`, `dotnet run`, `next dev|start`, `npm|pnpm|yarn|bun` avec `dev`, `start`, `serve`, `watch` ou `preview`, `make|just|task run|serve|server|dev|start|watch|up`, `mvn spring-boot:run|exec:java|exec:exec|jetty:run|quarkus:dev|liberty:dev`, `gradle run|bootRun|appRun|quarkusDev|jettyRun`, `gradle --continuous` ;
 - conteneurs, sans exception : `docker|podman run|create|start|exec|attach`, `compose run|exec|attach` (`-T` retire le pseudo-terminal, pas l'entrée), `compose up` sans `-d`, `kubectl exec|run|debug|attach|port-forward|proxy|edit`, `kubectl get -w` ;
-- suiveurs : `tail -f`, `journalctl -f`, `docker|kubectl logs -f`, `--watch`, `--follow`, `cargo watch`, `vitest` sans `run`, `cat` sans fichier.
+- suiveurs et veilles, après les enveloppes : `tail -f`, `journalctl -f`, `docker|kubectl logs -f`, `--watch`, `--watchAll`, `--follow`, `--looponfail`, `cargo watch`, `vitest` sans `run`, `pytest -f` seul ou groupé (`-fv`, `-xf` ; dans `-kf`, `f` est la valeur de `-k`), `-w` pour `tsc`, `vitest`, `mocha`, `webpack`, `rollup`, `babel`, `nodemon`, `cat` sans fichier. `jest -w` (`--maxWorkers`) part aussi directement : la forme est trop proche d'une veille pour être lue sûrement. Ailleurs `-w` ne décide rien (`grep -w`, `git diff -w` restent enveloppés).
 
 Limites : une commande qui a une vue, hors de cette liste, et qui pose une question (un test qui lit l'entrée, un `cargo test` qui lance un serveur) reste enveloppée et son invite n'apparaît qu'à la fin. `lm-resizer exec --stream` montre la sortie en direct.
 
@@ -25,7 +25,7 @@ Limites : une commande qui a une vue, hors de cette liste, et qui pose une quest
 lm-resizer exec -- sh -c 'sleep 47' & sleep 1; kill -9 $!; sleep 1; pgrep -af '^sleep 47'
 ```
 
-`sh` meurt, `sleep 47` reste, rattaché à un autre parent. Les tuer exige un survivant extérieur à `lm-resizer` (qui ne peut plus agir après SIGKILL) et un groupe de processus séparé, qui casse le contrôle du terminal (un enfant qui lit le terminal serait arrêté par SIGTTIN) : ce n'est pas corrigé proprement ici. La règle prudente du crochet réduit la surface : les serveurs, les scripts et les conteneurs ne sont plus enveloppés. Rien de tel sous macOS ni Windows : l'enfant y survit à un arrêt brutal.
+`sh` meurt, `sleep 47` reste, rattaché à un autre parent. Les tuer exige un survivant extérieur à `lm-resizer` (qui ne peut plus agir après SIGKILL) et un groupe de processus séparé, qui casse le contrôle du terminal (un enfant qui lit le terminal serait arrêté par SIGTTIN) : ce n'est pas corrigé proprement ici. Le crochet n'enveloppe ni les serveurs, ni les scripts, ni les conteneurs, ni les veilles qu'il reconnaît (liste plus haut) ; une veille qu'il ne reconnaît pas, enveloppée puis tuée, peut laisser ses petits-enfants. Rien de tel sous macOS ni Windows : l'enfant y survit à un arrêt brutal.
 
 ## `git log` : ce qui reste brut
 
@@ -72,7 +72,7 @@ printf '%s\n' '=== test session starts ===' 'collected 2 items' 'CVE-2024-99999:
 printf '%s\n' ' FAIL  src/a.test.js' 'CVE-2024-99999: token sk-live-SECRET' '  ● sums › adds' '    Expected: 3' '    Received: 4' 'Tests:       1 failed, 1 total' | lm-resizer tool-output --command 'jest' --exit-code 1
 ```
 
-La ligne CVE n'est pas dans la vue. Le brut reste dans tee (`lm-resizer tee read <id>`) ; `exec --raw-on-failure` rend tout échec brut.
+La ligne CVE n'est pas dans la vue. Le brut reste dans tee (`lm-resizer tee read <id>`). L'identifiant n'est affiché dans la vue que si la réduction, renvoi compris, dépasse 30 % ; sinon (c'est le cas de la commande jest ci-dessus) il est dans `--json` (`tee_hint`) et dans `lm-resizer tee list` ; `exec --raw-on-failure` rend tout échec brut.
 
 **Hors de la règle, mesuré** (sortie qu'un test **en échec** fait afficher sans aucun drapeau ; transcriptions passées par `tool-output`, dépôt de 23 commits, `git log --format=%s` imprimé par le test) :
 

@@ -401,8 +401,9 @@ fn is_named_harness(word: &str) -> bool {
 }
 
 /// La commande sans les enveloppes : le programme qui tourne vraiment, ou `None` quand une option
-/// d'enveloppe rend ce programme illisible (`npx -c '<ligne>'`, option inconnue).
-fn after_wrappers(command: &[String]) -> Option<&[String]> {
+/// d'enveloppe rend ce programme illisible (`npx -c '<ligne>'`, option inconnue). Partagée par la
+/// reconnaissance des lanceurs de tests et par la détection de la sortie en direct du crochet.
+pub(crate) fn after_wrappers(command: &[String]) -> Option<&[String]> {
     let mut rest = command;
     loop {
         let name = program_name(rest.first()?);
@@ -578,6 +579,39 @@ fn pytest_shows_output(args: &[String]) -> bool {
                 };
                 if shows(option, value) {
                     return true;
+                }
+                break;
+            }
+        }
+    }
+    false
+}
+
+/// Option courte `letter` de pytest, seule ou groupée (`-f`, `-fv`, `-vf`), en respectant les
+/// options courtes qui prennent une valeur (`k m p c o r W n` : la fin du groupe ou l'argument
+/// suivant) : dans `-kf`, `f` est la valeur de `-k`. Les options longues et ce qui suit `--` ne
+/// comptent pas.
+pub(crate) fn pytest_short_option(args: &[String], letter: char) -> bool {
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        index += 1;
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with("--") {
+            continue;
+        }
+        let Some(cluster) = arg.strip_prefix('-') else {
+            continue;
+        };
+        for (offset, option) in cluster.char_indices() {
+            if option == letter {
+                return true;
+            }
+            if "kmpcorWn".contains(option) {
+                if cluster[offset + option.len_utf8()..].is_empty() {
+                    index += 1;
                 }
                 break;
             }
