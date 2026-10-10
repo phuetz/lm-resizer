@@ -27,10 +27,13 @@ Some commands can store raw command output locally for recovery:
 Set `LM_RESIZER_TEE=0` to disable raw-output recovery and
 `LM_RESIZER_TRACKING=0` to disable local history/retrieval counters.
 
-The state directory is created with mode 0700 and its files (raw-output archives,
-`exec-history.jsonl`, the CCR database) with mode 0600 on Unix, whatever the caller's
-umask. Directories and files created by an earlier version keep their old mode: run
-`chmod -R go-rwx ~/lm-resizer` (or your `LM_RESIZER_STATE_DIR`) once. The history stores
+On Unix, creation requests mode 0700 for the state directory and mode 0600 for its
+files (raw-output archives, `exec-history.jsonl`, the CCR database). A restrictive
+umask can remove owner permissions. Existing directories keep their old
+mode. Existing history files, state logs and CCR files are tightened to 0600 if group or
+other permissions are their only fault; an archive with those permissions is refused
+and keeps its mode. Run `chmod -R go-rwx ~/lm-resizer` (or your `LM_RESIZER_STATE_DIR`)
+once for existing directories and archives. The history stores
 command lines as typed and is not redacted: treat it like a shell history file.
 
 A raw-output archive (`tee/<sha256>.log`) is created with `O_CREAT|O_EXCL|O_NOFOLLOW` and never
@@ -53,7 +56,9 @@ The local proxy (`serve`, `wrap`) has no client authentication. It listens on lo
 unless `--allow-non-loopback` is given, answers only requests whose `Host` is local, and
 follows no upstream redirect. Any local account that can reach the port can still use the
 upstream key it holds: do not run it on a shared machine. Give the key through
-`LM_RESIZER_API_KEY` or `--api-key-file`, never on the command line.
+`LM_RESIZER_API_KEY` or `--api-key-file`, never on the command line. On Unix, the key
+file is refused if any group or other permission is set (`mode & 0o077 != 0`).
+Mode 0600 is recommended; modes such as 0400 or 0700 also pass this check.
 
 ## Successful test runners
 
