@@ -42,10 +42,12 @@ is written, no `[tee:]` is shown and a warning names the file: symbolic link, ha
 directory (before 0.2.6, a link planted in a writable tee directory received the raw output,
 secrets included). The history (`exec-history.jsonl`), the hook counter file
 (`hook-audit.jsonl`), the other state logs and the CCR database (`ccr.sqlite3`, opened with
-`SQLITE_OPEN_NOFOLLOW`) are not opened through a symbolic link either, and a log file is written
-only under the same conditions (regular, single link, owned, private); otherwise the line is not
-written and `exec` names the refused history file. A history file left by a version before 0.2.6
-with a group- or world-readable mode is refused until `chmod -R go-rwx` is run once.
+`SQLITE_OPEN_NOFOLLOW`, and its `-wal` and `-shm` files) are not opened through a symbolic link
+either. They are used only if the open descriptor shows a regular file with a single link owned by
+the current user; otherwise nothing is written (`exec` names a refused history or database and
+goes on without it). Unlike a raw-output archive, such a file whose only fault is a group- or
+world-accessible mode (left by a version before 0.2.6) is tightened to 0600 on that descriptor and
+used (decision of 10 October 2026); an archive in that state is still refused.
 
 The local proxy (`serve`, `wrap`) has no client authentication. It listens on loopback only
 unless `--allow-non-loopback` is given, answers only requests whose `Host` is local, and

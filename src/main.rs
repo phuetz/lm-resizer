@@ -2598,8 +2598,9 @@ fn create_private_dir_all(dir: &Path) -> std::io::Result<()> {
 }
 
 /// Ouvre `path` en ajout ; un fichier créé ici l'est en 0600 sous Unix. Sous Unix, un lien
-/// symbolique n'est jamais suivi (`O_NOFOLLOW`) et le fichier ouvert doit être privé (voir
-/// [`refuse_unless_private`]) : sinon rien n'y est écrit.
+/// symbolique n'est jamais suivi (`O_NOFOLLOW`), le fichier ouvert doit être ordinaire, à un seul
+/// lien et à soi (sinon rien n'y est écrit), et un mode trop ouvert est resserré à 0600 (voir
+/// [`refuse_unless_private`]).
 fn open_private_append(path: &Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.create(true).append(true);
@@ -2612,7 +2613,7 @@ fn open_private_append(path: &Path) -> std::io::Result<std::fs::File> {
         let file = options
             .open(path)
             .map_err(|error| refused_open(path, error))?;
-        refuse_unless_private(&file, path)?;
+        refuse_unless_private(&file, path, LooseMode::Tighten)?;
         Ok(file)
     }
     #[cfg(not(unix))]
@@ -2648,10 +2649,27 @@ fn refused_open(path: &Path, error: std::io::Error) -> std::io::Error {
     }
 }
 
-/// Un fichier d'état ouvert n'est utilisé que s'il est ordinaire, à un seul lien, à l'utilisateur
-/// courant et fermé au groupe et aux autres. Contrôle sur le descripteur, pas sur le chemin.
+/// Que faire d'un fichier d'état à soi, ordinaire, à un seul lien, dont seul le mode est trop
+/// ouvert.
 #[cfg(unix)]
-fn refuse_unless_private(file: &std::fs::File, path: &Path) -> std::io::Result<()> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LooseMode {
+    /// Le resserrer à 0600 sur le descripteur déjà contrôlé (`fchmod`) : historique, journaux,
+    /// base CCR (décision du 10 octobre 2026).
+    Tighten,
+    /// Le refuser : archive tee (point 7 de l'audit du 9 octobre).
+    Refuse,
+}
+
+/// Un fichier d'état ouvert n'est utilisé que s'il est ordinaire, à un seul lien et à l'utilisateur
+/// courant ; sinon il est refusé. Ouvert au groupe ou aux autres, il est resserré ou refusé selon
+/// `loose`. Contrôle sur le descripteur, pas sur le chemin.
+#[cfg(unix)]
+fn refuse_unless_private(
+    file: &std::fs::File,
+    path: &Path,
+    loose: LooseMode,
+) -> std::io::Result<()> {
     use std::os::unix::fs::MetadataExt;
     let metadata = file.metadata()?;
     if !metadata.file_type().is_file() {
@@ -2667,6 +2685,10 @@ fn refuse_unless_private(file: &std::fs::File, path: &Path) -> std::io::Result<(
         return Err(refused_state_file(path, "appartient à un autre compte"));
     }
     if metadata.mode() & 0o077 != 0 {
+        if loose == LooseMode::Tighten {
+            use std::os::unix::fs::PermissionsExt;
+            return file.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
         return Err(refused_state_file(
             path,
             &format!(
@@ -2676,6 +2698,22 @@ fn refuse_unless_private(file: &std::fs::File, path: &Path) -> std::io::Result<(
         ));
     }
     Ok(())
+}
+
+/// Un fichier d'état qui existe peut-être déjà (`-wal`, `-shm` de la base CCR) : ouvert sans le
+/// créer ni suivre de lien, mêmes contrôles, mode resserré.
+#[cfg(unix)]
+fn secure_existing_state_file(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    if std::fs::symlink_metadata(path).is_err() {
+        return Ok(());
+    }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .open(path)
+        .map_err(|error| refused_open(path, error))?;
+    refuse_unless_private(&file, path, LooseMode::Tighten)
 }
 
 /// Écrit `bytes` dans `path` (hors Unix ; sous Unix, voir [`write_private_archive`]).
@@ -2713,9 +2751,16 @@ fn open_store(path: Option<PathBuf>) -> Result<Box<dyn CcrStore>> {
     if let Some(parent) = path.parent() {
         create_private_dir_all(parent)?;
     }
-    // Créée vide en 0600 avant SQLite : ses fichiers `-wal` et `-shm` héritent de ce mode.
-    if !path.exists() {
-        open_private_append(&path)?;
+    // Créée vide en 0600 avant SQLite (ses fichiers `-wal` et `-shm` héritent de ce mode), ou
+    // contrôlée si elle existe : jamais à travers un lien symbolique ni un lien dur, jamais à un
+    // autre compte, mode resserré à 0600 (avant : `exists()` suivait le lien, et une base en 0644
+    // le restait). Les `-wal` et `-shm` déjà présents passent les mêmes contrôles.
+    open_private_append(&path)?;
+    #[cfg(unix)]
+    for suffix in ["-wal", "-shm"] {
+        let mut companion = path.clone().into_os_string();
+        companion.push(suffix);
+        secure_existing_state_file(Path::new(&companion))?;
     }
     let cfg = CcrBackendConfig::sqlite_default(path);
     Ok(from_config(&cfg)?)
@@ -2752,8 +2797,17 @@ fn open_store_or_warn(path: Option<PathBuf>) -> Option<Box<dyn CcrStore>> {
         .unwrap_or_else(|| PathBuf::from("lm-resizer"));
     match open_store(path) {
         Ok(store) => Some(store),
-        Err(_) => {
-            warn_state_unwritable(&shown);
+        Err(error) => {
+            match error.downcast_ref::<std::io::Error>() {
+                // Refus nommé (lien, lien dur, autre compte, type) : l'erreur n'a pas de code système.
+                Some(io)
+                    if io.kind() == std::io::ErrorKind::PermissionDenied
+                        && io.raw_os_error().is_none() =>
+                {
+                    eprintln!("lm-resizer: base CCR refusée, réduction sans base : {io}");
+                }
+                _ => warn_state_unwritable(&shown),
+            }
             None
         }
     }
@@ -5809,7 +5863,7 @@ fn write_private_archive(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             .custom_flags(nofollow | rustix::fs::OFlags::NONBLOCK.bits() as i32)
             .open(path)
             .map_err(|error| refused_open(path, error))?;
-        refuse_unless_private(&file, path)?;
+        refuse_unless_private(&file, path, LooseMode::Refuse)?;
         let metadata = file.metadata()?;
         // Le nom est l'empreinte du contenu, mais rien ne garantit que le fichier déjà là la
         // respecte (écriture interrompue, fichier altéré) : son contenu est relu et comparé, puis
@@ -5958,8 +6012,8 @@ fn record_exec_history(report: &ExecReport, elapsed: Duration) -> Result<()> {
                     && io.raw_os_error().is_none() =>
             {
                 eprintln!(
-                    "lm-resizer: historique non écrit, fichier refusé : {io}. Supprimez-le ou \
-                     lancez `chmod -R go-rwx {}`",
+                    "lm-resizer: historique non écrit, fichier refusé : {io}. Supprimez-le, \
+                     un nouvel historique privé sera créé ({})",
                     state_path_for_warning(None).display()
                 );
             }
