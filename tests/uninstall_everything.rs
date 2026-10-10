@@ -270,3 +270,36 @@ fn uninstall_with_scope_all_removes_project_and_global_entries() {
     );
     assert!(left.is_empty(), "restent : {left:?}");
 }
+
+/// Revue DeepSeek du 10 octobre : `uninstall-hooks` annonçait « Removed 0 lm-resizer hook
+/// blocks » alors qu'il retirait ensuite les fichiers de crochets natifs. Le bilan compte chaque
+/// sorte de fichier.
+#[test]
+fn uninstall_hooks_summary_counts_native_hook_files() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let (home, project) = (home.path(), project.path());
+    let dir = project.to_str().unwrap();
+    let out = cli(
+        home,
+        project,
+        &[
+            "init-native-hooks",
+            "--client",
+            "cursor",
+            "--project-dir",
+            dir,
+        ],
+    );
+    assert!(out.status.success(), "{out:?}");
+    let out = cli(
+        home,
+        project,
+        &["uninstall-hooks", "--client", "all", "--project-dir", dir],
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.starts_with("Removed 0 instruction blocks, 0 helper files and 1 native hook file"),
+        "{text}"
+    );
+}

@@ -2485,7 +2485,15 @@ async fn run(cli: Cli) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!("Removed {} lm-resizer hook blocks", report.removed);
+                let plural = |count: usize, word: &str| {
+                    format!("{count} {word}{}", if count == 1 { "" } else { "s" })
+                };
+                println!(
+                    "Removed {}, {} and {}",
+                    plural(report.removed, "instruction block"),
+                    plural(report.helpers_removed.len(), "helper file"),
+                    plural(report.native_files_removed.len(), "native hook file")
+                );
                 for file in report.instruction_files {
                     println!("  updated {file}");
                 }
