@@ -1,13 +1,19 @@
-//! One producer and one shared pipe for both output channels. Drain before
-//! waiting, without a byte limit or per-stream reconstruction; EOF also covers
-//! inherited writers that outlive the immediate producer.
-use std::io::Read;
+//! Producer capture with either one shared pipe or two provenance-preserving
+//! pipes. Drain before waiting, without a byte limit; EOF also covers inherited
+//! writers that outlive the immediate producer.
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 
 pub struct Capture {
     pub raw: Vec<u8>,
+    pub streams: Option<Streams>,
     pub code: i32,
     pub launch_error: Option<String>,
+}
+
+pub struct Streams {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
 /// Windows `cmd.exe /c <line>` re-parses its own command line: Rust's usual
@@ -177,48 +183,239 @@ fn die_with_parent(command: &mut Command) {
 fn die_with_parent(_command: &mut Command) {}
 
 pub fn run(command: &[String]) -> anyhow::Result<Capture> {
+    run_shared(command)
+}
+
+/// Capture stdout and stderr independently for the displayed view while the
+/// raw tee receives the unlabelled chunks in the order observed by the two
+/// drain workers. Streaming retains each channel's native destination.
+pub fn run_separated(command: &[String], stream: bool) -> anyhow::Result<Capture> {
+    #[derive(Clone, Copy)]
+    enum Channel {
+        Stdout,
+        Stderr,
+    }
+
+    fn drain<R: Read>(
+        mut reader: R,
+        channel: Channel,
+        sender: std::sync::mpsc::Sender<(Channel, Vec<u8>)>,
+    ) -> std::io::Result<()> {
+        let mut chunk = [0u8; 8192];
+        loop {
+            let count = match reader.read(&mut chunk) {
+                Ok(count) => count,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            };
+            if count == 0 {
+                return Ok(());
+            }
+            if sender.send((channel, chunk[..count].to_vec())).is_err() {
+                return Ok(());
+            }
+        }
+    }
+
+    let (program, args) = command
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("missing producer"))?;
+    let resolved = crate::resolve_command_path(program).unwrap_or_else(|| program.into());
+    let mut producer = build_command(&resolved, args);
+    producer
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let grouped = crate::capture_interrupt::configure_process_group(&mut producer);
+    let interrupt_guard = crate::capture_interrupt::relay_interruptions(grouped)
+        .map_err(|error| anyhow::anyhow!("cannot install producer interruption relay: {error}"))?;
+    let result = producer.spawn();
+    drop(producer);
+    let mut child = match result {
+        Ok(child) => child,
+        Err(error) => return Ok(launch_failure(program, &error)),
+    };
+    if let Err(error) = interrupt_guard.set_child(&child) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(anyhow::anyhow!(
+            "cannot register producer interruption relay: {error}"
+        ));
+    }
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("failed to capture stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("failed to capture stderr"))?;
+    let mut tee = crate::capture_interrupt::DurableTee::create();
+    let mut raw = Vec::new();
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
+    let mut show_stdout = stream;
+    let mut show_stderr = stream;
+
+    let drained = std::thread::scope(|scope| -> anyhow::Result<()> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let stdout_worker = scope.spawn({
+            let sender = sender.clone();
+            move || drain(stdout, Channel::Stdout, sender)
+        });
+        let stderr_worker = scope.spawn({
+            let sender = sender.clone();
+            move || drain(stderr, Channel::Stderr, sender)
+        });
+        drop(sender);
+
+        for (channel, chunk) in receiver {
+            tee.append(&chunk);
+            raw.extend_from_slice(&chunk);
+            match channel {
+                Channel::Stdout => {
+                    stdout_bytes.extend_from_slice(&chunk);
+                    if show_stdout {
+                        let mut output = std::io::stdout().lock();
+                        if output
+                            .write_all(&chunk)
+                            .and_then(|()| output.flush())
+                            .is_err()
+                        {
+                            show_stdout = false;
+                        }
+                    }
+                }
+                Channel::Stderr => {
+                    stderr_bytes.extend_from_slice(&chunk);
+                    if show_stderr {
+                        let mut output = std::io::stderr().lock();
+                        if output
+                            .write_all(&chunk)
+                            .and_then(|()| output.flush())
+                            .is_err()
+                        {
+                            show_stderr = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        stdout_worker
+            .join()
+            .map_err(|_| anyhow::anyhow!("stdout capture worker panicked"))??;
+        stderr_worker
+            .join()
+            .map_err(|_| anyhow::anyhow!("stderr capture worker panicked"))??;
+        Ok(())
+    });
+    if let Err(error) = drained {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = tee.finish(&raw);
+        return Err(error);
+    }
+
+    let status = child.wait()?;
+    let _ = tee.finish(&raw);
+    Ok(Capture {
+        raw,
+        streams: Some(Streams {
+            stdout: stdout_bytes,
+            stderr: stderr_bytes,
+        }),
+        code: crate::child_exit_code(status),
+        launch_error: None,
+    })
+}
+
+fn run_shared(command: &[String]) -> anyhow::Result<Capture> {
     let (program, args) = command
         .split_first()
         .ok_or_else(|| anyhow::anyhow!("missing producer"))?;
     let resolved = crate::resolve_command_path(program).unwrap_or_else(|| program.into());
     let (mut reader, writer) = std::io::pipe()?;
-    let result = build_command(&resolved, args)
+    let mut producer = build_command(&resolved, args);
+    producer
         .stdin(Stdio::inherit())
         .stdout(Stdio::from(writer.try_clone()?))
-        .stderr(Stdio::from(writer))
-        .spawn();
+        .stderr(Stdio::from(writer));
+    let grouped = crate::capture_interrupt::configure_process_group(&mut producer);
+    // Install before spawn so a signal cannot terminate lm-resizer in the
+    // interval between creating the producer and registering the relay.
+    let interrupt_guard = crate::capture_interrupt::relay_interruptions(grouped)
+        .map_err(|error| anyhow::anyhow!("cannot install producer interruption relay: {error}"))?;
+    let result = producer.spawn();
+    // `Command` retains its configured Stdio handles after spawn. Close those
+    // parent-side writer copies so EOF reflects the producer group exiting.
+    drop(producer);
     match result {
         Ok(mut child) => {
+            if let Err(error) = interrupt_guard.set_child(&child) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(anyhow::anyhow!(
+                    "cannot register producer interruption relay: {error}"
+                ));
+            }
+            let mut tee = crate::capture_interrupt::DurableTee::create();
             let mut raw = Vec::new();
-            reader.read_to_end(&mut raw)?;
+            let mut chunk = [0u8; 8192];
+            loop {
+                let count = match reader.read(&mut chunk) {
+                    Ok(count) => count,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => {
+                        // A broken capture pipe can otherwise leave a producer
+                        // blocked forever. End it, reap it, and keep the
+                        // incrementally flushed tee available for diagnosis.
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        let _ = tee.finish(&raw);
+                        return Err(error.into());
+                    }
+                };
+                if count == 0 {
+                    break;
+                }
+                tee.append(&chunk[..count]);
+                raw.extend_from_slice(&chunk[..count]);
+            }
             let status = child.wait()?;
+            let _ = tee.finish(&raw);
             Ok(Capture {
                 raw,
+                streams: None,
                 code: crate::child_exit_code(status),
                 launch_error: None,
             })
         }
-        Err(error) => {
-            let (code, message) = launch_failure(program, &error);
-            Ok(Capture {
-                raw: Vec::new(),
-                code,
-                launch_error: Some(message),
-            })
-        }
+        Err(error) => Ok(launch_failure(program, &error)),
     }
 }
 
 /// Message d'échec de lancement. Pour une commande introuvable, on nomme la
 /// commande et on dit où elle a été cherchée, au lieu du seul « os error 2 »
 /// qui laisse croire à un fichier d'lm-resizer manquant.
-pub fn launch_failure(program: &str, error: &std::io::Error) -> (i32, String) {
-    let code = if error.kind() == std::io::ErrorKind::PermissionDenied {
-        126
-    } else {
-        127
-    };
-    (code, launch_error_message(program, error))
+pub fn launch_failure(program: &str, error: &std::io::Error) -> Capture {
+    #[cfg(windows)]
+    let invalid_image = matches!(error.raw_os_error(), Some(193 | 216));
+    #[cfg(unix)]
+    let invalid_image = error.raw_os_error() == Some(8); // ENOEXEC
+    #[cfg(not(any(windows, unix)))]
+    let invalid_image = false;
+    Capture {
+        raw: Vec::new(),
+        streams: None,
+        code: if error.kind() == std::io::ErrorKind::PermissionDenied || invalid_image {
+            126
+        } else {
+            127
+        },
+        launch_error: Some(launch_error_message(program, error)),
+    }
 }
 
 fn launch_error_message(program: &str, error: &std::io::Error) -> String {

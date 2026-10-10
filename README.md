@@ -1,6 +1,6 @@
 # LM Resizer
 
-**Shorten noisy command output before it reaches your coding agent — and never lose a failure.** LM Resizer is a fast, local Rust CLI for developers who drive tests, builds, Git, containers and other tools through an AI coding agent such as Claude Code, Codex, Cursor, Gemini CLI, an MCP client or a custom pipeline. It runs a command, keeps a compact result for the agent, and stores the byte-exact original for instant recall.
+**Shorten noisy command output before it reaches your coding agent — and never lose a failure.** LM Resizer is a fast, local Rust CLI for developers who drive tests, builds, Git, containers and other tools through an AI coding agent such as Claude Code, Codex, Cursor, Gemini CLI, an MCP client or a custom pipeline. It runs a command, keeps a compact result for the agent, and stores the original for instant recall: the bytes and the order of each stream are exact, while the order between stdout and stderr is guaranteed only in the default mode (see [Recover the exact output](#recover-the-exact-output)).
 
 On a benchmark of 61 command captures it saves a mean of **27.61%** of tokens (median **4.87%**) with the raw recovery included, keeps the producer's exit code in **61/61** cases and starts in about **5 ms** (`lm-resizer --version`; an `exec` run also launches the wrapped command and takes about **20 ms**). Zero telemetry, 100% local, deterministic.
 
@@ -73,6 +73,8 @@ LM Resizer's replayed median (4.87%) and mean (27.61%) are both below the refere
 
 Check the install works anywhere, with no repository needed:
 
+On Windows, use `lm-resizer exec -- cmd.exe /d /c echo hello` for the first example.
+
 ~~~bash
 lm-resizer --version
 lm-resizer exec -- echo hello
@@ -95,7 +97,7 @@ For any producer, `lm-resizer err|test|summary -- <command>` keeps diagnostics o
 
 For scripts, use `lm-resizer gain --json`.
 
-`exec` preserves the producer's status (128 + signal on Unix). `--stream` and `--raw-on-failure` keep stdout and stderr apart and print the `[stderr]` marker; the default shortened view does not, so use one of them when the origin of a line matters.
+`exec` preserves the producer's status (128 + signal on Unix). With `--stream` or `--raw-on-failure`, the displayed view retains separate streams: stdout comes first, then the `[stderr]` boundary, so cross-stream chronology is not implied. The default shortened view does not keep them apart, so use one of these options when the origin of a line matters. JSON reports expose the byte counts and this layout in `streams`.
 
 ## The diagnostic guarantee
 
@@ -105,7 +107,7 @@ LM Resizer shortens, it does not hide. Command views keep literal numbers, paths
 
 ## Recover the exact output
 
-`exec` drains a shared stdout/stderr pipe through EOF, without a 10 MiB ceiling. A sufficiently reduced view may display `[tee:<id>]`; read it with `lm-resizer tee read <id>`; otherwise `tee list` and the JSON `tee_hint` field provide recovery without adding tokens to the view.
+`exec` drains output through EOF, without a 10 MiB ceiling. The tee contains the producer bytes only: it never includes the view's `[stderr]` boundary or capture annotation. By default `exec` drains one shared pipe, so the tee keeps the producer's write order. In separate-stream modes (`--stream`, `--raw-on-failure`), each stream's bytes are exact and in order, but chunks are archived in drain order: the order between stdout and stderr is not guaranteed, and a chunk of one stream can fall inside a long line of the other. A sufficiently reduced view may display `[tee:<id>]`; read it with `lm-resizer tee read <id>`; otherwise `tee list` and the JSON `tee_hint` field provide recovery without adding tokens to the view.
 
 `tee list` is ordered by file name, which is a hash of the content, not by date: its first entry is not "the last output". Take the identifier from the view (`[tee:<id>]`), from the `tee_hint` field of a `--json` report, or from the `[raw: …]` marker, then read it:
 

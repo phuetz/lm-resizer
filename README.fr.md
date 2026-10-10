@@ -1,6 +1,6 @@
 # LM Resizer
 
-**Raccourcissez les sorties de commande bruyantes avant qu'elles n'atteignent votre agent de code — sans jamais perdre un seul échec.** LM Resizer est un CLI Rust local et rapide, destiné aux développeurs qui pilotent tests, compilations, Git, conteneurs et autres outils depuis un agent de code comme Claude Code, Codex, Cursor, Gemini CLI, un client MCP ou un pipeline maison. Il lance une commande, garde un résultat compact pour l'agent et conserve l'original exact pour un rappel immédiat.
+**Raccourcissez les sorties de commande bruyantes avant qu'elles n'atteignent votre agent de code — sans jamais perdre un seul échec.** LM Resizer est un CLI Rust local et rapide, destiné aux développeurs qui pilotent tests, compilations, Git, conteneurs et autres outils depuis un agent de code comme Claude Code, Codex, Cursor, Gemini CLI, un client MCP ou un pipeline maison. Il lance une commande, garde un résultat compact pour l'agent et conserve l'original pour un rappel immédiat : les octets et l'ordre de chaque flux sont exacts, tandis que l'ordre entre stdout et stderr n'est garanti que dans le mode par défaut (voir [Récupérer la sortie exacte](#récupérer-la-sortie-exacte)).
 
 Sur un banc de 61 captures de commandes, il économise en moyenne **27,61 %** de jetons (médiane **4,87 %**), rappel du brut compris, conserve le code de sortie du producteur dans **61/61** cas et démarre en environ **5 ms** (`lm-resizer --version` ; un `exec` lance aussi la commande enveloppée et prend environ **20 ms**). Zéro télémétrie, 100 % local, déterministe.
 
@@ -95,7 +95,7 @@ Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagno
 
 Pour les scripts, utiliser `lm-resizer gain --json`.
 
-`exec` conserve le statut du producteur (128 + signal sous Unix). `--stream` et `--raw-on-failure` gardent stdout et stderr séparés et affichent le marqueur `[stderr]` ; la vue raccourcie par défaut ne le fait pas, utilisez l'une des deux quand l'origine d'une ligne compte.
+`exec` conserve le statut du producteur (128 + signal sous Unix). Avec `--stream` ou `--raw-on-failure`, la vue conserve les flux séparés : stdout vient d'abord, puis la frontière `[stderr]`, sans promettre la chronologie entre flux. La vue raccourcie par défaut ne les sépare pas : utilisez l'une de ces options quand l'origine d'une ligne compte. Les rapports JSON exposent les nombres d'octets et cette disposition dans `streams`.
 
 ## La garantie diagnostique
 
@@ -105,7 +105,7 @@ LM Resizer raccourcit, il ne cache pas. Les vues de commandes conservent littér
 
 ## Récupérer la sortie exacte
 
-`exec` archive stdout et stderr entrelacés jusqu'à EOF, sans plafond de 10 Mio. Une vue suffisamment réduite peut afficher `[tee:<id>]` ; le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.
+`exec` archive la sortie jusqu'à EOF, sans plafond de 10 Mio. Le tee ne contient que les octets du producteur : jamais la frontière `[stderr]` ni l'annotation ajoutées à la vue. Par défaut, `exec` draine un seul tube commun : le tee garde l'ordre d'écriture du producteur. Dans les modes à flux séparés (`--stream`, `--raw-on-failure`), les octets de chaque flux sont exacts et dans leur ordre, mais les blocs sont archivés dans l'ordre de leur drainage : l'ordre entre stdout et stderr n'est pas garanti, et un bloc d'un flux peut tomber au milieu d'une longue ligne de l'autre. Une vue suffisamment réduite peut afficher `[tee:<id>]` ; le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.
 
 `tee list` est trié par nom de fichier, qui est une empreinte du contenu, pas par date : sa première entrée n'est pas « la dernière sortie ». Prenez l'identifiant dans la vue (`[tee:<id>]`), dans le champ `tee_hint` d'un rapport `--json` ou dans le marqueur `[raw: …]`, puis lisez-le :
 

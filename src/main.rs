@@ -40,6 +40,7 @@ use walkdir::WalkDir;
 
 mod advice_cli;
 mod agent_hooks;
+mod capture_interrupt;
 mod command_capture;
 mod command_filters;
 mod command_views;
@@ -3265,33 +3266,26 @@ fn run_exec_command(
         return run_inspected_command(command, None, store, query);
     }
     let started = Instant::now();
-    let (program, args) = command.split_first().context("missing command for exec")?;
-    let resolved_program = resolve_command_path(program).unwrap_or_else(|| PathBuf::from(program));
-    let (exit_code, raw_bytes, streams) = if stream {
-        run_command_streaming(&resolved_program, args, &command.join(" "))?
-    } else {
-        match command_capture::build_command(&resolved_program, args)
-            .stdin(Stdio::inherit())
-            .output()
-        {
-            Ok(output) => (
-                child_exit_code(output.status),
-                combine_command_bytes(&output.stdout, &output.stderr),
-                CapturedStreams::new(&output.stdout, &output.stderr),
-            ),
-            Err(error) => {
-                let (code, message) = command_capture::launch_failure(program, &error);
-                let bytes = message.into_bytes();
-                let streams = CapturedStreams::new(&[], &bytes);
-                (code, bytes, streams)
-            }
-        }
-    };
-
-    let raw = display_captured_bytes(&raw_bytes);
+    let captured = command_capture::run_separated(command, stream)?;
+    let exit_code = captured.code;
+    let raw_bytes = captured.raw;
+    let view_bytes = captured
+        .streams
+        .as_ref()
+        .map(|streams| combine_command_bytes(&streams.stdout, &streams.stderr))
+        .unwrap_or_else(|| raw_bytes.clone());
+    let streams = captured
+        .streams
+        .as_ref()
+        .map(|streams| CapturedStreams::new(&streams.stdout, &streams.stderr));
+    let launch_error = captured.launch_error;
+    let failed_to_launch = launch_error.is_some();
+    let raw = launch_error.unwrap_or_else(|| display_captured_bytes(&view_bytes));
     perf_stage("capture", started.elapsed());
     let phase = Instant::now();
-    let (filter, mut filtered) = if raw_on_failure && exit_code != 0 {
+    let (filter, mut filtered) = if failed_to_launch {
+        ("native:launch-error".to_string(), raw.clone())
+    } else if raw_on_failure && exit_code != 0 {
         ("raw_on_failure".to_string(), raw.clone())
     } else if successful_test_run(command, exit_code) {
         ("lossless:test-success".to_string(), raw.clone())
@@ -3380,9 +3374,12 @@ fn run_exec_command(
         compressed.steps_applied.clear();
         compressed.cache_keys.clear();
     }
-    let tee_hint = tee_raw_bytes_if_useful(&raw_bytes, &compressed.output)?;
+    let tee_hint = archive_raw_bytes(&raw_bytes)?;
     let mut final_output = compressed.output;
-    if streams.stdout_bytes > 0 && streams.stderr_bytes > 0 {
+    if streams
+        .as_ref()
+        .is_some_and(|streams| streams.stdout_bytes > 0 && streams.stderr_bytes > 0)
+    {
         if !final_output.ends_with('\n') {
             final_output.push('\n');
         }
@@ -3396,15 +3393,15 @@ fn run_exec_command(
     perf_stage("tee", phase.elapsed());
     let phase = Instant::now();
     let report = ExecReport {
-        streams: Some(streams),
+        streams,
         tokens: TokenCounts::measure(&raw, &final_output),
         command: command.join(" "),
         exit_code,
         filter,
-        original_bytes: raw_bytes.len(),
+        original_bytes: view_bytes.len(),
         filtered_bytes: filtered.len(),
         compressed_bytes: final_output.len(),
-        bytes_saved: raw_bytes.len().saturating_sub(final_output.len()),
+        bytes_saved: view_bytes.len().saturating_sub(final_output.len()),
         compression_steps: compressed.steps_applied,
         cache_keys: compressed.cache_keys,
         tee_hint,
@@ -3557,71 +3554,6 @@ fn prepend_failure_status(output: &mut String, exit_code: i32) {
     }
 }
 
-fn run_command_streaming(
-    program: &Path,
-    args: &[String],
-    display: &str,
-) -> Result<(i32, Vec<u8>, CapturedStreams)> {
-    let result = command_capture::build_command(program, args)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
-    let mut child = match result {
-        Ok(child) => child,
-        Err(error) => {
-            let (code, message) = command_capture::launch_failure(display, &error);
-            let bytes = message.into_bytes();
-            let streams = CapturedStreams::new(&[], &bytes);
-            return Ok((code, bytes, streams));
-        }
-    };
-
-    let stdout = child.stdout.take().context("failed to capture stdout")?;
-    let stderr = child.stderr.take().context("failed to capture stderr")?;
-    let streams = std::thread::scope(|scope| {
-        let workers = [
-            scope.spawn(|| stream_reader(stdout, false)),
-            scope.spawn(|| stream_reader(stderr, true)),
-        ];
-        workers
-            .into_iter()
-            .map(|worker| {
-                worker
-                    .join()
-                    .map_err(|_| anyhow::anyhow!("output capture worker panicked"))?
-            })
-            .collect::<Result<Vec<_>>>()
-    })?;
-    let status = child.wait()?;
-    Ok((
-        child_exit_code(status),
-        combine_command_bytes(&streams[0], &streams[1]),
-        CapturedStreams::new(&streams[0], &streams[1]),
-    ))
-}
-
-fn stream_reader<R: std::io::Read>(reader: R, stderr: bool) -> Result<Vec<u8>> {
-    let mut reader = std::io::BufReader::new(reader);
-    let mut captured = Vec::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        let read = std::io::Read::read(&mut reader, &mut buf)?;
-        if read == 0 {
-            break;
-        }
-        captured.extend_from_slice(&buf[..read]);
-        if stderr {
-            std::io::stderr().write_all(&buf[..read])?;
-            std::io::stderr().flush()?;
-        } else {
-            std::io::stdout().write_all(&buf[..read])?;
-            std::io::stdout().flush()?;
-        }
-    }
-    Ok(captured)
-}
-
 fn child_exit_code(status: std::process::ExitStatus) -> i32 {
     #[cfg(unix)]
     let interrupted = {
@@ -3646,6 +3578,25 @@ fn combine_command_bytes(stdout: &[u8], stderr: &[u8]) -> Vec<u8> {
 }
 
 fn display_captured_bytes(bytes: &[u8]) -> String {
+    // Decode only a complete, valid BOM-tagged UTF-16 capture. The tee always
+    // retains the original bytes, including the BOM and Windows line endings.
+    let utf16_le = bytes.starts_with(&[0xff, 0xfe]);
+    let utf16_be = bytes.starts_with(&[0xfe, 0xff]);
+    if (utf16_le || utf16_be) && bytes.len().is_multiple_of(2) {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|pair| {
+                if utf16_le {
+                    u16::from_le_bytes([pair[0], pair[1]])
+                } else {
+                    u16::from_be_bytes([pair[0], pair[1]])
+                }
+            })
+            .collect();
+        if let Ok(text) = String::from_utf16(&units) {
+            return text;
+        }
+    }
     if let Ok(text) = std::str::from_utf8(bytes) {
         return text.to_string();
     }
@@ -8314,8 +8265,16 @@ fn upsert_marked_block(path: &Path, block: &str) -> Result<()> {
     } else {
         String::new()
     };
-    let stripped = strip_marked_block(&existing);
-    let mut next = stripped.trim_end().to_string();
+    let mut next = existing.clone();
+    if let Some(start) = existing.find(HOOK_BLOCK_START) {
+        if let Some(end) = existing[start..].find(HOOK_BLOCK_END) {
+            let end = start + end + HOOK_BLOCK_END.len();
+            next.replace_range(start..end, block.trim());
+            std::fs::write(path, next)?;
+            return Ok(());
+        }
+    }
+    next = next.trim_end().to_string();
     if !next.is_empty() {
         next.push_str("\n\n");
     }
