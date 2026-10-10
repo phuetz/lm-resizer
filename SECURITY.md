@@ -94,7 +94,9 @@ into `lm-resizer exec -- <command>` through `updatedInput`.
 - A command received as a JSON array is an argument vector: the rewritten command stays an array
   (`["<lm-resizer>", "exec", "--", …]`), run without a shell. Before 0.2.6 the elements were
   joined with spaces, so `*` was expanded and `--format=%h %s` split in two. An array with a
-  non-text element is not rewritten.
+  non-text element is not always refused: the fallback may extract a command from it and replace
+  the array with a string, so `["cargo test", 1]` may be rewritten from `cargo test`, without the
+  number. No known client sends an array (Claude, Cursor and Codex document a string).
 - The hook rewrites only a command that a view really reduces, and never one that can read its
   input or not end: `exec` keeps the output until the process exits, so a `Password:` prompt, a
   host-key question or a server log would never show. A script (`npm test`, `npm run server`,
