@@ -64,8 +64,18 @@ impl SqliteCcrStore {
         let path_buf = path.as_ref().to_path_buf();
         // Jamais à travers un lien symbolique : un lien posé dans un dossier d'état ouvert en
         // écriture ferait écrire la base (sorties brutes comprises) dans le fichier visé.
+        // SQLITE_OPEN_NOFOLLOW refuse un lien dans N'IMPORTE QUEL élément du chemin : le dossier
+        // parent est donc d'abord résolu (macOS : /var -> /private/var ; un HOME derrière un lien),
+        // et le refus ne porte plus que sur le fichier de la base lui-même.
+        let open_path = match (path_buf.parent(), path_buf.file_name()) {
+            (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+                std::fs::canonicalize(parent)
+                    .map_or_else(|_| path_buf.clone(), |dir| dir.join(name))
+            }
+            _ => path_buf.clone(),
+        };
         let conn = Connection::open_with_flags(
-            &path_buf,
+            &open_path,
             rusqlite::OpenFlags::default() | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
 
