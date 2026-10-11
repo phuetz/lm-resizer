@@ -2,7 +2,7 @@
 //! et son sujet, ou la sortie est rendue brute. L'original reste relisible par `tee read`.
 #![cfg(unix)]
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
 
 fn git(dir: &Path, args: &[&str]) -> Vec<u8> {
     let output = Command::new("git")
@@ -79,6 +79,10 @@ fn repository(with_sentinel: bool) -> tempfile::TempDir {
 }
 
 fn lm_resizer(dir: &Path, state: &Path, args: &[&str]) -> std::process::Output {
+    lm_resizer_with_input(dir, state, args, None)
+}
+
+fn lm_resizer_with_input(dir: &Path, state: &Path, args: &[&str], input: Option<&Path>) -> Output {
     Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
         .current_dir(dir)
         .env("LM_RESIZER_STATE_DIR", state)
@@ -87,8 +91,46 @@ fn lm_resizer(dir: &Path, state: &Path, args: &[&str]) -> std::process::Output {
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .args(args)
+        .stdin(test_input(input))
         .output()
         .unwrap()
+}
+
+fn test_input(input: Option<&Path>) -> Stdio {
+    input.map_or_else(Stdio::null, |path| {
+        Stdio::from(std::fs::File::open(path).unwrap())
+    })
+}
+
+/// Seules les absences sont sautées : un programme présent qui échoue fait échouer le test.
+fn available_program(candidates: &[&'static str]) -> Option<&'static str> {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    for &program in candidates {
+        if std::env::split_paths(&path).any(|dir| {
+            std::fs::metadata(dir.join(program))
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        }) {
+            if program != candidates[0] {
+                writeln!(
+                    std::io::stderr().lock(),
+                    "[INFO] {} remplacé par {program}",
+                    candidates[0]
+                )
+                .unwrap();
+            }
+            return Some(program);
+        }
+    }
+    // Écriture directe : visible même quand libtest capture les sorties des tests réussis.
+    writeln!(
+        std::io::stderr().lock(),
+        "[SKIP] cas {} : aucun exécutable dans PATH",
+        candidates.join(" / ")
+    )
+    .unwrap();
+    None
 }
 
 /// (arguments après `git`, nombre de commits attendus, la sortie montre-t-elle le hash ?,
@@ -731,6 +773,16 @@ fn exec_gives_raw(
     let mut wrapped = vec!["exec", "--"];
     wrapped.extend(args);
     let out = lm_resizer(repo.path(), state, &wrapped);
+    output_gives_raw(&out, code, direct, label, failures);
+}
+
+fn output_gives_raw(
+    out: &Output,
+    code: i32,
+    direct: &[u8],
+    label: &str,
+    failures: &mut Vec<String>,
+) {
     if out.status.code() != Some(code) {
         failures.push(format!(
             "{label}: code {:?} au lieu de {code}",
@@ -758,30 +810,93 @@ fn wrappers_in_front_of_a_shell_running_git_log_are_returned_raw() {
     let repo = trap_history();
     let state = tempfile::tempdir().unwrap();
     let mut failures = Vec::new();
+    let sh = available_program(&["sh"]);
+    let wrappers = [
+        (available_program(&["env"]), vec![]),
+        (available_program(&["timeout", "gtimeout"]), vec!["20"]),
+        (available_program(&["nice"]), vec![]),
+        (available_program(&["stdbuf", "gstdbuf"]), vec!["-oL"]),
+    ];
+    let bash = available_program(&["bash"]);
+    let xargs = available_program(&["xargs"]);
+    // Une entrée réelle force une invocation sur GNU ET BSD (entrée vide : GNU lance,
+    // macOS ne lance rien). Le mot devient $0 du shell, sans modifier la commande Git.
+    // man xargs, -r et EXIT STATUS :
+    // https://github.com/apple-oss-distributions/shell_cmds/blob/main/xargs/xargs.1
+    // https://www.gnu.org/software/findutils/manual/html_node/find_html/Invoking-xargs.html
+    // GNU renvoie 123 pour un enfant sortant en 1..=125 ; macOS/BSD renvoie 1.
+    // Mesurer le binaire réel couvre aussi GNU installé sur macOS. Linux garde l'exigence 123.
+    let input = state.path().join("xargs-input");
+    std::fs::write(&input, b"history-test\n").unwrap();
+    let xargs_failure = xargs.zip(sh).map(|(xargs, sh)| {
+        let out = Command::new(xargs)
+            .args([sh, "-c", "exit 7"])
+            .stdin(test_input(Some(&input)))
+            .output()
+            .unwrap();
+        let code = out.status.code().expect("xargs terminé par un signal");
+        if cfg!(target_os = "linux") {
+            assert_eq!(code, 123, "xargs Linux doit conserver le contrat GNU");
+        } else {
+            assert!(matches!(code, 1 | 123), "code xargs inattendu : {code}");
+        }
+        code
+    });
     for form in HARD_FORMS {
         let direct = direct_log(&repo, form);
         for code in [0, 7, 23] {
             let script = format!("git log {form}; exit {code}");
-            // `xargs` répond 123 quand la commande sort en 1..=125.
-            let xargs_code = if code == 0 { 0 } else { 123 };
-            let cases: Vec<(&str, Vec<&str>, i32)> = vec![
-                ("env", vec!["env", "sh", "-c", &script], code),
-                ("timeout", vec!["timeout", "20", "sh", "-c", &script], code),
-                ("nice", vec!["nice", "sh", "-c", &script], code),
-                ("stdbuf", vec!["stdbuf", "-oL", "sh", "-c", &script], code),
-                ("xargs", vec!["xargs", "sh", "-c", &script], xargs_code),
-                ("sh", vec!["sh", "-c", &script], code),
-                ("bash -lc", vec!["bash", "-lc", &script], code),
-            ];
-            for (wrapper, args, expected) in cases {
+            let mut cases = Vec::new();
+            if let Some(sh) = sh {
+                cases.push((sh, vec![sh, "-c", &script]));
+                for (program, options) in &wrappers {
+                    if let Some(program) = program {
+                        let mut args = vec![*program];
+                        args.extend(options);
+                        args.extend([sh, "-c", &script]);
+                        cases.push((*program, args));
+                    }
+                }
+            }
+            if let Some(bash) = bash {
+                cases.push(("bash -lc", vec![bash, "-lc", &script]));
+            }
+            for (wrapper, args) in cases {
                 let label = format!("{wrapper} {form} exit {code}");
                 exec_gives_raw(
                     &repo,
                     state.path(),
                     &args,
-                    expected,
+                    code,
                     &direct,
                     &label,
+                    &mut failures,
+                );
+            }
+            if let (Some(xargs), Some(sh), Some(failure)) = (xargs, sh, xargs_failure) {
+                let expected = if code == 0 { 0 } else { failure };
+                let args = [sh, "-c", &script];
+                let baseline = Command::new(xargs)
+                    .args(args)
+                    .current_dir(repo.path())
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .stdin(test_input(Some(&input)))
+                    .output()
+                    .unwrap();
+                assert_eq!(baseline.status.code(), Some(expected), "xargs direct");
+                assert_eq!(baseline.stdout, direct, "xargs doit vraiment lancer Git");
+                let out = lm_resizer_with_input(
+                    repo.path(),
+                    state.path(),
+                    &["exec", "--", xargs, sh, "-c", &script],
+                    Some(&input),
+                );
+                output_gives_raw(
+                    &out,
+                    expected,
+                    &direct,
+                    &format!("xargs {form} exit {code}"),
                     &mut failures,
                 );
             }
@@ -877,6 +992,14 @@ fn git_log_behind_a_script_or_an_assembled_command_comes_out_whole_and_raw() {
         .count();
     assert_eq!((identities.lines().count(), subjects), (23, 22));
     let mut failures = Vec::new();
+    let mut wrappers = vec![("script", vec![])];
+    if let Some(env) = available_program(&["env"]) {
+        wrappers.push((env, vec![env]));
+    }
+    if let Some(timeout) = available_program(&["timeout", "gtimeout"]) {
+        wrappers.push((timeout, vec![timeout, "20"]));
+    }
+    let sh = available_program(&["sh"]);
     for format in ["%s", "%s %H", "    %H %s", "%H%x00%s", "id:%H %s"] {
         let direct = git(repo.path(), &["log", &format!("--format={format}")]);
         for code in [0, 7, 23] {
@@ -888,12 +1011,9 @@ fn git_log_behind_a_script_or_an_assembled_command_comes_out_whole_and_raw() {
             .unwrap();
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
             let path = script.to_str().unwrap().to_string();
-            let forms: [(&str, Vec<&str>); 3] = [
-                ("script", vec![&path]),
-                ("env script", vec!["env", &path]),
-                ("timeout script", vec!["timeout", "20", &path]),
-            ];
-            for (name, args) in forms {
+            for (name, prefix) in &wrappers {
+                let mut args = prefix.clone();
+                args.push(&path);
                 let label = format!("{name} {format:?} exit {code}");
                 exec_gives_raw(
                     &repo,
@@ -907,17 +1027,17 @@ fn git_log_behind_a_script_or_an_assembled_command_comes_out_whole_and_raw() {
             }
         }
     }
+    let Some(sh) = sh else {
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        return;
+    };
     for format in ["%s", "%s %H"] {
         let direct = git(repo.path(), &["log", &format!("--format={format}")]);
         for code in [0, 7, 23] {
             let line = format!("g=git; l=log; \"$g\" \"$l\" '--format={format}'; exit {code}");
-            for (name, prefix) in [
-                ("sh -c", vec![]),
-                ("env sh -c", vec!["env"]),
-                ("timeout sh -c", vec!["timeout", "20"]),
-            ] {
+            for (name, prefix) in &wrappers {
                 let mut args = prefix.clone();
-                args.extend(["sh", "-c", &line]);
+                args.extend([sh, "-c", &line]);
                 let label = format!("variables {name} {format:?} exit {code}");
                 exec_gives_raw(
                     &repo,
