@@ -11,9 +11,8 @@ Report security issues privately through GitHub Security Advisories when the
 repository is hosted on GitHub. If advisories are unavailable, contact the
 maintainers through a private channel before opening a public issue.
 
-You can also report privately by email to `patrice.huetz+security@gmail.com`.
-This is also the address that [OSS Scanner](https://github.com/anthropics/oss-scanner)
-sends its reports to. Please do not open a public issue for an unpatched vulnerability.
+This project is enrolled in [OSS Scanner](https://github.com/anthropics/oss-scanner); its reports go to the
+maintainers' private security address. Please do not open a public issue for an unpatched vulnerability.
 
 Do not include live credentials, private prompts, proprietary provider payloads,
 or unsanitized customer data in public issues.
