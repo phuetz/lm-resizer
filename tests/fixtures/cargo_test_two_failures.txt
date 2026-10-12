@@ -1,0 +1,33 @@
+   Compiling demo v0.1.0 (/dev/shm/d2/demo)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (target/debug/deps/demo-6608bf82a9088484)
+
+running 4 tests
+test tests::bad_other ... FAILED
+test tests::ok_two ... ok
+test tests::ok_one ... ok
+test tests::bad_sum ... FAILED
+
+failures:
+
+---- tests::bad_other stdout ----
+
+thread 'tests::bad_other' (2786174) panicked at src/lib.rs:8:30:
+assertion failed: add(1, 1) == 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- tests::bad_sum stdout ----
+
+thread 'tests::bad_sum' (2786175) panicked at src/lib.rs:7:28:
+assertion `left == right` failed: somme attendue
+  left: 4
+ right: 5
+
+
+failures:
+    tests::bad_other
+    tests::bad_sum
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

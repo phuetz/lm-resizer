@@ -11,12 +11,16 @@ on:
 env:
   RUSTUP_TOOLCHAIN: stable
 
+# Every job has a ceiling: a hung test once held both macOS release checks for
+# 5 h 14 min. Ceilings are at least 2.5 times the longest run observed (Windows
+# release check: 18 min; minimum Rust: 5 min; binary install: under 1 min).
 jobs:
   minimum-rust:
     # Documented minimums: 1.86 for the core and wasm libraries, 1.91 for the CLI
     # (workspace `rust-version`). Each compiler checks only what it must support.
     name: Rust minimum (${{ matrix.toolchain }}, ${{ matrix.scope }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +55,7 @@ jobs:
   release-check-linux:
     name: release check (ubuntu-latest)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -88,6 +93,7 @@ jobs:
     name: install prebuilt binary without Rust (ubuntu-latest)
     needs: release-check-linux
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -108,6 +114,7 @@ jobs:
       matrix:
         runner: [macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -144,6 +151,7 @@ jobs:
       matrix:
         runner: [macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -161,6 +169,7 @@ jobs:
   release-check-windows:
     name: release check (windows-latest)
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -202,6 +211,7 @@ jobs:
     name: install prebuilt binary (windows-latest)
     needs: release-check-windows
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4

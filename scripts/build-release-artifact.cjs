@@ -20,7 +20,22 @@ function buildEnvironment(env, root, home) {
     // Rust dependency paths can use forward slashes on Windows too.
     if (from.includes('\\')) flags.push(`--remap-path-prefix=${from.replaceAll('\\', '/')}=${to}`);
   }
-  return { ...env, CARGO_ENCODED_RUSTFLAGS: flags.join('\x1f') };
+  const result = { ...env, CARGO_ENCODED_RUSTFLAGS: flags.join('\x1f') };
+  if (process.platform !== 'win32') {
+    // `--remap-path-prefix` only reaches rustc. C sources compiled by build scripts (tree-sitter,
+    // SQLite, oniguruma, ring) bake `__FILE__` paths of the registry checkout into the binary:
+    // 0.2.6's first candidate carried seven `/home/<user>/.cargo/registry/...` paths. The same
+    // prefixes go to the C compiler, last match first, so the cargo and rustup homes keep winning
+    // over the enclosing home directory. `cc` splits CFLAGS like a shell: quote paths with spaces.
+    const quote = flag => (/\s/.test(flag) ? `"${flag}"` : flag);
+    const cFlags = prefixes
+      .map(([from, to]) => `-ffile-prefix-map=${from}=${to}`)
+      .map(quote);
+    for (const name of ['CFLAGS', 'CXXFLAGS']) {
+      result[name] = [env[name], ...cFlags].filter(Boolean).join(' ');
+    }
+  }
+  return result;
 }
 
 function build(mode) {

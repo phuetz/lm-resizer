@@ -14,7 +14,7 @@ Les chiffres CLI sont des mesures du texte UTF-8 avec **tiktoken-rs 0.11.0 / o20
 | `tokenizer` | `tiktoken-rs/o200k_base` |
 | `token_count_method` | `exact` |
 
-`exec` compte le texte UTF-8 produit par la combinaison stdout/stderr utilisée par le CLI, y compris son séparateur `[stderr]`. Les octets invalides sont remplacés par U+FFFD comme dans la sortie rendue. Les hooks et le proxy MCP enregistrent les comptes du texte qu'ils traitent dans le même historique. Les champs d'octets et le texte de sortie restent disponibles.
+`exec` compte le texte capturé par le CLI ; avec `--stream` ou `--raw-on-failure`, ce texte est réassemblé stdout-puis-stderr, y compris son séparateur `[stderr]`. Ce séparateur et l'annotation de capture ne sont pas écrits dans le tee brut. La disposition ne promet pas la chronologie entre les deux flux. Les hooks et le proxy MCP enregistrent les comptes du texte qu'ils traitent dans le même historique. Les champs d'octets et le texte de sortie restent disponibles.
 
 `stats` JSON/Markdown, les statistiques HTTP et le dashboard utilisent les comptes persistés. `tokens_saved`, `original_tokens` et `compressed_tokens` ne portent que sur `measured_commands`. Les regroupements par filtre et commande appliquent la même règle. Les gains négatifs restent négatifs dans les totaux.
 

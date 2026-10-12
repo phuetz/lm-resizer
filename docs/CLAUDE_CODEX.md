@@ -15,7 +15,7 @@ practical ways:
 
 ## Install
 
-Follow the [README](../README.md) for the exact clone command, official Rustup setup and native build prerequisites. Its prebuilt installer is usable only after v0.2.5 is published. Once the repository is cloned and Rustup is on PATH, build and
+Follow the [README](../README.md) for the exact clone command, official Rustup setup and native build prerequisites. Its prebuilt installer is usable only after v0.2.6 is published. Once the repository is cloned and Rustup is on PATH, build and
 install from its root. Source builds require Rust 1.91 or newer for the CLI (core/wasm: 1.86; pinned toolchain: 1.95.0), Git and native C/C++ build tools (MSVC C++ tools and Windows SDK in Visual Studio Build Tools on Windows):
 
 Linux/macOS (Bash):
@@ -104,7 +104,13 @@ they do not execute target commands.
 It shares the PreToolUse refusal: a command whose stdout or stderr is redirected
 (`>`, `>>`, `2>`, `&>`, `>&`), consumed by a pipe (including `| tee` and `|&`),
 fed by a here-document, captured by `$(...)` or backticks, or interactive is
-returned unchanged. Wrapping those forms used to glue the redirect onto
+returned unchanged. Interactive includes editors, pagers and REPLs, and every
+command that can prompt or run until stopped, read from `argv`: `git
+push|pull|fetch|clone`, every `docker run|exec`, `compose run|exec` (even with
+`-T`), `ssh`, `sudo`, Terraform without `-input=false`, `pytest --pdb`… A command
+whose output `exec` would return as is (a script such as `npm test` or
+`make run-server`, `php -S`, `git credential`) is not rewritten either
+([full list](KNOWN-MISSES.md)). Wrapping those forms used to glue the redirect onto
 `lm-resizer exec`, so the file or the next program received the reduced view.
 The hook is stricter: any shell operator, including `&&`, leaves the whole line raw.
 
@@ -124,7 +130,10 @@ An existing file is refused unless you pass `--force`, which overwrites the
 whole file: back up and merge any existing settings yourself.
 `uninstall-hooks` removes guidance blocks, generated helpers under
 `.lm-resizer/hooks`, and a native hook config file only when its contents still
-match what `init` / `init-native-hooks` would write. A divergent hand-edited
+match what `init` / `init-native-hooks` would write; `--client all` covers the
+five clients (Codex, Claude, Gemini, Copilot, Cursor). `lm-resizer uninstall
+--client <client> --scope <scope>` removes the MCP entry written by `install`.
+A divergent hand-edited
 file is left alone; restore or delete it yourself if needed. Repeating
 `install-hooks` or `init` with identical content is a no-op success.
 The generated config wires `lm-resizer hook` on two `Bash` events:
@@ -135,6 +144,12 @@ The generated config wires `lm-resizer hook` on two `Bash` events:
   command line is preserved verbatim (quoting and backslashes intact), the hook
   never re-wraps its own `exec` invocations, and an unsupported or unparseable
   command emits nothing — the command runs raw. It never blocks.
+  For Claude Code the hook sends no `permissionDecision`, so the normal approval prompt
+  applies to the rewritten command; only Codex receives `permissionDecision: allow`
+  (Codex needs it, otherwise it runs the original command). Permission rules match the
+  command text, so a rule written for the original, such as `deny` on `Bash(cargo test)`,
+  does **not** match `lm-resizer exec -- cargo test`: add a deny rule on the wrapped form too
+  (`Bash(*exec -- cargo test*)`) or do not install the hook. See `SECURITY.md`.
 - `PostToolUse` — records command-output savings telemetry when it can identify
   a command and output, and exits successfully when the event shape is unknown.
 
@@ -163,10 +178,11 @@ without executing anything.
 ```bash
 lm-resizer stats --markdown
 lm-resizer tee list --json
-tee_listing=$(lm-resizer tee list)
-tee_file=${tee_listing%% *}
-lm-resizer tee read "$tee_file"
+lm-resizer tee read e3b0c44298fc
 ```
+
+`tee list` is ordered by file name (a hash of the content), not by date: take `<id>` from the
+`[tee:<id>]` line of the view or from the `tee_hint` field of a `--json` report.
 
 Use `tee` only when you need the original raw output that was compressed out of
 the agent-facing response.

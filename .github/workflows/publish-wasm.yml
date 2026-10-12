@@ -21,6 +21,8 @@ jobs:
   publish:
     name: publish @phuetz/lm-resizer
     runs-on: ubuntu-latest
+    # Runs the full release check first: a hung test must not hold it.
+    timeout-minutes: 45
     environment: npm-production
     permissions:
       contents: read

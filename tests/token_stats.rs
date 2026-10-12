@@ -18,17 +18,22 @@ fn cli(state: &std::path::Path, args: &[&str]) -> std::process::Output {
 fn exec_history_and_stats_count_final_output_including_recovery_hint() {
     let state = tempfile::tempdir().unwrap();
     use std::os::unix::fs::PermissionsExt;
-    let raw =
-        "test measured_success ... ok\n".repeat(200) + "test result: ok. 200 passed; 0 failed\n";
+    // Une exécution en échec : le code 0 d'un lanceur de tests rendrait la sortie intacte.
+    let raw = "test measured_success ... ok\n".repeat(200)
+        + "test measured_failure ... FAILED\n\nfailures:\n\n---- measured_failure stdout ----\nassertion failed\n\nfailures:\n    measured_failure\n\ntest result: FAILED. 200 passed; 1 failed\n";
     std::fs::write(state.path().join("raw"), &raw).unwrap();
     let producer = state.path().join("cargo");
-    std::fs::write(&producer, "#!/bin/sh\ncat \"$(dirname \"$0\")/raw\"\n").unwrap();
+    std::fs::write(
+        &producer,
+        "#!/bin/sh\ncat \"$(dirname \"$0\")/raw\"\nexit 101\n",
+    )
+    .unwrap();
     std::fs::set_permissions(&producer, std::fs::Permissions::from_mode(0o755)).unwrap();
     let result = cli(
         state.path(),
         &["exec", "--json", "--", producer.to_str().unwrap(), "test"],
     );
-    assert!(result.status.success(), "{:?}", result.stderr);
+    assert_eq!(result.status.code(), Some(101), "{:?}", result.stderr);
     let report: Value = serde_json::from_slice(&result.stdout).unwrap();
     let tokenizer = TiktokenCounter::for_model("gpt-4o").unwrap();
     let before = tokenizer.count_text(&raw) as i64;
@@ -99,7 +104,8 @@ fn generic_tool_output_and_gain_record_a_failed_command() {
             input.to_str().unwrap(),
         ],
     );
-    assert!(result.status.success());
+    // `tool-output` sort avec le code de la commande d'origine.
+    assert_eq!(result.status.code(), Some(7), "{result:?}");
     let report: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert!(report["output"]
         .as_str()

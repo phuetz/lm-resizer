@@ -1,6 +1,6 @@
-//! Readable command-aware views with no line budgets or implicit dictionaries;
-//! test filters remove only explicitly recognized successful result/progress
-//! rows outside diagnostic blocks. Unknown output is retained verbatim.
+//! Readable command-aware views with no line budgets or implicit dictionaries.
+//! Unknown output is retained verbatim. Test runners are recognized only by
+//! `test_views::runner`; none of these routes reduces a test transcript.
 
 pub fn filter(command: &[String], raw: &str) -> Option<(&'static str, String)> {
     // Inspect wrapper arguments without changing execution or environment.
@@ -16,19 +16,7 @@ pub fn filter(command: &[String], raw: &str) -> Option<(&'static str, String)> {
         ("ls" | "dir" | "tree", _) => ("listing", raw.to_string()),
         ("cat" | "head" | "tail" | "nl", _) => ("file", raw.to_string()),
         ("git", "log" | "diff" | "show" | "status") => ("git", raw.to_string()),
-        ("cargo", "test") => ("cargo", test_view(raw, "cargo")),
         ("cargo", "build" | "check" | "clippy" | "rustc") => ("cargo", raw.to_string()),
-        ("pytest", _) => ("pytest", test_view(raw, "pytest")),
-        ("npm" | "pnpm" | "yarn", "test") | ("vitest" | "jest", _) => {
-            ("npm-test", test_view(raw, "npm"))
-        }
-        ("npm" | "pnpm" | "yarn", "run")
-            if command
-                .get(2)
-                .is_some_and(|s| s == "test" || s.starts_with("test:")) =>
-        {
-            ("npm-test", test_view(raw, "npm"))
-        }
         ("docker" | "podman" | "docker-compose", _) => ("containers", raw.to_string()),
         ("tsc" | "eslint", _) => ("linter", raw.to_string()),
         // Other ecosystems: literal facts first.
@@ -101,65 +89,6 @@ fn unwrap_runner(mut command: &[String]) -> &[String] {
             return command;
         }
         command = &command[skip..];
-    }
-}
-
-fn test_view(raw: &str, runner: &str) -> String {
-    let mut output = String::new();
-    let mut diagnostics = false;
-    for line in raw.split_inclusive('\n') {
-        let row = line.trim();
-        // Once diagnostics begin, keep the entire remaining transcript. No
-        // keyword-based traceback selection, length limits or deduplication.
-        if row == "failures:"
-            || row.starts_with("---- ")
-            || row.contains(" FAILURES ")
-            || row.contains(" ERRORS ")
-            || row.starts_with("warning:")
-            || row.starts_with("error:")
-            || row.starts_with("FAIL ")
-            || row.starts_with("ERROR ")
-            || row.starts_with("FAILED ")
-        {
-            diagnostics = true;
-        }
-        let success = !diagnostics
-            && match runner {
-                "cargo" => row.starts_with("test ") && row.ends_with(" ... ok"),
-                "pytest" => {
-                    // Pytest -q dots, possibly followed by a percentage. Never
-                    // consume source/stack rows inside a failure block.
-                    let dots = row.split_once('[').map_or(row, |(dots, _)| dots.trim());
-                    let percentage = row.split_once('[').is_none_or(|(_, percent)| {
-                        percent.strip_suffix("%]").is_some_and(|n| {
-                            !n.trim().is_empty() && n.trim().bytes().all(|b| b.is_ascii_digit())
-                        })
-                    });
-                    !dots.is_empty()
-                        && dots
-                            .bytes()
-                            .all(|b| matches!(b, b'.' | b's' | b'F' | b'x' | b'X' | b'E'))
-                        && percentage
-                }
-                // npm can invoke arbitrary scripts: retain all unknown output.
-                _ => false,
-            };
-        if !success {
-            output.push_str(line);
-        }
-    }
-    // Without a result counter, even "test ... ok" may be application text.
-    let has_summary = match runner {
-        "cargo" => raw.lines().any(|l| l.starts_with("test result:")),
-        "pytest" => raw
-            .lines()
-            .any(|l| l.contains(" passed") || l.contains(" failed") || l.contains(" errors")),
-        _ => false,
-    };
-    if has_summary {
-        output
-    } else {
-        raw.to_string()
     }
 }
 
@@ -742,14 +671,6 @@ pub(crate) mod tests {
             "wget --server-response example.invalid",
             "prettier --check .",
             "black --check .",
-            "npx --yes jest",
-            "npm exec vitest",
-            "npm exec -- vitest",
-            "npm run test",
-            "pnpm run test:unit",
-            "yarn test",
-            "uv run pytest",
-            "python3 -m pytest",
         ] {
             let command: Vec<String> = command.split_whitespace().map(str::to_string).collect();
             let (_, compact) = filter(&command, &raw).expect("dedicated lossless route");
@@ -758,6 +679,20 @@ pub(crate) mod tests {
         }
         let unsupported = ["uv", "run", "--project", "elsewhere", "pytest"].map(str::to_string);
         assert!(filter(&unsupported, &raw).is_none());
+        // Les lanceurs de tests ne passent plus par ces routes : `test_views::runner` les reconnaît.
+        for command in [
+            "npx --yes jest",
+            "npm exec vitest",
+            "npm run test",
+            "yarn test",
+            "uv run pytest",
+            "python3 -m pytest",
+            "cargo test",
+            "pytest",
+        ] {
+            let command: Vec<String> = command.split_whitespace().map(str::to_string).collect();
+            assert!(filter(&command, &raw).is_none(), "{command:?}");
+        }
     }
 
     #[test]
@@ -792,27 +727,9 @@ pub(crate) mod tests {
     #[test]
     fn cargo_build_preserves_warnings_locations_and_unknown_messages() {
         let raw = format!("{}warning: unused import\n --> src/lib.rs:7:3\nerror[E0308]: expected u32, found str\n[stderr]\nfinished with 1 error\n", "    Checking dependency v1.2.3\n".repeat(80));
-        for sub in ["test", "build", "check", "clippy", "rustc"] {
+        for sub in ["build", "check", "clippy", "rustc"] {
             let (_, view) = filter(&["cargo".into(), sub.into()], &raw).unwrap();
             assert_eq!(expand(&view).unwrap(), raw);
         }
-    }
-
-    #[test]
-    fn long_diagnostics_and_unknown_npm_output_are_never_cut() {
-        let diagnostic = format!(
-            "failures:\n---- fails stdout ----\n{}test result: FAILED. 1 failed\n",
-            "stack with values and locations\n".repeat(350)
-        );
-        let raw = format!("test passes ... ok\n{diagnostic}");
-        assert_eq!(decode(&factor_lines(&test_view(&raw, "cargo"))), diagnostic);
-        let npm = "sh: 1: hereby: not found\n";
-        assert_eq!(filter(&["npm".into(), "test".into()], npm).unwrap().1, npm);
-        let pytest = format!(
-            "... [ 50%]\n=== ERRORS ===\n{}350 errors in 1.0s\n",
-            ".\n".repeat(350)
-        );
-        let out = decode(&factor_lines(&test_view(&pytest, "pytest")));
-        assert_eq!(out, pytest.strip_prefix("... [ 50%]\n").unwrap());
     }
 }

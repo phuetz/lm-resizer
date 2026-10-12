@@ -13,6 +13,43 @@ pub fn direct_args(command: &[String]) -> Option<Vec<String>> {
     }
 }
 
+/// `git [options globales] <sous-commande> …` : la commande sans les options globales
+/// (`-C <dir>`, `-c <clé=valeur>`, `--git-dir`, `--no-pager`…), pour reconnaître la sous-commande.
+/// `None` quand aucune sous-commande ne se lit sûrement (option inconnue en fin de ligne).
+pub fn git_without_globals(command: &[String]) -> Option<Vec<String>> {
+    let (_, from_subcommand) = git_split_globals(command)?;
+    let mut out = vec![command.first()?.clone()];
+    out.extend(from_subcommand);
+    Some(out)
+}
+
+/// Sépare `git [options globales] <sous-commande> …` en (options globales, sous-commande et suite).
+fn git_split_globals(command: &[String]) -> Option<(Vec<String>, Vec<String>)> {
+    let mut rest = &command[1..];
+    // Options globales qui prennent la valeur suivante (sans `=`).
+    const WITH_VALUE: [&str; 7] = [
+        "-C",
+        "-c",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--super-prefix",
+        "--config-env",
+    ];
+    while let Some(first) = rest.first() {
+        if !first.starts_with('-') {
+            let globals = command[1..command.len() - rest.len()].to_vec();
+            return Some((globals, rest.to_vec()));
+        }
+        rest = if WITH_VALUE.contains(&first.as_str()) {
+            rest.get(2..)?
+        } else {
+            &rest[1..]
+        };
+    }
+    None
+}
+
 pub fn pipe_command(name: &str) -> Option<Vec<String>> {
     let words: &[&str] = match name {
         "git-log" => &["git", "log"],
@@ -40,11 +77,14 @@ pub fn pipe_command(name: &str) -> Option<Vec<String>> {
     Some(words.iter().map(|s| s.to_string()).collect())
 }
 
+/// Vues natives des commandes qui ne sont pas des lanceurs de tests : ceux-là sont reconnus et
+/// dirigés plus tôt, par `test_views::runner` seul.
 pub fn filter(command: &[String], raw: &str) -> Option<(String, String)> {
     let name = super::command_basename(command.first()?);
     let sub = command.get(1).map(String::as_str).unwrap_or("");
     let (kind, candidate) = match (name.as_str(), sub) {
-        ("git", "log") => ("git-log", git_log(raw)),
+        // Appelant sans lecture de la configuration (tube, test) : jamais de vue compressée.
+        ("git", "log") => ("git-log", git_log(raw, false)),
         ("git", "diff") => ("git-diff", git_diff(raw)),
         ("git", "status") => ("git-status", git_status(raw)),
         ("git", "show") => (
@@ -59,11 +99,6 @@ pub fn filter(command: &[String], raw: &str) -> Option<(String, String)> {
         ("find", _) => ("find", crate::file_views::paths(raw)),
         ("ls", _) => ("ls", crate::file_views::listing(command, raw)),
         ("tree", _) => ("tree", crate::file_views::tree(raw)),
-        ("cargo", "test") => ("cargo-test", crate::test_views::cargo(raw)),
-        ("dotnet", "test") => ("dotnet-test", crate::test_views::dotnet(raw)),
-        ("pytest", _) => ("pytest", crate::test_views::pytest(raw)),
-        ("go", "test") => ("go-test", crate::test_views::go(raw)),
-        ("jest" | "vitest", _) => ("js-test", crate::test_views::javascript(raw)),
         ("go", "build") => ("go-build", raw.to_owned()),
         ("npm" | "pnpm" | "pip" | "uv", _) if sub != "exec" => {
             ("packages", crate::package_views::filter(&name, sub, raw))
@@ -97,11 +132,17 @@ pub fn filter(command: &[String], raw: &str) -> Option<(String, String)> {
 }
 
 fn git_diff(raw: &str) -> String {
+    git_diff_view(raw, true)
+}
+
+/// `truncate` : `git diff` garde la fenêtre d'ouverture d'un grand patch ; `git log` ne tronque
+/// jamais, une troncature y ferait disparaître des commits entiers.
+fn git_diff_view(raw: &str, truncate: bool) -> String {
     let rows: Vec<&str> = raw.lines().collect();
     // Large Git patches can dwarf every other command in an agent transcript.
     // Keep the opening patch records through the reference tool's visible
     // window and make the complete producer output recoverable through tee.
-    if rows.len() > 1000 && rows.first().is_some_and(|r| r.starts_with("diff --git ")) {
+    if truncate && rows.len() > 1000 && rows.first().is_some_and(|r| r.starts_with("diff --git ")) {
         let visible = rows.len().min(350);
         return format!(
             "{}\n[{} further patch lines; retrieve the complete output with tee]\n",
@@ -152,47 +193,326 @@ fn clipped(s: &str, width: usize) -> String {
     }
 }
 
-fn git_log(raw: &str) -> String {
-    // A patch is a distinct record type, never message prose.
-    if raw.lines().any(|s| s.starts_with("diff --")) {
-        return git_diff(raw);
+/// Une ligne `git log --stat` : ` chemin | 12 ++++---` ou ` image.png | Bin 0 -> 512 bytes`.
+fn stat_row(row: &str) -> Option<String> {
+    let (path, rest) = row.split_once(" | ")?;
+    let path = path.trim();
+    // Une ligne de statistique commence par exactement une espace ; le corps du
+    // message est indenté de quatre.
+    if path.is_empty() || !row.starts_with(' ') || row.starts_with("  ") {
+        return None;
     }
-    struct Excerpt {
-        rows: Vec<String>,
-        hidden: usize,
-    }
-    let mut excerpts = Vec::new();
-    for record in raw.split("---END---").take(50) {
-        let mut excerpt = Excerpt {
-            rows: Vec::new(),
-            hidden: 0,
-        };
-        for row in record.trim().lines() {
-            if excerpt.rows.is_empty() {
-                excerpt.rows.push(clipped(row, 80));
-                continue;
+    let rest = rest.trim();
+    let count = rest.trim_end_matches(['+', '-']).trim_end();
+    let digits = count.split_whitespace().next()?;
+    (rest.starts_with("Bin ") || digits.chars().all(|c| c.is_ascii_digit()))
+        .then(|| format!("  {path} | {count}"))
+}
+
+/// Séparateurs de champs d'une ligne d'historique : blancs et NUL (`--format=%H%x00%s`).
+fn is_field_separator(c: char) -> bool {
+    c.is_whitespace() || c == '\0'
+}
+
+/// `(avant, après)` le dernier séparateur de champs de `text`, s'il y en a un.
+fn split_last_field(text: &str) -> Option<(&str, &str)> {
+    let at = text.rfind(is_field_separator)?;
+    let width = text[at..].chars().next().map_or(1, char::len_utf8);
+    Some((&text[..at], &text[at + width..]))
+}
+
+/// Hashes de commit et sujets non vides qu'un texte présente comme un historique git :
+/// - en-têtes `commit <hash>` (4 à 40 chiffres hexadécimaux ; sujet = première ligne indentée du
+///   message) ;
+/// - lignes `<hash> <sujet>` ou `<hash>` seul, même indentées, après un graphe `*`/`|`, ou avec un
+///   NUL pour séparateur (`%H%x00%s`) ;
+/// - lignes `<sujet> <hash>` (`%s %H`) : dernier mot de 7 à 40 chiffres hexadécimaux.
+///
+/// Quand le texte a des en-têtes `commit <hash>`, ses lignes indentées de quatre sont la prose des
+/// messages : un mot hexadécimal y est du texte, pas une identité.
+fn git_log_identities(text: &str) -> (Vec<&str>, Vec<&str>) {
+    let rows: Vec<&str> = text.lines().collect();
+    let headered = rows.iter().any(|row| is_commit_header(strip_graph(row)));
+    let (mut hashes, mut subjects) = (Vec::new(), Vec::new());
+    for (i, row) in rows.iter().enumerate() {
+        let body = strip_graph(row);
+        if is_commit_header(body) {
+            hashes.push(body.split_whitespace().nth(1).unwrap_or_default());
+            let message = rows[i + 1..]
+                .iter()
+                .skip_while(|l| !l.trim().is_empty())
+                .find(|l| !l.trim().is_empty());
+            if let Some(line) = message.filter(|l| l.starts_with("    ")) {
+                subjects.push(line.trim());
             }
-            let text = row.trim();
-            if text.is_empty()
-                || ["Signed-off-by:", "Co-authored-by:"]
-                    .iter()
-                    .any(|prefix| text.starts_with(prefix))
+            continue;
+        }
+        if headered && row.starts_with("    ") {
+            continue;
+        }
+        let content = body.trim_matches(is_field_separator);
+        let first = content.split(is_field_separator).next().unwrap_or_default();
+        if is_hex_id(first) {
+            hashes.push(first);
+            let subject = content[first.len()..].trim_matches(is_field_separator);
+            if !subject.is_empty() {
+                subjects.push(subject);
+            }
+        } else if let Some((before, last)) = split_last_field(content) {
+            if last.len() >= 7 && is_hex_id(last) {
+                hashes.push(last);
+                let subject = before.trim_matches(is_field_separator);
+                if !subject.is_empty() {
+                    subjects.push(subject);
+                }
+            }
+        }
+    }
+    (hashes, subjects)
+}
+
+fn strip_graph(row: &str) -> &str {
+    if row.starts_with(['*', '|', '/', '\\']) {
+        row.trim_start_matches(['*', '|', '/', '\\', ' ', '_'])
+    } else {
+        row
+    }
+}
+
+fn is_hex_id(word: &str) -> bool {
+    // Git abrège jusqu'à quatre caractères (`--abbrev=4`).
+    (4..=40).contains(&word.len())
+        && word
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Garde finale, pour toute sortie : `output` perd-il un hash de commit ou un sujet non vide que
+/// `raw` présente ? Elle ne reconnaît le contenu que pour **refuser** une vue (le brut est alors
+/// rendu) : se tromper la rend inutile, jamais dangereuse.
+pub fn lost_git_identity(raw: &str, output: &str) -> bool {
+    if raw == output {
+        return false;
+    }
+    let (hashes, subjects) = git_log_identities(raw);
+    if hashes.is_empty() {
+        return false;
+    }
+    let mut words = std::collections::HashSet::new();
+    let mut lines = std::collections::HashSet::new();
+    for row in output.lines() {
+        words.extend(row.split(is_field_separator).filter(|w| !w.is_empty()));
+        let body = strip_graph(row).trim_matches(is_field_separator);
+        lines.insert(body);
+        // Sujet après le premier champ (`<hash> <sujet>`) ou avant le dernier (`<sujet> <hash>`).
+        if let Some(at) = body.find(is_field_separator) {
+            lines.insert(body[at..].trim_matches(is_field_separator));
+        }
+        if let Some((before, _)) = split_last_field(body) {
+            lines.insert(before.trim_matches(is_field_separator));
+        }
+    }
+    hashes.iter().any(|h| !words.contains(h)) || subjects.iter().any(|s| !lines.contains(s))
+}
+
+/// Défense en profondeur pour le texte déjà produit (`tool-output`, `pipe`), dont le format n'est pas
+/// connu par la commande : chaque en-tête `commit <hash>` est suivi de la disposition par défaut, des
+/// lignes `Merge:`, `Author:` et `Date:` seules jusqu'à la ligne vide. Un format qui imite un en-tête
+/// (`commit %T%n    …`) ne l'a pas. Ce contrôle ne remplace pas le contrat de la commande (voir
+/// [`git_log_compact_allowed`]) : il en réduit seulement les trous.
+fn has_default_layout(raw: &str) -> bool {
+    let rows: Vec<&str> = raw.lines().collect();
+    let mut headers = 0usize;
+    for (i, row) in rows.iter().enumerate() {
+        if !is_commit_header(row) {
+            continue;
+        }
+        headers += 1;
+        let (mut author, mut date) = (false, false);
+        for line in rows[i + 1..].iter().take_while(|l| !l.trim().is_empty()) {
+            if line.starts_with("Author:") {
+                author = true;
+            } else if line.starts_with("Date:") {
+                date = true;
+            } else if !line.starts_with("Merge:") {
+                return false;
+            }
+        }
+        if !(author && date) {
+            return false;
+        }
+    }
+    headers > 0
+}
+
+fn is_commit_header(row: &str) -> bool {
+    row.strip_prefix("commit ").is_some_and(|rest| {
+        rest.split_whitespace()
+            .next()
+            .is_some_and(|hash| hash.len() >= 4 && hash.chars().all(|c| c.is_ascii_hexdigit()))
+    })
+}
+
+/// `git log` sans sentinelle (avec ou sans `--stat`) : un enregistrement par commit, aucun commit
+/// perdu. Les barres de proportion `+++---` disparaissent (le nombre de lignes reste), ainsi que
+/// les lignes vides et les pieds `Signed-off-by` / `Co-authored-by`. Les trois premières
+/// lignes de corps suivent le titre ; le reste est compté et récupérable dans tee.
+/// `None` quand la sortie ne commence pas par un en-tête `commit <hash>` (`--oneline`, `--format`,
+/// `--graph`, `--pretty=email`…) : aucune compaction n'y est sûre, le brut est rendu.
+fn git_log_records(raw: &str) -> Option<String> {
+    if !raw
+        .lines()
+        .find(|row| !row.trim().is_empty())
+        .is_some_and(is_commit_header)
+        || !has_default_layout(raw)
+        // Un patch en colonne 0 a des lignes de contexte indentées comme un message : brut.
+        || raw.lines().any(|row| row.starts_with("diff --"))
+    {
+        return None;
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut message_rows = 0usize;
+    let mut hidden = 0usize;
+    let flush = |out: &mut Vec<String>, hidden: &mut usize| {
+        if *hidden != 0 {
+            out.push(format!("  [+{hidden} message lines omitted]"));
+            *hidden = 0;
+        }
+    };
+    for row in raw.lines() {
+        if is_commit_header(row) {
+            flush(&mut out, &mut hidden);
+            message_rows = 0;
+            out.push(clipped(row, 120));
+            continue;
+        }
+        let text = row.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if let Some(stat) = stat_row(row) {
+            flush(&mut out, &mut hidden);
+            out.push(stat);
+        } else if row.starts_with("    ") {
+            if ["Signed-off-by:", "Co-authored-by:", "Co-Authored-By:"]
+                .iter()
+                .any(|prefix| text.starts_with(prefix))
             {
                 continue;
             }
-            match excerpt.rows.len() {
-                0..=3 => excerpt.rows.push(format!("  {}", clipped(text, 80))),
-                _ => excerpt.hidden += 1,
+            // Titre + trois lignes de corps au plus. Le titre est une identité du commit : jamais
+            // coupé ; les lignes de corps le sont à 100 caractères.
+            if message_rows < 4 {
+                if message_rows == 0 {
+                    out.push(format!("  {text}"));
+                } else {
+                    out.push(format!("  {}", clipped(text, 100)));
+                }
+                message_rows += 1;
+            } else {
+                hidden += 1;
             }
+        } else {
+            // Author:, Date:, Merge:, bilan « N files changed » : conservés tels quels.
+            flush(&mut out, &mut hidden);
+            out.push(format!("  {}", clipped(text, 120)));
         }
-        if excerpt.hidden != 0 {
-            excerpt
-                .rows
-                .push(format!("  [+{} lines omitted]", excerpt.hidden));
-        }
-        excerpts.extend(excerpt.rows);
     }
-    excerpts.join("\n")
+    flush(&mut out, &mut hidden);
+    let view = out.join("\n");
+    // Une vue ne perd jamais un commit et ne dépasse jamais le brut : chaque en-tête du brut se
+    // retrouve, dans le même ordre et avec le même hash, dans la vue.
+    let hashes = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter(|row| is_commit_header(row))
+            .filter_map(|row| row.split_whitespace().nth(1).map(str::to_owned))
+            .collect()
+    };
+    (hashes(&view) == hashes(raw)
+        && crate::token_metrics::TokenCounts::measure(raw, &view).tokens_saved > 0)
+        .then_some(view)
+}
+
+/// Vue d'un `git log` exécuté : `command` est la ligne complète, options globales comprises.
+/// La vue compacte par commit ne s'applique qu'à un appel direct simple (voir
+/// [`git_log_compact_allowed`]) dont la sortie a le format par défaut ; toute autre forme est rendue
+/// brute, octet pour octet.
+///
+/// `executed` : la commande est lancée par `lm-resizer` lui-même (`exec`, `lm-resizer git log`). Un
+/// texte déjà produit (`pipe`, `tool-output`) n'a pas de ligne de commande fiable : jamais de vue
+/// compacte, quel que soit son contenu.
+pub fn git_log_filter(command: &[String], raw: &str, executed: bool) -> (String, String) {
+    (
+        "native:git-log".to_string(),
+        git_log(raw, executed && git_log_compact_allowed(command)),
+    )
+}
+
+/// Liste blanche fermée. `true` seulement pour `git [-C <dossier>]… log` suivi exclusivement de
+/// `--decorate`, `--all`, `-n <N>`, `-<N>`, `--oneline`, `--graph`, de révisions ou plages (mots
+/// sans `-` initial) et, après `--`, de chemins ; et seulement si la configuration de Git ne contient
+/// aucune clé `format.*` ou `log.*`. Toute autre option (`--format`, `--pretty`, `--stat`, `-p`,
+/// `--author`, `--no-pager`, `-c`…) ou tout autre programme devant `git` (`env`, `timeout`, shell,
+/// script) : `false`, donc le brut. La configuration se lit avec `git config --get-regexp`, jamais
+/// en analysant le texte de la sortie. Dans le doute (git absent, configuration illisible) : `false`.
+///
+/// `--oneline` et `--graph` sont admis mais ne produisent pas la disposition par défaut : la vue les
+/// rend bruts (voir [`git_log_records`]).
+pub fn git_log_compact_allowed(command: &[String]) -> bool {
+    if command
+        .first()
+        .is_none_or(|program| super::command_basename(program) != "git")
+    {
+        return false;
+    }
+    let mut rest = &command[1..];
+    let mut globals: Vec<String> = Vec::new();
+    while rest.first().map(String::as_str) == Some("-C") {
+        let Some(dir) = rest.get(1) else {
+            return false;
+        };
+        globals.extend(["-C".to_string(), dir.clone()]);
+        rest = &rest[2..];
+    }
+    if rest.first().map(String::as_str) != Some("log") {
+        return false;
+    }
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    let mut args = rest[1..].iter();
+    while let Some(arg) = args.next() {
+        let arg = arg.as_str();
+        let allowed = match arg {
+            "--" => break,
+            "--decorate" | "--all" | "--oneline" | "--graph" => true,
+            "-n" => args.next().is_some_and(|n| digits(n)),
+            _ if arg.starts_with('-') => digits(&arg[1..]),
+            _ => true,
+        };
+        if !allowed {
+            return false;
+        }
+    }
+    // Code 1 = aucune clé ne correspond ; 0 = au moins une ; tout autre résultat = inconnu.
+    std::process::Command::new(&command[0])
+        .args(&globals)
+        .args(["config", "--get-regexp", r"^(format|log)\."])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()
+        .and_then(|status| status.code())
+        == Some(1)
+}
+
+fn git_log(raw: &str, compact: bool) -> String {
+    // Un séparateur NUL (`-z`) commence les en-têtes suivants par `\0` : aucun découpage sûr.
+    if !compact || raw.contains('\0') {
+        return raw.to_owned();
+    }
+    // Aucun séparateur n'est déduit du texte d'un message : seuls les en-têtes `commit <hash>`
+    // découpent, et toute forme sans en-tête (`--oneline`, `--graph`) reste brute.
+    git_log_records(raw).unwrap_or_else(|| raw.to_owned())
 }
 
 fn git_status(raw: &str) -> String {
@@ -244,8 +564,14 @@ mod tests {
     }
     #[test]
     fn git_author_stays_with_its_commit() {
-        let raw = "commit aaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n  title\n---END---\ncommit bbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n  autre\n";
-        assert_eq!(git_log(raw), "commit aaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\ncommit bbbb\n  Author: Bob <b@example.test>\n  Date: yesterday\n  autre");
+        let body = "\n    ligne de corps".repeat(12);
+        let raw = format!("commit aaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n{body}\n\ncommit bbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n{body}\n");
+        let view = git_log(&raw, true);
+        assert!(view.starts_with(
+            "commit aaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n"
+        ));
+        assert!(view
+            .contains("commit bbbb\n  Author: Bob <b@example.test>\n  Date: yesterday\n  autre\n"));
     }
     #[test]
     fn all_git_patch_rows_remain_recoverable() {
@@ -253,6 +579,301 @@ mod tests {
         let view = git_diff(raw);
         assert!(view.contains("@@ -179,1 +181,1 @@ fn total"));
         assert!(view.contains("---source\n+++source"));
+    }
+    fn stat_log() -> String {
+        let mut raw = String::new();
+        for (hash, who, title, files) in [
+            (
+                "a".repeat(40),
+                "Alice",
+                "Premier titre",
+                vec![
+                    ("src/lib.rs", 12, "++++++-----"),
+                    ("docs/guide.md", 3, "+++"),
+                ],
+            ),
+            (
+                "b".repeat(40),
+                "Bob",
+                "Second titre",
+                vec![(
+                    "src/main.rs",
+                    40,
+                    "++++++++++++++++++++----------------------",
+                )],
+            ),
+            (
+                "c".repeat(40),
+                "Carol",
+                "Troisième titre",
+                vec![("img/logo.png", 0, "")],
+            ),
+        ] {
+            raw.push_str(&format!("commit {hash}\nAuthor: {who} <{who}@example.test>\nDate:   Mon Oct 5 12:00:00 2026 +0200\n\n    {title}\n\n    Corps de {who} : tableau a | 5 colonnes.\n\n    Co-Authored-By: Autre <autre@example.test>\n\n"));
+            for (path, n, bars) in &files {
+                if *n == 0 {
+                    raw.push_str(&format!(" {path} | Bin 0 -> 512 bytes\n"));
+                } else {
+                    raw.push_str(&format!(" {path} | {n} {bars}\n"));
+                }
+            }
+            raw.push_str(&format!(
+                " {} files changed, 5 insertions(+), 2 deletions(-)\n\n",
+                files.len()
+            ));
+        }
+        raw
+    }
+    #[test]
+    fn stat_log_keeps_every_commit_title_and_file() {
+        let raw = stat_log();
+        let view = git_log(&raw, true);
+        for fact in [
+            "commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "commit cccccccccccccccccccccccccccccccccccccccc",
+            "Author: Bob <Bob@example.test>",
+            "Troisième titre",
+            "Corps de Alice : tableau a | 5 colonnes.",
+            "src/lib.rs | 12",
+            "docs/guide.md | 3",
+            "src/main.rs | 40",
+            "img/logo.png | Bin 0 -> 512 bytes",
+            "2 files changed, 5 insertions(+), 2 deletions(-)",
+        ] {
+            assert!(view.contains(fact), "manque {fact:?} dans\n{view}");
+        }
+        assert!(
+            !view.contains("  tableau a | 5"),
+            "une ligne de corps n'est pas un fichier\n{view}"
+        );
+        assert!(
+            !view.contains("+++"),
+            "les barres de proportion sont retirées\n{view}"
+        );
+        assert!(!view.contains("Co-Authored-By"));
+        assert!(view.len() < raw.len());
+    }
+    #[test]
+    fn body_line_resembling_a_stat_summary_stays_message_text() {
+        let raw = "commit aaaaaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    refactor\n\n    5 files changed in this refactor\n\ncommit bbbbbbb\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    autre\n";
+        let view = git_log(raw, true);
+        for fact in [
+            "commit aaaaaaa",
+            "refactor",
+            "5 files changed in this refactor",
+            "commit bbbbbbb",
+            "autre",
+        ] {
+            assert!(view.contains(fact), "manque {fact:?} dans\n{view}");
+        }
+        assert!(!view.contains("omitted"));
+    }
+    #[test]
+    fn plain_log_shows_every_commit() {
+        let raw = "commit aaaaaaaa\nAuthor: Alice <a@example.test>\nDate: today\n\n    title\n\n    ligne 1\n    ligne 2\n    ligne 3\n    ligne 4\n    ligne 5\n\n    Signed-off-by: A <a@example.test>\n\ncommit bbbbbbbb (HEAD -> main)\nMerge: aaaaaaa ccccccc\nAuthor: Bob <b@example.test>\nDate: yesterday\n\n    fusion\n\ncommit cccccccc\nAuthor: Zoé <z@example.test>\nDate: before\n\n";
+        assert_eq!(
+            git_log(raw, true),
+            "commit aaaaaaaa\n  Author: Alice <a@example.test>\n  Date: today\n  title\n  ligne 1\n  ligne 2\n  ligne 3\n  [+2 message lines omitted]\ncommit bbbbbbbb (HEAD -> main)\n  Merge: aaaaaaa ccccccc\n  Author: Bob <b@example.test>\n  Date: yesterday\n  fusion\ncommit cccccccc\n  Author: Zoé <z@example.test>\n  Date: before"
+        );
+    }
+    #[test]
+    fn forms_without_a_commit_header_are_returned_raw() {
+        for raw in [
+            "aac6d62 sujet cinq\n956d045\n6ecefbf fusion\n7af913f trois\nad9434e côté\n",
+            "* aac6d62 sujet cinq\n*   6ecefbf fusion\n|\\\n| * ad9434e côté\n",
+            "sujet cinq\nfusion\ntrois\n",
+            "From aac6d6244a36c451c1361bc2e13918afadc3308a Mon Sep 17 00:00:00 2001\nSubject: x\n",
+        ] {
+            assert_eq!(git_log(raw, true), raw);
+        }
+    }
+    #[test]
+    fn abbreviated_commit_headers_are_recognised() {
+        let raw = format!("commit abcd\nAuthor: A <a@example.test>\nDate: d\n\n    t\n{}\ncommit ef01\nAuthor: B <b@example.test>\nDate: d\n\n    u\n", "\n    corps".repeat(40));
+        let view = git_log(&raw, true);
+        assert!(
+            view.contains("commit abcd") && view.contains("commit ef01"),
+            "{view}"
+        );
+        assert!(view.len() < raw.len());
+    }
+    #[test]
+    fn a_view_that_would_grow_the_log_is_returned_raw() {
+        let raw = "commit aaaaaaa\nAuthor: A <a@example.test>\nDate: d\n\n    t\n";
+        assert_eq!(git_log(raw, true), raw);
+    }
+    #[test]
+    fn old_sentinel_text_in_a_message_is_just_text() {
+        let raw: String = (0..80)
+            .map(|n| {
+                format!(
+                    "commit {n:040x}\nAuthor: A <a@example.test>\nDate: d\n\n    sujet ---END--- {n}\n\n    avant\n    ---END---\n    apres\n    l1\n    l2\n    l3\n\n"
+                )
+            })
+            .collect();
+        let view = git_log(&raw, true);
+        assert_eq!(
+            view.lines()
+                .filter(|row| row.starts_with("commit "))
+                .count(),
+            80
+        );
+        // Une forme sans en-tête avec la même chaîne reste brute.
+        let oneline = "abc1234 sujet ---END--- un\ndef5678 deux\n";
+        assert_eq!(git_log(oneline, true), oneline);
+    }
+    fn words(line: &str) -> Vec<String> {
+        line.split_whitespace().map(str::to_string).collect()
+    }
+    #[test]
+    fn git_global_options_are_skipped_to_find_the_subcommand() {
+        for (line, expected) in [
+            ("git log -n 3", Some("git log -n 3")),
+            ("git --no-pager log --oneline", Some("git log --oneline")),
+            ("git -C /tmp/repo log", Some("git log")),
+            ("git -c color.ui=false -c a.b=c log -1", Some("git log -1")),
+            (
+                "git --git-dir=/x/.git --work-tree /x status",
+                Some("git status"),
+            ),
+            ("git --no-pager -C . --bare lg", Some("git lg")),
+            ("git --no-pager", None),
+            ("git -C", None),
+        ] {
+            let got = git_without_globals(&words(line)).map(|c| c.join(" "));
+            assert_eq!(got.as_deref(), expected, "{line}");
+        }
+    }
+    #[test]
+    fn nul_separated_and_decoy_patch_text_stay_raw() {
+        let nul = "commit aaaaaaa\nAuthor: A <a@example.test>\n\n    t\n\0commit bbbbbbb\nAuthor: B <b@example.test>\n\n    u\n";
+        assert_eq!(git_log(nul, true), nul);
+        let decoy = format!("diff --git a/x b/x\n{}", "ligne\n".repeat(1200));
+        assert_eq!(git_log(&decoy, true), decoy);
+    }
+    #[test]
+    fn only_a_simple_direct_call_may_use_the_compact_view() {
+        for line in [
+            "git log -z",
+            "git log --stat",
+            "git log -p -n 3",
+            "git log --author=x",
+            "git log --date=short",
+            "git log --abbrev-commit",
+            "git log --decorate=full",
+            "git log -n x",
+            "git log -n",
+            "git log -n6",
+            "git --no-pager log",
+            "git -C",
+            "git -C . -c a.b=c log",
+            "env git log",
+            "timeout 5 git log",
+            "sh -c git log",
+            "/tmp/show-history log",
+            "git log --format=%H",
+            "git log --format=commit%x20%T",
+            "git log --pretty=fuller",
+            "git log --pretty=format:x",
+            "git -c format.pretty=oneline log",
+            "git -c color.ui=false log",
+            "git --config-env=format.pretty=VAR log",
+            "git --no-pager -c a.b=c log -n 3",
+            "git status",
+            "git",
+        ] {
+            assert!(!git_log_compact_allowed(&words(line)), "{line}");
+        }
+    }
+    #[test]
+    fn the_final_guard_refuses_a_view_that_loses_a_hash_or_a_subject() {
+        let oneline = "abc1234 premier\n8441500 \ndef5678 troisième\n";
+        // Intact, ou sans identité reconnaissable : jamais refusée.
+        assert!(!lost_git_identity(oneline, oneline));
+        assert!(!lost_git_identity(
+            "rien de git ici\nligne 2\n",
+            "ligne 2\n"
+        ));
+        // Le hash du commit à message vide disparaît.
+        assert!(lost_git_identity(
+            oneline,
+            "abc1234 premier\ndef5678 troisième\n"
+        ));
+        // Un sujet disparaît (ou est tronqué).
+        assert!(lost_git_identity(
+            oneline,
+            "abc1234\n8441500\ndef5678 troisi...\n"
+        ));
+        // Quatre caractères suffisent (`--abbrev=4`), avec ou sans sujet, avec ou sans graphe.
+        let short = "a1b2 un\n3c4d \ne5f6 trois\n";
+        assert!(!lost_git_identity(short, short));
+        assert!(lost_git_identity(short, "a1b2 un\ne5f6 trois\n"));
+        assert!(lost_git_identity("a1b2\n3c4d\n", "a1b2\n"));
+        assert!(lost_git_identity(
+            "* a1b2 un\n| * 3c4d deux\n",
+            "* a1b2 un\n"
+        ));
+        // Le graphe `*` ne cache pas les identités.
+        let graph = "* abc1234 premier\n| * def5678 deuxième\n";
+        assert!(!lost_git_identity(graph, graph));
+        assert!(lost_git_identity(graph, "* abc1234 premier\n"));
+        // En-têtes `commit <hash>` : le sujet est la première ligne indentée du message.
+        let long = "commit aaaaaaa1\nAuthor: A <a@e.t>\nDate: d\n\n    sujet un\n\n    corps\n";
+        assert!(!lost_git_identity(
+            long,
+            "commit aaaaaaa1\n  Author: A\n  sujet un\n"
+        ));
+        assert!(lost_git_identity(long, "commit aaaaaaa1\n  Author: A\n"));
+        // Une ligne de message qui commence par un mot hexadécimal n'est pas une identité.
+        let prose = "commit aaaaaaa1\nAuthor: A <a@e.t>\nDate: d\n\n    sujet\n\n    deadbeef est le correctif\n";
+        assert!(!lost_git_identity(prose, "commit aaaaaaa1\n  sujet\n"));
+        let revert = "commit aaaaaaa1\nAuthor: A <a@e.t>\nDate: d\n\n    sujet\n\n    retour de 0123456789abcdef\n";
+        assert!(!lost_git_identity(revert, "commit aaaaaaa1\n  sujet\n"));
+    }
+    #[test]
+    fn the_final_guard_sees_hashes_after_a_subject_indented_or_after_a_nul() {
+        let h1 = "1f0e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
+        let h2 = "2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d";
+        // `%s %H`, commit à message vide compris (` <hash>`).
+        let subject_then_hash = format!("premier sujet {h1}\n {h2}\n");
+        assert!(!lost_git_identity(&subject_then_hash, &subject_then_hash));
+        assert!(lost_git_identity(
+            &subject_then_hash,
+            &format!("premier sujet {h1}\n")
+        ));
+        assert!(lost_git_identity(
+            &subject_then_hash,
+            &format!("premier {h1}\n {h2}\n")
+        ));
+        assert!(lost_git_identity(
+            &subject_then_hash,
+            "1 passed, 0 failed\n"
+        ));
+        // `    %H %s`.
+        let indented = format!("    {h1} premier sujet\n    {h2} second\n");
+        assert!(!lost_git_identity(&indented, &indented));
+        assert!(lost_git_identity(
+            &indented,
+            &format!("    {h1} premier sujet\n")
+        ));
+        // `%H%x00%s`.
+        let nul = format!("{h1}\0premier sujet\n{h2}\0second\n");
+        assert!(!lost_git_identity(&nul, &nul));
+        assert!(lost_git_identity(&nul, &format!("{h1}\0premier sujet\n")));
+        assert!(lost_git_identity(
+            &nul,
+            &format!("{h1}\0premier sujet\n{h2}\0sec\n")
+        ));
+        // La vue compacte garde `Merge: a b` tel quel : pas de refus.
+        let merge =
+            "commit aaaaaaa1\nMerge: abc1234 def5678\nAuthor: A <a@e.t>\nDate: d\n\n    fusion\n";
+        assert!(!lost_git_identity(
+            merge,
+            "commit aaaaaaa1\n  Merge: abc1234 def5678\n  Author: A <a@e.t>\n  fusion\n"
+        ));
+        // Un sujet qui finit par un mot non hexadécimal ou trop court n'est pas une identité.
+        assert!(!lost_git_identity("version 1.2.3\nadd cafe\n", ""));
     }
     #[test]
     fn unicode_truncation_never_splits_a_character() {

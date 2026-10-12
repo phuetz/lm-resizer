@@ -72,6 +72,7 @@ Toutes les commandes de premier niveau, puis les sous-commandes de `tee`.
 | `mcp` | Run a minimal MCP stdio server |
 | `mcp-proxy` | Relay an MCP stdio server and compress successful tool text results |
 | `install` | Install lm-resizer as an MCP server for common agent clients |
+| `uninstall` | Remove the lm-resizer MCP server entry written by `install`, keeping the rest of each file |
 | `serve` | Run a small HTTP API |
 | `wrap` | Start the local proxy, then launch an agent through it |
 | `tee list` | List raw output recovery files |
@@ -82,20 +83,39 @@ Détail des commandes qui n'ont pas d'autre page de documentation :
 
 | Commande | Précisions rejouées |
 | --- | --- |
-| `smart <fichier> [-q <requête>] [--json] [--store <chemin>]` | Résume un fichier source avec les symboles Code Explorer indexés quand ils existent ; sans index, compression ordinaire. |
+| `smart <fichier> [--ast] [-q <requête>] [--json] [--store <chemin>]` | Sans `--ast`, compression existante avec conseil Code Explorer quand disponible. Avec `--ast`, résumé syntaxique local Rust, Python, TypeScript ou JavaScript, signatures et numéros de ligne, corps omis. |
 | `share <nom> [-i <fichier>] [-q <requête>] [--json] [--store <chemin>]` | Enregistre une passation nommée, compressée. Lit stdin sans `-i`. Affiche le nom (ou, avec `--json`, `key`, `original_bytes`, `shared_bytes`). |
 | `shared-get <nom> [--full] [--store <chemin>]` | Compressée par défaut ; texte d'origine, octets identiques, avec `--full`. |
 | `shared-list [--store <chemin>]` | Liste les noms des passations du store. |
 | `list-trusted-filters [--json]` | Liste les fichiers de filtres approuvés par `trust-filters`. |
 | `untrust-filters [--path <fichier>] [--json]` | Retire un fichier du registre de confiance (défaut : `.lm-resizer/filters.toml`) ; `removed: false` s'il n'y était pas. |
 
+`smart --ast` conserve l'ordre des déclarations, les imports, les types et leurs
+membres, les fonctions/méthodes avec leur signature et la première ligne de
+documentation. Les constantes visibles sont listées sans leur valeur : visibilité
+explicite en Rust, exports en JS/TS, noms en majuscules en Python. Les déclarations
+contenues dans un corps de fonction ne sont pas parcourues. Les macros Rust ne
+sont pas développées. L'analyse est syntaxique et ne résout pas les imports ni les
+types.
+
+Le mode AST réussi n'utilise ni modèle, ni réseau, ni index Code Explorer, ni
+store. `--query` et `--store` restent acceptés et s'appliquent seulement au repli.
+Une extension inconnue ou une erreur syntaxique revient au traitement existant,
+avec une ligne `[smart AST: repli …]` en tête de la sortie. En JSON, cette ligne
+figure dans `output`. Le JSON AST réussi mesure les octets et annonce
+`token_count_method: "approximate"`, `tokenizer: "bytes/4"` : **octets ÷ 4 est une
+approximation de jetons**, pas une tokenisation. Les petits fichiers déjà limités
+à des signatures peuvent produire un résumé plus long que l'entrée.
+
 ## Options
 
 | Option | Commande | Effet |
 | --- | --- | --- |
 | `-q`, `--query <texte>` | `compress`, `exec`, `smart`, `share`, `batch`, `tool-output` | Requête utilisée par les compresseurs sensibles à la pertinence (défaut : vide). |
-| `--api-key <jeton>` | `serve`, `wrap` | Jeton porteur optionnel envoyé au fournisseur amont. Sa valeur n'est jamais affichée par `--help`, même lue depuis `LM_RESIZER_API_KEY`. |
-| `--exit-code <n>` | `tool-output`, `pipe` | Code de sortie de la commande d'origine (défaut : 0), recopié dans `exit_code` du rapport `--json`. |
+| `--api-key <jeton>` | `serve`, `wrap` | Jeton porteur optionnel envoyé au fournisseur amont. Sa valeur n'est jamais affichée par `--help`, même lue depuis `LM_RESIZER_API_KEY`. Donné sur la ligne de commande, il est lisible par tous les comptes locaux (`ps`, `/proc`) : un avertissement est écrit ; préférer `LM_RESIZER_API_KEY` ou `--api-key-file`. `wrap` ne le transmet jamais en argument au proxy qu'il lance, seulement par l'environnement du processus fils. |
+| `--api-key-file <chemin>` | `serve`, `wrap` | Fichier dont la première ligne est le jeton amont. Sous Unix, tout droit du groupe ou des autres entraîne un refus (`mode & 0o077 != 0`) avec la consigne `chmod 600`. Le mode 0600 est conseillé ; 0400 et 0700 passent aussi ce contrôle. L'emporte sur `--api-key`. |
+| `--allow-non-loopback` | `serve`, `wrap` | Autorise une adresse `--bind` hors boucle locale. Sans lui, `serve` et `wrap` refusent (le proxy n'authentifie pas ses clients : quiconque l'atteint dépense la clé amont). Par défaut le proxy refuse aussi toute requête dont l'en-tête `Host` n'est pas local (anti rebinding DNS) et ne suit aucune redirection de l'amont. |
+| `--exit-code <n>` | `tool-output`, `pipe` | Code de sortie de la commande d'origine (défaut : 0), recopié dans `exit_code` du rapport `--json` ; le processus sort avec ce code, avec ou sans `--json` (`tool-output` sortait 0 avant la 0.2.6). Sous Unix seul l'octet bas d'un code de sortie survit : un code non nul hors de 1 à 255 sort avec son octet bas s'il n'est pas nul, 1 sinon (`256` → 1, `-1` → 255), jamais 0 ; le rapport `--json` garde le code donné. Même règle pour `exec`. |
 | `--event <nom>` | `hook` | Nom de l'événement du hook (par exemple `PostToolUse`), recopié dans le rapport `--json`. Défaut : `unknown`. |
 | `--ext <liste>` | `batch` | Liste blanche d'extensions séparées par des virgules (`log,json,diff,txt`). |
 | `-j`, `--jobs <n>` | `batch` | Nombre de fils de travail (défaut : le pool global de Rayon). |
@@ -170,8 +190,8 @@ Ces options existent sur plusieurs commandes ; le script de contrôle exige que 
 | `--provider` | `sanitize-provider-fixture`, `serve`, `wrap` | Fournisseur : `openai`, `anthropic`, `bedrock` ou `vertex` (pour `serve` et `wrap`, défaut `openai`). La variable `LM_RESIZER_PROVIDER` n'est lue que par `serve` et `wrap`. |
 | `--input` | `sanitize-provider-fixture` | Fichier JSON d'entrée (obligatoire). |
 | `--output` | `sanitize-provider-fixture` | Chemin du fichier fixture écrit (obligatoire). |
-| `--client` | `init-native-hooks`, `hook`, `install-hooks`, `uninstall-hooks` | Agent visé : `codex`, `claude`, `gemini`, `copilot`, `cursor` ou `all` (défaut `all`). `install-hooks` n'accepte que `codex`, `claude` et `all` ; pour `gemini`, `copilot` et `cursor`, utiliser `init-native-hooks`. |
-| `--project-dir` | `install-hooks`, `uninstall-hooks` | Dossier du projet (où lire ou écrire `AGENTS.md` / `CLAUDE.md` ou la configuration). |
+| `--client` | `init-native-hooks`, `hook`, `install-hooks`, `uninstall-hooks` | Agent visé : `codex`, `claude`, `gemini`, `copilot`, `cursor` ou `all` (défaut `all`). `uninstall-hooks --client all` retire les configurations natives des cinq clients. Pour `install` et `uninstall` (serveur MCP) : `claude`, `codex`, `cursor`, `vscode` ou `all`, avec `--scope project|global` (Codex toujours global) ; `uninstall --scope all` retire les deux portées. `uninstall-hooks` reconnaît un fichier généré pour le binaire courant ou pour le chemin de binaire écrit dans le fichier. `install-hooks` n'accepte que `codex`, `claude` et `all` ; pour `gemini`, `copilot` et `cursor`, utiliser `init-native-hooks`. |
+| `--project-dir` | `install-hooks`, `uninstall-hooks`, `install`, `uninstall` | Dossier du projet (où lire ou écrire `AGENTS.md` / `CLAUDE.md` ou la configuration). |
 | `--force` | `install-hooks` | Écrase les fichiers générés existants. |
 
 ## Garde de diagnostic
@@ -241,6 +261,7 @@ fait que le décrire.
 | --- | --- |
 | `LM_RESIZER_UPSTREAM` | URL de base du fournisseur compatible OpenAI, valeur par défaut de `--upstream` pour `serve` et `wrap`. |
 | `LM_RESIZER_API_KEY` | Valeur par défaut de `--api-key` (jamais affichée). |
+| `LM_RESIZER_API_KEY_FILE` | Valeur par défaut de `--api-key-file`. |
 | `LM_RESIZER_PROVIDER` | Valeur par défaut de `--provider` pour `serve` et `wrap` seulement : `openai`, `anthropic`, `bedrock` ou `vertex`. Une autre valeur est refusée quand ces commandes lisent leurs arguments (`unsupported provider 'bogus'. Use openai, anthropic, bedrock, or vertex`, code 1). Ce n'est pas un refus au démarrage de toute commande : `stats` et `doctor` avec `bogus` sortent 0, stderr vide. |
 | `LM_RESIZER_CODE_EXPLORER_BIN` | Binaire Code Explorer utilisé par `compress --advice-from-code-explorer` (d'après son `--help`) ; à défaut, `code-explorer` dans le `PATH`. |
 | `LM_RESIZER_TEE` | `0` coupe l'archive du brut de `exec` (`[raw: …]`, `tee_hint`) ; le hash CCR de `compress` reste émis. |
@@ -261,6 +282,6 @@ fait que le décrire.
 
 `lm-resizer err -- <program> [args...]`, `test`, and `summary` run any program. They capture the producer's output and preserve its exit status. `err` keeps diagnostic lines, `test` keeps diagnostics and test totals, and `summary` also retains numeric footer lines. Selected lines keep adjacent context; traceback frames, source lines and compiler carets stay with their diagnostic. On failure the first line includes the real exit code, including when raw output is requested. Unknown diagnostics fall back to the complete output. The full output is archived; use `lm-resizer tee list` and `lm-resizer tee read <id>` to recover it. Add `--json` before `--` for the output, status, exact token counts and recovery hint.
 
-`lm-resizer exec -- <program> [args...]` applies a dedicated native view where one exists and the generic summary to other commands. `lm-resizer tool-output --command '<program> [args...]' --exit-code N` accepts already captured text on stdin. Both write measured execution history. Hooks that route through `exec` and the MCP `lm_resizer_tool_output` tool use the same history. MCP applies generic filtering by default and marks nonzero producer status with `isError: true`; `raw_on_failure: true` keeps the raw body while still showing the failure code first.
+`lm-resizer exec -- <program> [args...]` applies a dedicated native view where one exists. Any other program, script, wrapper (`env`, `timeout`, `xargs`…), shell line or recipe runner (`make`, `npm run`, `npm test`, `cargo run`, `uv run`…) is returned raw, byte for byte, apart from the `[FAIL]` header on a nonzero code; only a whole JSON document or a run of log-level lines is folded, reversibly. Since 0.2.6 the generic summary is never applied by itself: ask for it with `summary`. A test runner's view is raw (`lossless:test-output`) when the command asks to display test output (`cargo test -- --nocapture`, `pytest -s`, `go test -v`, `jest --silent=false`, `dotnet test -v d`…) or when the runner has no capture (`rspec`, minitest, Maven test phases, `playwright test`); a test runner that exits with code 0 is returned raw too (`lossless:test-success`), its reduced view applying only to a nonzero code; recipe runners are `lossless:script-runner`, other unknown programs `lossless:generic`. `git log` is shortened only in a simple direct call (see [KNOWN-MISSES](KNOWN-MISSES.md)). `lm-resizer tool-output --command '<program> [args...]' --exit-code N` accepts already captured text on stdin and follows the same rules. Both write measured execution history. Hooks that route through `exec` and the MCP `lm_resizer_tool_output` tool use the same history. MCP applies the same views by default and marks nonzero producer status with `isError: true`; `raw_on_failure: true` keeps the raw body while still showing the failure code first.
 
 `lm-resizer gain` displays the total number of commands, original and output tokens, signed savings and percent saved. `lm-resizer gain --json` and `lm-resizer stats --json` expose the underlying counts in `exec_history`; `stats` also defaults to JSON. `--history` prints recent executions and `--project` restricts them to the current directory, whose path is displayed even for a zero count. Token counts use tiktoken-rs `o200k_base` on the final output including visible recovery hints. Legacy records lacking exact counts remain separate as estimates and do not inflate the measured total.

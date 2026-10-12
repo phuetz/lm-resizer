@@ -1,8 +1,8 @@
 # LM Resizer
 
-**Raccourcissez les sorties de commande bruyantes avant qu'elles n'atteignent votre agent de code — sans jamais perdre un seul échec.** LM Resizer est un CLI Rust local et rapide, destiné aux développeurs qui pilotent tests, compilations, Git, conteneurs et autres outils depuis un agent de code comme Claude Code, Codex, Cursor, Gemini CLI, un client MCP ou un pipeline maison. Il lance une commande, garde un résultat compact pour l'agent et conserve l'original exact pour un rappel immédiat.
+**Raccourcissez les sorties de commande bruyantes avant qu'elles n'atteignent votre agent de code — sans jamais perdre un seul échec.** LM Resizer est un CLI Rust local et rapide, destiné aux développeurs qui pilotent tests, compilations, Git, conteneurs et autres outils depuis un agent de code comme Claude Code, Codex, Cursor, Gemini CLI, un client MCP ou un pipeline maison. Il lance une commande, garde un résultat compact pour l'agent et conserve l'original pour un rappel immédiat : les octets et l'ordre de chaque flux sont exacts, tandis que l'ordre entre stdout et stderr n'est garanti que dans le mode par défaut (voir [Récupérer la sortie exacte](#récupérer-la-sortie-exacte)).
 
-Sur un banc de 61 captures de commandes, il économise une médiane de **25,18 %** de jetons, rappel du brut compris, conserve le code de sortie du producteur dans **61/61** cas et démarre en environ **8 ms**. Zéro télémétrie, 100 % local, déterministe.
+Sur un banc de 61 captures de commandes, il économise en moyenne **27,61 %** de jetons (médiane **4,87 %**), rappel du brut compris, conserve le code de sortie du producteur dans **61/61** cas et démarre en environ **5 ms** (`lm-resizer --version` ; un `exec` lance aussi la commande enveloppée et prend environ **20 ms**). Zéro télémétrie, 100 % local, déterministe.
 
 ![Exemple de traitement d'une sortie de commande par LM Resizer](docs/lm-resizer-hero.png)
 
@@ -13,7 +13,7 @@ Sur un banc de 61 captures de commandes, il économise une médiane de **25,18 %
 Binaire précompilé pour Linux et macOS :
 
 ~~~sh
-curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.5/install.sh -o install.sh && sh install.sh
+curl -fsSL https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.6/install.sh -o install.sh && sh install.sh
 export PATH="$HOME/.local/bin:$PATH"
 lm-resizer --version
 ~~~
@@ -21,10 +21,10 @@ lm-resizer --version
 Windows PowerShell :
 
 ~~~powershell
-irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.5/install.ps1 | iex
+irm https://raw.githubusercontent.com/phuetz/lm-resizer/v0.2.6/install.ps1 | iex
 ~~~
 
-L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire avant de poser `lm-resizer` dans `~/.local/bin` par défaut. Plateformes préparées : Linux x86_64, macOS x86_64/arm64 et Windows x86_64. La release v0.2.2 existante n'a pas d'archives précompilées.
+L'installeur vérifie la somme SHA-256 de l'archive et la version du binaire avant de poser `lm-resizer` dans `~/.local/bin` par défaut. Plateformes préparées : Linux x86_64, macOS x86_64/arm64 et Windows x86_64.
 
 Sur Linux et macOS, l'installeur affiche la ligne à ajouter quand `~/.local/bin` n'est pas dans le `PATH` ; pour la rendre permanente sous Bash, lancez `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc` (`~/.zshrc` pour zsh) puis ouvrez un nouveau terminal. L'installeur Windows met à jour le `PATH` utilisateur. `LM_RESIZER_INSTALL_DIR` permet de choisir un autre répertoire. Pour désinstaller un binaire précompilé, retirez-le de ce répertoire. [Windows : repli TLS, PowerShell 5.1 et récupération exacte](docs/WINDOWS.md).
 
@@ -33,38 +33,39 @@ Sur Linux et macOS, l'installeur affiche la ligne à ajouter quand `~/.local/bin
 `tool-output` filtre une sortie déjà capturée par un hôte. La vue réduite conserve le test en échec et pointe vers l'original exact :
 
 ~~~console
-$ lm-resizer tool-output --command 'cargo test' --input bench/corpus/cargo_fail.txt
+$ lm-resizer tool-output --command 'cargo test' --exit-code 101 --input bench/corpus/cargo_fail.txt
 FAILURES (1):
-1.     parse::reject_empty
+1. ---- parse::reject_empty stdout ----
+thread 'parse::reject_empty' panicked at src/parser.rs:42:9:
+assertion `left == right` failed: expected=422 observed=200
 
 test result: FAILED. 70 passed; 1 failed; finished in 0.09s
-test result: FAILED. 70 passed; 1 failed; finished in 0.09s
-[tee:78bf04f25902]
+[tee:78bf04f25902] lm-resizer tee read 78bf04f25902
 ~~~
 
-La même commande sur le fichier de 78 lignes compte **792** jetons d'origine et **65** jetons compressés. Quatre captures fournies, mesurées sur cette machine avec `o200k_base` :
+La même commande sur le fichier de 78 lignes compte **792** jetons d'origine et **80** jetons compressés. Quatre captures fournies, mesurées sur cette machine avec `o200k_base` :
 
 | Capture (`bench/corpus/`) | `--command` | Origine | Compressé |
 |---|---|---:|---:|
 | `cargo_ok.txt` | `cargo test` | 837 | 24 |
-| `cargo_fail.txt` | `cargo test` | 792 | 65 |
+| `cargo_fail.txt` | `cargo test` | 792 | 80 |
 | `pytest_ok.txt` | `pytest` | 937 | 17 |
-| `git_log.txt` | `git log` | 2320 | 60 |
+| `git_log.txt` | `git log` | 2320 | 2320 |
 
-Reproduisez n'importe quelle ligne avec `lm-resizer tool-output --command '<command>' --input <file> --json` : le JSON expose `original_tokens`, `compressed_tokens` et `tokens_saved` avec `token_count_method: "exact"`.
+Reproduisez n'importe quelle ligne avec `lm-resizer tool-output --command '<command>' --input <file> --json` : le JSON expose `original_tokens`, `compressed_tokens` et `tokens_saved` avec `token_count_method: "exact"`. `git_log.txt` revient inchangé : la vue de `git log` montre chaque commit et, sur cet historique, n'économise aucun jeton ; le brut est donc conservé.
 
-## Pourquoi LM Resizer ? (face à RTK et Headroom)
+## Pourquoi LM Resizer ? (face à un filtre de référence et à Headroom)
 
-Deux autres outils servent souvent à réduire les sorties de commande. Leurs chiffres publiés sont reproduits dans [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md) sur les mêmes 61 captures, tokenisées avec `o200k_base`, rappel du brut compris :
+Deux autres outils servent souvent à réduire les sorties de commande : un filtre de sorties de commandes (la référence épinglée, nommée dans [le banc](bench/native/README.md)) et Headroom. Leurs chiffres publiés sont reproduits dans [`bench/native/windows-release/delivery.md`](bench/native/windows-release/delivery.md) sur les mêmes 61 captures, tokenisées avec `o200k_base`, rappel du brut compris :
 
-| 61 captures de commandes, `o200k_base` | LM Resizer 0.2.5 | RTK 0.50.0 | Headroom 0.39.1, API générale |
+| 61 captures de commandes, `o200k_base` | LM Resizer 0.2.6 | Filtre de référence épinglé | Headroom 0.39.1, API générale |
 |---|---:|---:|---:|
-| Médiane de jetons économisés, rappel du brut compris | 25,18 % | 15,81 % | 0,00 % |
-| Moyenne de jetons économisés, rappel du brut compris | 34,68 % | 32,61 % | 1,91 % |
+| Médiane de jetons économisés, rappel du brut compris | 4,87 % | 15,81 % | 0,00 % |
+| Moyenne de jetons économisés, rappel du brut compris | 27,61 % | 32,61 % | 1,91 % |
 | Code de sortie du producteur conservé | 61/61 | 52/61 | non mesuré |
 | Brut exact récupérable | 61/61 | partiel ou absent | non |
 
-La médiane et la moyenne rejouées dépassent celles de RTK sur ce corpus. Les grands patchs gardent leur début diagnostique et leur brut intégral reste dans tee ; les assertions et diagnostics du compilateur restent entiers. RTK retourne le code de sortie 0 dans **9** des 61 captures où le producteur échoue ; LM Resizer conserve le code du producteur. Sur une capture, LM Resizer rend 251 jetons contre 40 chez RTK parce qu'il indique les **457** erreurs de collecte et liste les dix premiers fichiers en échec, ce que RTK omet. Headroom compresse sémantiquement le contexte d'API LLM et n'a pas de filtres dédiés aux outils CLI : sa médiane d'économie sur ce corpus de commandes est de 0,00 %. L'égalité stricte des vues est de 41/61 ; les vingt écarts et leurs raisons sont listés dans le fichier du banc, et le contrôle strict du banc sort en code 1 par construction. Les chiffres se rejouent avec `python3 bench/real/parity_rtk.py` ; voir [le banc](bench/native/README.md).
+La médiane (4,87 %) et la moyenne (27,61 %) rejouées de LM Resizer sont toutes deux inférieures à celles du filtre de référence (15,81 % et 32,61 %) sur ce corpus. Depuis la 0.2.6, `git log` n'est raccourci qu'en appel direct simple : `git [-C dossier] log` lancé par `exec`, avec seulement `--decorate`, `--all`, `-n N`, `-N`, des révisions, des plages ou `-- chemins`, et aucune clé `format.*`/`log.*` dans la configuration de Git. Pour toute autre option, un wrapper, un shell, un script, un lanceur de recettes, `pipe` ou `tool-output`, le corps reste brut ; un code non nul peut ajouter un en-tête `[FAIL]`, et un rappel tee peut suivre la sortie, alors que le filtre de référence n'en montre toujours que le premier commit (cinq captures qui comptaient 91 à 97 % d'économie en comptent maintenant 0 %). Un programme sans vue native garde son corps brut, sauf un document JSON entier ou au moins vingt lignes toutes préfixées par un niveau de journal, qui peuvent être réencodés ou pliés. Les lanceurs de recettes comme `make` et `npm run`/`npm test` gardent aussi leur corps brut ([limites](docs/KNOWN-MISSES.fr.md)). Un lanceur de tests qui se termine par le code 0 est rendu brut lui aussi : un test réussi peut imprimer n'importe quoi, un `git log` relayé ou un avertissement de sécurité, qu'un bilan cacherait ; une exécution en échec garde la vue réduite. Les grands patchs gardent leur début diagnostique et leur brut intégral reste dans tee ; les diagnostics du compilateur restent entiers, et les vues de tests en échec gardent chaque bloc d'échec (leurs autres pertes sont mesurées dans [les limites](docs/KNOWN-MISSES.fr.md)). Le filtre de référence retourne le code de sortie 0 dans **9** des 61 captures où le producteur échoue ; LM Resizer conserve le code du producteur. Sur une capture, LM Resizer rend 251 jetons contre 40 chez le filtre de référence parce qu'il indique les **457** erreurs de collecte et liste les dix premiers fichiers en échec, ce qu'il omet. Headroom compresse sémantiquement le contexte d'API LLM et n'a pas de filtres dédiés aux outils CLI : sa médiane d'économie sur ce corpus de commandes est de 0,00 %. L'égalité stricte des vues est de 34/61 ; les vingt-sept écarts et leurs raisons sont listés dans le fichier du banc, et le contrôle strict du banc sort en code 1 par construction. Les chiffres se rejouent en une étape avec `bench/real/rejouer.sh` (Python isolé avec tiktoken, exécutable de comparaison construit depuis l'archive épinglée, rejeu dans un dossier neuf, synthèse des médianes, récupérations et codes de sortie ; réseau nécessaire la première fois, `--sans-headroom` omet la colonne Headroom) ; le script Python du banc seul exige ses arguments, voir [le banc](bench/native/README.md).
 
 ## Essayez sur votre projet
 
@@ -73,45 +74,47 @@ La médiane et la moyenne rejouées dépassent celles de RTK sur ce corpus. Les 
 Vérifiez que l'installation fonctionne partout, sans dépôt :
 
 ~~~bash
+lm-resizer --version
 lm-resizer exec -- echo hello
+lm-resizer tee list
+~~~
+
+Sous Windows `echo` est une commande interne de `cmd` et de PowerShell, pas un programme, et `exec` ne peut pas la lancer : utilisez `lm-resizer exec -- cmd /c echo hello`.
+
+Ensuite, depuis un dépôt Git et depuis un projet Rust :
+
+~~~bash
 lm-resizer git log -20
 lm-resizer exec --raw-on-failure -- cargo test
-lm-resizer tee list
 lm-resizer gain --history --project
 ~~~
 
-Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagnostics ou bilans de tests avec une ligne de contexte et le code d’échec en tête. `exec` et `tool-output` résument aussi les commandes sans filtre dédié. Chaque sortie reste récupérable avec `tee read`. `gain` affiche les commandes et jetons mesurés ; `gain --json` donne les compteurs complets. Voir la [référence CLI](docs/CLI-REFERENCE.md).
+`gain` peut commencer négatif : sur une sortie minuscule, la vue et la ligne de rappel coûtent plus de jetons que l'original. Les vraies sorties rendent le total positif.
+
+Pour toute commande, `lm-resizer err|test|summary -- <command>` garde les diagnostics ou bilans de tests avec une ligne de contexte et le code d’échec en tête. `exec` et `tool-output` appliquent une vue dédiée quand elle existe ; tout autre programme, script, wrapper, ligne de shell ou lanceur de recettes sort brut, et le résumé ne s'applique que sur demande (`summary`). Chaque sortie reste récupérable avec `tee read`. `gain` affiche les commandes et jetons mesurés ; `gain --json` donne les compteurs complets. Voir la [référence CLI](docs/CLI-REFERENCE.md).
 
 Pour les scripts, utiliser `lm-resizer gain --json`.
 
-`exec` conserve le statut du producteur (128 + signal sous Unix). Les routes shells, `--stream` et `--raw-on-failure` conservent leurs flux séparés et le marqueur `[stderr]`.
+`exec` conserve le statut du producteur (128 + signal sous Unix). Avec `--stream` ou `--raw-on-failure`, stdout et stderr sont capturés séparément. Avant filtrage, le texte contient stdout, puis une frontière `[stderr]`, puis stderr. Certaines vues, dont celles de tests et de recherche, retirent cette frontière : la vue finale n’identifie donc pas toujours le flux de chaque ligne. Quand les deux flux sont présents, une annotation finale rappelle que l’ordre affiché n’est pas chronologique. Le champ JSON `streams` donne leurs nombres d’octets ; son champ `layout` décrit le texte avant filtrage, pas nécessairement la vue finale.
 
 ## La garantie diagnostique
 
-LM Resizer raccourcit, il ne cache pas. Les vues de commandes conservent littéralement nombres, chemins, identifiants, auteurs de commit et diagnostics d'échec. Les réussites reconnues de Cargo/pytest peuvent être résumées par des compteurs de suite ; les échecs restent visibles. Si une étape de compression devait omettre une ligne d'échec, le corps filtré est conservé et, quand le gain le permet, une ligne `[tee:<id>]` pointe vers l'original intact. Une vue qui contient un diagnostic peut donc n'afficher presque aucun gain — c'est voulu. Les noms d'étapes internes (`diagnostic-guard`, `kept_filtered`, `diagnostic_reinjection`) et le chemin `raw_on_failure` sont listés dans [la référence de la ligne de commande](docs/CLI-REFERENCE.md).
+LM Resizer raccourcit, il ne cache pas. Les vues de commandes conservent littéralement nombres, chemins, identifiants et auteurs de commit. Un lanceur de tests qui se termine par le code 0 est rendu brut, octet pour octet (règle validée le 9 octobre 2026) : un test réussi peut imprimer n'importe quoi. Une exécution en échec garde la vue réduite du lanceur, qui montre les échecs mais pas toutes les lignes : `cargo test` garde toute ligne hors de sa grammaire connue, pytest et jest perdent encore les lignes hors de leurs blocs d'échec ([limites mesurées](docs/KNOWN-MISSES.fr.md)). Quand la commande demande d'afficher la sortie des tests (`cargo test -- --nocapture`, `pytest -s`, `go test -v`…) ou que le lanceur n'a pas de capture (`rspec`, minitest, phases de test Maven, `playwright test`), la sortie est rendue brute ([limites](docs/KNOWN-MISSES.fr.md)). Si une étape de compression devait omettre une ligne d'échec, le corps filtré est conservé et, quand le gain le permet, une ligne `[tee:<id>]` pointe vers l'original intact. Une vue qui contient un diagnostic peut donc n'afficher presque aucun gain — c'est voulu. Les noms d'étapes internes (`diagnostic-guard`, `kept_filtered`, `diagnostic_reinjection`) et le chemin `raw_on_failure` sont listés dans [la référence de la ligne de commande](docs/CLI-REFERENCE.md).
 
 `lm-resizer expand -i view.txt` reconstruit les vues réversibles, dont les historiques et diffs `Patch v1` et `Patch v2` : les en-têtes communs et répétitions sont factorisés sans retirer de ligne de source ni de contexte.
 
 ## Récupérer la sortie exacte
 
-`exec` archive stdout et stderr entrelacés jusqu'à EOF, sans plafond de 10 Mio. Une vue suffisamment réduite peut afficher `[tee:<id>]` ; le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.
+`exec` archive la sortie jusqu'à EOF, sans plafond de 10 Mio. Le tee ne contient que les octets du producteur : jamais la frontière `[stderr]` ni l'annotation ajoutées à la vue. Par défaut, `exec` draine un seul tube commun : le tee garde l'ordre d'écriture du producteur. Dans les modes à flux séparés (`--stream`, `--raw-on-failure`), les octets de chaque flux sont exacts et dans leur ordre, mais les blocs sont archivés dans l'ordre de leur drainage : l'ordre entre stdout et stderr n'est pas garanti, et un bloc d'un flux peut tomber au milieu d'une longue ligne de l'autre. Une vue suffisamment réduite peut afficher `[tee:<id>]` ; le rappel se lit avec `lm-resizer tee read <id>` ; sinon `tee list` et le champ JSON `tee_hint` donnent accès au brut sans alourdir la vue.
 
-Depuis Bash, récupérer un original listé lorsqu'il en existe un :
+`tee list` est trié par nom de fichier, qui est une empreinte du contenu, pas par date : sa première entrée n'est pas « la dernière sortie ». Prenez l'identifiant dans la vue (`[tee:<id>]`), dans le champ `tee_hint` d'un rapport `--json` ou dans le marqueur `[raw: …]`, puis lisez-le :
 
 ~~~bash
-tee_listing=$(lm-resizer tee list)
-tee_file=${tee_listing%% *}
-if [ -n "$tee_file" ]; then lm-resizer tee read "$tee_file"; fi
+lm-resizer tee list
+lm-resizer tee read e3b0c44298fc
 ~~~
 
-Sous PowerShell, choisir le fichier dans la liste JSON :
-
-~~~powershell
-$teeFiles = lm-resizer tee list --json | ConvertFrom-Json
-if ($teeFiles.files.Count -gt 0) { lm-resizer tee read $teeFiles.files[0].name }
-~~~
-
-Si plusieurs fichiers sont listés, utilisez le nom ou l'identifiant `[raw: …]` correspondant à la commande recherchée. `lm-resizer --version` affiche `lm-resizer 0.2.5`. Le rappel JSON porte un identifiant tel que `[raw: e3b0c44298fc]` ; les archives ont l'extension `.log`.
+`lm-resizer --version` affiche `lm-resizer 0.2.6`. Le rappel JSON porte un identifiant tel que `[raw: e3b0c44298fc]` ; les archives ont l'extension `.log`.
 
 ## Intégrations agents
 
@@ -134,6 +137,12 @@ lm-resizer install --client all --scope project
 
 Cette commande écrit les fichiers du projet et la configuration Codex de votre compte, y compris avec `--scope project`. Gemini CLI n'est pas couvert par `install` : utilisez `lm-resizer init --client gemini --project-dir .` ([guide des hooks d'agents](docs/AGENT_HOOKS.md)).
 
+### Crochets et permissions
+
+Les crochets d'agent (`lm-resizer init-native-hooks`, `lm-resizer install-hooks`) réécrivent une commande Bash prise en charge en `lm-resizer exec -- <command>`. Pour Claude Code le crochet ne fait que réécrire : il n'accorde aucune permission, donc Claude Code demande l'accord pour la commande réécrite comme pour toute autre (vérifié sur Claude Code 2.1.294). Seul Codex exige que le crochet réponde `permissionDecision: allow`. Pour Cursor le crochet répond `permission: "ask"`, jamais `allow` ; Cursor documente `ask` comme non appliqué pour `preToolUse`, son effet n'y est donc pas vérifié. La commande réécrite ne correspond plus à une règle de permission écrite pour l'original : **une règle `deny` comme `Bash(cargo test)` n'arrête pas `lm-resizer exec -- cargo test`**. Ajoutez aussi une règle deny pour la forme enveloppée, par exemple `Bash(*exec -- cargo test*)`, ou n'installez pas le crochet. Seule une commande qu'une vue réduit vraiment est réécrite, et jamais une commande qui peut poser une question ou ne pas se terminer (`git push|pull|fetch`, `git credential`, `npm test`, `npm run server`, `make run-server`, `docker run`, `docker compose exec -T`, `ssh`, `sudo`, Terraform sans `-input=false`…) : `exec` retiendrait son invite ou son journal jusqu'à la fin ([liste](docs/KNOWN-MISSES.fr.md)). Voir [SECURITY.md](SECURITY.md).
+
+Le crochet ne réécrit une commande que si c'est une commande simple. Avec `cd <dir> && …`, un tube comme `| tail`, une redirection ou `&&`, il laisse la ligne brute : rien n'est raccourci et rien ne casse. Les agents écrivent souvent `cd <dir> && cargo test 2>&1 | tail` ; pour profiter du crochet, demandez-leur de lancer `cargo test` seul depuis le dossier du projet.
+
 ## Statistiques de jetons reproductibles
 
 `lm-resizer stats --markdown` affiche les comptes exacts du texte avec le tokenizer existant **tiktoken-rs / o200k_base** (famille GPT-4o). Les JSON `exec`, `tool-output` et `compress` exposent `original_tokens`, `compressed_tokens`, le gain signé `tokens_saved`, `tokenizer` et `token_count_method: "exact"`. Le compte inclut les marqueurs de récupération finaux ; un gain négatif signifie davantage de jetons en sortie. Cet encodage de référence ne mesure ni le tokenizer de Claude/Llama ni une facture fournisseur.
@@ -144,9 +153,9 @@ Les nouvelles entrées d'historique conservent les deux comptes. Les statistique
 
 ## Filtres natifs et mesures actuelles
 
-Le produit utilise ses propres filtres Rust et TOML. Les commandes d'inspection explicites incluent `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` et `dedup`. Les lectures de fichiers restent littérales. Les plis réversibles de chemins et correspondances, tables JSON et répétitions exactes complètent les filtres de commandes ; le contour syntaxique et la déduplication de blocs sont explicites.
+Le produit utilise ses propres filtres Rust et TOML. Les commandes d'inspection explicites incluent `err`, `test`, `summary`, `json`, `deps`, `env`, `format`, `outline` et `dedup`. Les lectures de fichiers restent littérales. Pour un programme sans vue native, seuls un document JSON entier (réencodé en table ou compacté) et des suites d’au moins vingt lignes toutes préfixées par un niveau de journal sont pliés ; les autres sorties d’un programme inconnu et les lanceurs de recettes gardent leur corps brut. Un code non nul peut ajouter un en-tête `[FAIL]`, et un rappel tee peut suivre la sortie. Le contour syntaxique et la déduplication de blocs sont explicites.
 
-**Médiane tee compris : 25,18 %.** La moyenne est de 34,68 % ; les 61 récupérations du brut et les codes de sortie du producteur passent tous, et les mesures de démarrage entrelacées donnent environ 8 ms. Ces médianes de corpus ne sont pas une affirmation sur des dépôts vivants arbitraires. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
+**Moyenne tee compris : 27,61 %.** La médiane est de 4,87 % ; les 61 récupérations du brut et les codes de sortie du producteur passent tous, et le démarrage mesure environ 5 ms pour `lm-resizer --version` et environ 20 ms pour `lm-resizer exec -- echo hello` (médiane de 60 lancements, Linux, build release, machine chargée). Ces médianes de corpus ne sont pas une affirmation sur des dépôts vivants arbitraires. [Mesures actuelles, écarts exacts et limites](bench/native/windows-release/delivery.md).
 
 `env` masque les noms contenant `PASSPHRASE` (y compris `PASSPHRASE_FILE`) et un composant de nom `PASS`. Cela masque volontairement aussi des noms inoffensifs comme `PASS_COUNT` ; le filtrage est prudent, fondé sur les noms et les formes d'URL à identifiants.
 
@@ -171,7 +180,7 @@ La compilation est vérifiée sous Linux x86_64 avec Rust 1.95.0. Les autres pla
 Téléchargez les sources du tag public (Bash ou PowerShell). `lm-resizer` garde son état dans `~/lm-resizer` : clonez depuis un autre dossier (par exemple `mkdir -p ~/src && cd ~/src` sous Bash, ou `New-Item -ItemType Directory -Force "$HOME\src" | Set-Location` sous PowerShell) plutôt que depuis votre dossier personnel :
 
 ~~~sh
-git clone --branch v0.2.5 https://github.com/phuetz/lm-resizer.git
+git clone --branch v0.2.6 https://github.com/phuetz/lm-resizer.git
 cd lm-resizer
 ~~~
 
@@ -217,6 +226,34 @@ Windows (PowerShell) :
 ~~~powershell
 cargo uninstall --root "$installRoot" lm-resizer
 ~~~
+
+## Désinstaller
+
+Défaites ce que vous avez installé, dans cet ordre.
+
+1. Les crochets, projet par projet :
+
+~~~bash
+lm-resizer uninstall-hooks --client all --project-dir .
+~~~
+
+   Cette commande retire les blocs de consignes, les scripts générés et les fichiers de crochets natifs des cinq clients (Codex, Claude, Gemini, Copilot, Cursor) s'ils sont encore exactement ceux qui ont été générés, pour le binaire courant ou pour le chemin de binaire écrit dans le fichier ; un fichier modifié à la main est laissé en place.
+
+2. Les serveurs MCP, avec le même client et la même portée qu'`install` :
+
+~~~bash
+lm-resizer uninstall --client all --scope all --project-dir .
+~~~
+
+   `--scope all` couvre les configurations du projet et les globales (`project` ou `global` seules fonctionnent aussi). Cette commande retire seulement l'entrée `lm-resizer` de `.mcp.json` et `.cursor/mcp.json` (clé `mcpServers`), de `.vscode/mcp.json` (clé `servers`) et la table `[mcp_servers.lm_resizer]` de `~/.codex/config.toml` (Codex est global même avec `project`) ; les autres serveurs restent, un fichier devenu vide est supprimé.
+
+3. Les données enregistrées. Les archives de sortie brute, l'historique des commandes et la base CCR sont dans le dossier d'état : `~/lm-resizer` par défaut, ou `XDG_STATE_HOME`, `LOCALAPPDATA` ou `LM_RESIZER_STATE_DIR` s'ils sont définis. Supprimez les archives, puis le dossier :
+
+~~~bash
+lm-resizer tee purge --all
+~~~
+
+4. Le binaire : `cargo uninstall` comme indiqué dans « Compiler depuis les sources », ou supprimez `~/.local/bin/lm-resizer`.
 
 ## Quand ne pas l'utiliser
 

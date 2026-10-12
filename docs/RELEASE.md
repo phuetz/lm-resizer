@@ -48,7 +48,7 @@ archives to a release.
 ## Commands
 
 To prepare the next binary release, first merge the version-aligned code and
-create a new tag (`v0.2.5` for this change). Run **Prepare binary release draft**
+create a new tag (`v0.2.6` for this change). Run **Prepare binary release draft**
 with that existing tag and `confirm=PREPARE_DRAFT`. The workflow builds four
 platform archives, verifies their checksums, and creates a draft with the
 archives and sidecars. Review its assets before publishing the draft manually.
@@ -70,10 +70,10 @@ needs GLIBC_2.39 and libstdc++ and does not start on Debian 12, Ubuntu 20.04/22.
 or Alpine. The workflow proves the archive starts on those images before the
 draft is created.
 
-The tag must include `60d5cc6` and the v0.2.4 and v0.2.5 preparation commits. A local
+The tag must include `60d5cc6` and the v0.2.4, v0.2.5 and v0.2.6 preparation commits. A local
 `dist/SHA256SUMS` is evidence for that local build only; it does not establish
 the hashes of GitHub assets. After publishing, run both README installers on
-clean accounts, check `lm-resizer --version` reports 0.2.5 and repeat source
+clean accounts, check `lm-resizer --version` reports 0.2.6 and repeat source
 and JSON retrieval with the downloaded executable. Run the four platform
 installation checks before announcing the release. Binary publication does
 not require publishing the npm package.

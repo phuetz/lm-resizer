@@ -15,9 +15,17 @@ PRIVATE = re.compile(r"p[a]trice|mini[s]tar|dark[s]tar|192[.]168[.]", re.I)
 
 
 def check_repository():
-    paths = subprocess.check_output(
-        ["git", "-c", "core.fsmonitor=false", "ls-files", "-z"], cwd=ROOT
-    ).decode().split("\0")
+    try:
+        paths = subprocess.check_output(
+            ["git", "-c", "core.fsmonitor=false", "ls-files", "-z"],
+            cwd=ROOT,
+            stderr=subprocess.DEVNULL,
+        ).decode().split("\0")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        raise SystemExit(
+            f"{ROOT} is not a Git checkout (or git is missing): this check lists the tracked "
+            "files with `git ls-files`. Clone the repository instead of downloading an archive."
+        )
     failures = []
     for name in paths:
         if not name or name.startswith("vendor/"):

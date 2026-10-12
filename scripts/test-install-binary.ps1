@@ -1,6 +1,26 @@
 param([Parameter(Mandatory = $true)][string]$ArchiveDir)
 $ErrorActionPreference = "Stop"
 
+function Remove-LmResizerTemporaryPath {
+  param([Parameter(Mandatory = $true)][string]$LiteralPath)
+  # Processes are reaped before this call; antivirus/indexers can still hold
+  # a transient Windows file lock. Cleanup must not replace the real result.
+  for ($attempt = 1; $attempt -le 10; $attempt++) {
+    try {
+      if (Test-Path -LiteralPath $LiteralPath) {
+        Remove-Item -LiteralPath $LiteralPath -Recurse -Force -ErrorAction Stop
+      }
+      return
+    } catch {
+      if ($attempt -eq 10) {
+        Write-Warning "Cleanup left '$LiteralPath' after $attempt attempts: $($_.Exception.Message)" -WarningAction Continue
+        return
+      }
+      Start-Sleep -Milliseconds ([Math]::Min(1000, 200 * $attempt))
+    }
+  }
+}
+
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $manifest = Get-Content -LiteralPath (Join-Path $root "Cargo.toml") -Raw
 if ($manifest -notmatch '(?m)^version = "([^"]+)"') { throw "Missing package version" }
@@ -36,7 +56,14 @@ try {
   Get-Content -LiteralPath (Join-Path $root "install.ps1") -Raw | Invoke-Expression
   $binary = Join-Path $installDir "lm-resizer.exe"
   if (-not (Test-Path -LiteralPath $binary)) { throw "Installer did not create the binary" }
-  $output = & $binary --version
+  $versionOutput = Join-Path $tmp "version.txt"
+  $versionProcess = Start-Process -FilePath $binary -ArgumentList '--version' -NoNewWindow -Wait -PassThru -RedirectStandardOutput $versionOutput
+  try {
+    if ($versionProcess.ExitCode -ne 0) { throw "Installed binary failed ($($versionProcess.ExitCode))" }
+    $output = (Get-Content -LiteralPath $versionOutput -Raw).Trim()
+  } finally {
+    $versionProcess.Dispose()
+  }
   if ($output -notmatch [regex]::Escape("lm-resizer $version")) { throw "Wrong installed version: $output" }
   $before = (Get-FileHash -Algorithm SHA256 -LiteralPath $binary).Hash
 
@@ -108,5 +135,5 @@ try {
   $env:LM_RESIZER_SKIP_PATH_UPDATE = $savedSkip
   $env:PATH = $savedProcessPath
   [Environment]::SetEnvironmentVariable("Path", $savedUserPath, "User")
-  Remove-Item -LiteralPath $tmp -Recurse -Force
+  Remove-LmResizerTemporaryPath -LiteralPath $tmp
 }

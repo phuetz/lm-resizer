@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to package, for example v0.2.5"
+        description: "Existing tag to package, for example v0.2.6"
         required: true
         type: string
       confirm:
@@ -34,6 +34,8 @@ jobs:
           - runner: windows-latest
             artifact: windows
     runs-on: ${{ matrix.runner }}
+    # Same release check as CI, plus packaging: a hung test must not hold it.
+    timeout-minutes: 60
     steps:
       - name: Checkout the existing tag
         uses: actions/checkout@v4
@@ -135,6 +137,7 @@ jobs:
   draft:
     needs: package
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: github-release
     permissions:
       contents: write

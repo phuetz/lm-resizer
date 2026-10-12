@@ -167,6 +167,8 @@ fn git_history_with_patches_keeps_each_commit_and_its_complete_patch() {
     let expected = git(&args);
     assert!(String::from_utf8_lossy(&expected).contains("+after"));
     let state = dir.path().join("state");
+    // `--format` et `-p` sont hors de la liste blanche de la vue compacte : brut, octet pour octet,
+    // en appel direct comme par `exec`.
     for direct in [true, false] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lm-resizer"));
         command
@@ -181,34 +183,6 @@ fn git_history_with_patches_keeps_each_commit_and_its_complete_patch() {
         }
         let output = command.arg("git").args(args).output().unwrap();
         assert!(output.status.success(), "{:?}", output);
-        assert!(
-            output.stdout.len() < expected.len(),
-            "patch must actually shrink: direct={direct}"
-        );
-        let mut decoder = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
-            .arg("expand")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        decoder
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(&output.stdout)
-            .unwrap();
-        let expanded = decoder.wait_with_output().unwrap();
-        assert!(expanded.status.success());
-        assert_eq!(expanded.stdout, expected, "direct={direct}");
-    }
-    for file in std::fs::read_dir(state.join("tee")).unwrap() {
-        let recalled = Command::new(env!("CARGO_BIN_EXE_lm-resizer"))
-            .env("LM_RESIZER_STATE_DIR", &state)
-            .args(["tee", "read"])
-            .arg(file.unwrap().file_name())
-            .output()
-            .unwrap();
-        assert!(recalled.status.success());
-        assert_eq!(recalled.stdout, expected);
+        assert_eq!(output.stdout, expected, "direct={direct}");
     }
 }

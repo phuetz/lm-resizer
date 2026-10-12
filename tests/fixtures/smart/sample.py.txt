@@ -1,0 +1,17 @@
+"""Première ligne du module.
+Seconde ligne du module.
+"""
+from typing import Iterable
+LIMIT: int = 999
+class Reader:
+    @staticmethod
+    def read(
+        paths: Iterable[str],
+    ) -> list[str]:
+        """Lit les chemins.
+        Seconde ligne de documentation.
+        """
+        return list(paths)
+async def fetch(value: str) -> str:
+    return value
+text = "def textual_fake(): pass"

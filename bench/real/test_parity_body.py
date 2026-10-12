@@ -16,7 +16,7 @@ class VisibleBodyTests(unittest.TestCase):
         self.assertEqual(parity_rtk.visible_body(report), output.encode())
 
     def test_only_the_exact_tee_trailer_is_removed(self):
-        output = "E   assert 42 == 43\n[tee:abc123]\n"
+        output = "E   assert 42 == 43\n[tee:abc123] lm-resizer tee read abc123\n"
         report = {"output": output, "filtered_bytes": 1, "tee_hint": "[raw: abc123]"}
         self.assertEqual(parity_rtk.visible_body(report), b"E   assert 42 == 43\n")
 

@@ -2,7 +2,7 @@
 # Install a prebuilt, checksum-verified lm-resizer binary. No Rust toolchain needed.
 set -eu
 
-version="${LM_RESIZER_VERSION:-0.2.5}"
+version="${LM_RESIZER_VERSION:-0.2.6}"
 case "$version" in
   ''|*[!0-9A-Za-z.+-]*) echo "invalid version: $version" >&2; exit 2 ;;
 esac
@@ -80,7 +80,7 @@ if [ "$status" -ne 0 ]; then
     echo "If you see 'not found' or 'Exec format error': check that this is a 64-bit x86_64 system (uname -m gives $arch)," >&2
     echo "that you did not install an older release built against glibc, and that the file system is not mounted noexec." >&2
   fi
-  echo "Alternative: build from source (see the README, section Build from source)." >&2
+  echo "Alternative: build from source (see the README, section Install from source)." >&2
   exit 1
 fi
 if [ "$reported" != "lm-resizer $version" ]; then
