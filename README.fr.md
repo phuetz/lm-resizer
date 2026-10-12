@@ -1,5 +1,7 @@
 # LM Resizer
 
+![LM Resizer — protéger la fenêtre de contexte, garder le signal utile](docs/infographic-lm-resizer.webp)
+
 **Raccourcissez les sorties de commande bruyantes avant qu'elles n'atteignent votre agent de code — sans jamais perdre un seul échec.** LM Resizer est un CLI Rust local et rapide, destiné aux développeurs qui pilotent tests, compilations, Git, conteneurs et autres outils depuis un agent de code comme Claude Code, Codex, Cursor, Gemini CLI, un client MCP ou un pipeline maison. Il lance une commande, garde un résultat compact pour l'agent et conserve l'original pour un rappel immédiat : les octets et l'ordre de chaque flux sont exacts, tandis que l'ordre entre stdout et stderr n'est garanti que dans le mode par défaut (voir [Récupérer la sortie exacte](#récupérer-la-sortie-exacte)).
 
 Sur un banc de 61 captures de commandes, il économise en moyenne **27,61 %** de jetons (médiane **4,87 %**), rappel du brut compris, conserve le code de sortie du producteur dans **61/61** cas et démarre en environ **5 ms** (`lm-resizer --version` ; un `exec` lance aussi la commande enveloppée et prend environ **20 ms**). Zéro télémétrie, 100 % local, déterministe.
