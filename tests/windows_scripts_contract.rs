@@ -55,6 +55,17 @@ mod windows {
         Some(&text[start..end])
     }
 
+    #[test]
+    fn installer_cleanup_preserves_the_installation_result() {
+        let sandbox = sandbox("cleanup-contract");
+        let output = run_isolated_powershell(
+            &sandbox,
+            &repository_root().join("scripts/test-install-cleanup.ps1"),
+        );
+        fs::remove_dir_all(&sandbox).expect("remove sandbox");
+        assert!(output.status.success(), "cleanup contract: {output:?}");
+    }
+
     fn braced_block_from<'a>(text: &'a str, needle: &str) -> &'a str {
         let start = text.find(needle).expect("historical PATH update block");
         let mut depth = 0usize;

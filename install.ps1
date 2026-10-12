@@ -1,6 +1,48 @@
 & {
 $ErrorActionPreference = "Stop"
 
+function Invoke-LmResizerVersion {
+  param([Parameter(Mandatory = $true)][string]$FilePath)
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo.FileName = $FilePath
+  $process.StartInfo.Arguments = '--version'
+  $process.StartInfo.UseShellExecute = $false
+  $process.StartInfo.RedirectStandardOutput = $true
+  try {
+    if (-not $process.Start()) { throw "Could not start $FilePath" }
+    # Drain stdout before waiting to avoid a full pipe deadlock. Stderr is
+    # inherited. EOF alone does not prove that the process has exited.
+    $output = $process.StandardOutput.ReadToEnd()
+    $process.WaitForExit()
+    if ($process.ExitCode -ne 0) {
+      throw "Version command failed ($($process.ExitCode)): $FilePath"
+    }
+    return $output.Trim()
+  } finally {
+    $process.Dispose()
+  }
+}
+
+function Remove-LmResizerTemporaryPath {
+  param([Parameter(Mandatory = $true)][string]$LiteralPath)
+  # Processes are reaped before this call; antivirus/indexers can still hold
+  # a transient Windows file lock. Cleanup must not replace the real result.
+  for ($attempt = 1; $attempt -le 10; $attempt++) {
+    try {
+      if (Test-Path -LiteralPath $LiteralPath) {
+        Remove-Item -LiteralPath $LiteralPath -Recurse -Force -ErrorAction Stop
+      }
+      return
+    } catch {
+      if ($attempt -eq 10) {
+        Write-Warning "Cleanup left '$LiteralPath' after $attempt attempts: $($_.Exception.Message)" -WarningAction Continue
+        return
+      }
+      Start-Sleep -Milliseconds ([Math]::Min(1000, 200 * $attempt))
+    }
+  }
+}
+
 # LM_RESIZER_PATH_HELPER_START
 function Add-LmResizerInstallPath {
   param(
@@ -104,7 +146,7 @@ get(url, 5);
   [IO.Compression.ZipFile]::ExtractToDirectory($zip, $unpack)
   $source = Join-Path $unpack "lm-resizer.exe"
   if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Archive is missing lm-resizer.exe" }
-  $reported = & $source --version
+  $reported = Invoke-LmResizerVersion -FilePath $source
   if ($reported -ne "lm-resizer $version") { throw "Archive has unexpected binary version: $reported" }
   New-Item -ItemType Directory -Force -Path $destDir | Out-Null
   $staged = Join-Path $destDir (".lm-resizer." + [guid]::NewGuid().ToString("N") + ".exe")
@@ -112,15 +154,15 @@ get(url, 5);
     Copy-Item -LiteralPath $source -Destination $staged
     Move-Item -LiteralPath $staged -Destination (Join-Path $destDir "lm-resizer.exe") -Force
   } finally {
-    if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Force }
+    Remove-LmResizerTemporaryPath -LiteralPath $staged
   }
-  & (Join-Path $destDir "lm-resizer.exe") --version
+  Invoke-LmResizerVersion -FilePath (Join-Path $destDir "lm-resizer.exe")
   Write-Host "Installed $(Join-Path $destDir 'lm-resizer.exe')"
 
   if ($env:LM_RESIZER_SKIP_PATH_UPDATE -ne "1") {
     Add-LmResizerInstallPath -Directory $destDir
   }
 } finally {
-  Remove-Item -LiteralPath $tmp -Recurse -Force
+  Remove-LmResizerTemporaryPath -LiteralPath $tmp
 }
 }
