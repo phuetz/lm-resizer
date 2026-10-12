@@ -40,7 +40,41 @@ fn invalid_executable_is_126_in_every_exec_mode() {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
+#[test]
+fn invalid_image_from_path_or_symlink_never_reaches_a_shell() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let dir = sandbox();
+    let file = dir.path().join("invalid-from-path");
+    let link = dir.path().join("invalid-link");
+    let executed = dir.path().join("unexpected-shell-execution");
+    std::fs::write(
+        &file,
+        format!("printf executed > '{}'\nexit 23\n", executed.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700)).unwrap();
+    symlink(&file, &link).unwrap();
+    for program in ["invalid-from-path", "invalid-link"] {
+        for options in [vec![], vec!["--raw-on-failure"], vec!["--stream"]] {
+            let out = lm(dir.path())
+                .env("PATH", dir.path())
+                .args(["exec", "--json"])
+                .args(options)
+                .args(["--", program])
+                .output()
+                .unwrap();
+            assert!(!executed.exists(), "{program}: {out:?}");
+            assert_eq!(out.status.code(), Some(126), "{program}: {out:?}");
+            assert!(report(&out)["output"]
+                .as_str()
+                .unwrap()
+                .contains("cannot execute"));
+        }
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn kernel_rejected_images_never_reach_a_shell() {
     use std::os::unix::fs::PermissionsExt;
@@ -57,6 +91,7 @@ fn kernel_rejected_images_never_reach_a_shell() {
     // reject a malformed ELF or the interpreter named by a valid shebang.
     for (name, contents) in [
         ("truncated-elf", b"\x7fELF\nexit 23\n".to_vec()),
+        ("truncated-mach-o", b"\xcf\xfa\xed\xfe\nexit 23\n".to_vec()),
         (
             "bad-interpreter",
             format!("#!{}\nexit 23\n", interpreter.display()).into_bytes(),
@@ -83,7 +118,7 @@ fn kernel_rejected_images_never_reach_a_shell() {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 #[test]
 fn direct_exec_preserves_shebang_arguments_environment_and_path_search() {
     use std::os::unix::fs::PermissionsExt;

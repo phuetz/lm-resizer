@@ -200,9 +200,9 @@ mod platform {
         if std::io::stdin().is_terminal() || std::fs::File::open("/dev/tty").is_ok() {
             return false;
         }
-        // Preserve Rust's posix_spawn path and its ENOEXEC launch error.
-        // A pre_exec callback forces execvp, which executes invalid images
-        // through /bin/sh instead of reporting the failed launch.
+        // Let Rust set the process group before command_capture's strict
+        // execv callback. Neither execvp nor Apple's posix_spawnp is safe
+        // here: both can interpret invalid images through /bin/sh.
         command.process_group(0);
         true
     }

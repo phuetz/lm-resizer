@@ -159,27 +159,35 @@ pub fn build_command(program: &std::path::Path, args: &[String]) -> Command {
 fn spawn_producer(command: &mut Command) -> std::io::Result<std::process::Child> {
     // Install last: StrictExec snapshots argv and replaces the final exec,
     // after all caller configuration and any other pre_exec callbacks.
-    die_with_parent(command);
+    configure_exec(command);
     command.spawn()
 }
 
+/// Launch without an implicit shell on Unix. On Linux, also arrange for the
+/// producer to die with its parent.
 /// Linux : l'enfant reçoit SIGKILL quand `lm-resizer` meurt, même par `kill -9`, au lieu de lui
 /// survivre rattaché à un autre parent (`PR_SET_PDEATHSIG`). Le signal part à la mort du fil qui a
 /// lancé l'enfant : chaque appelant attend l'enfant sur ce fil. Les petits-enfants ne sont pas
 /// couverts (`sh -c 'sleep 40'` : `sh` meurt, `sleep` reste).
-#[cfg(target_os = "linux")]
-fn die_with_parent(command: &mut Command) {
+#[cfg(unix)]
+fn configure_exec(command: &mut Command) {
     use std::os::unix::process::CommandExt;
+    #[cfg(target_os = "linux")]
     let parent = rustix::process::getpid();
     let image = StrictExec::prepare(command);
     // SAFETY: tout est préparé dans le parent. L'enfant ne fait que prctl, getppid et execv,
     // sans allocation ni verrou ; les erreurs sont des codes OS bruts.
     unsafe {
         command.pre_exec(move || {
-            rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::KILL))?;
-            // Le parent est mort entre fork et prctl : le signal ne viendra plus.
-            if rustix::process::getppid() != Some(parent) {
-                return Err(rustix::io::Errno::SRCH.into());
+            #[cfg(target_os = "linux")]
+            {
+                rustix::process::set_parent_process_death_signal(Some(
+                    rustix::process::Signal::KILL,
+                ))?;
+                // Le parent est mort entre fork et prctl : le signal ne viendra plus.
+                if rustix::process::getppid() != Some(parent) {
+                    return Err(rustix::io::Errno::SRCH.into());
+                }
             }
             match &image {
                 Ok(image) => Err(image.exec()),
@@ -189,10 +197,12 @@ fn die_with_parent(command: &mut Command) {
     }
 }
 
-/// A pre_exec forces Rust's fork/execvp path, whose ENOEXEC fallback runs /bin/sh.
+/// Apple's posix_spawnp and Unix execvp can run /bin/sh on ENOEXEC, even for
+/// absolute paths. A pre_exec bypasses posix_spawnp and must never return Ok,
+/// which would let Rust continue into execvp.
 /// Replace that final exec with execv: the kernel accepts or rejects the image,
 /// including shebangs and binfmt_misc, and an error never reaches execvp.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 struct StrictExec {
     program: std::ffi::CString,
     // Own the immutable buffers referenced by argv, including its argv[0].
@@ -203,12 +213,12 @@ struct StrictExec {
 // SAFETY: argv points only into this object's owned CString buffers. Moving the
 // object leaves those heap allocations stable; neither the buffers nor pointers
 // are mutated or exposed. Concurrent exec calls only read them.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 unsafe impl Send for StrictExec {}
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 unsafe impl Sync for StrictExec {}
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl StrictExec {
     fn prepare(command: &Command) -> Result<Self, rustix::io::Errno> {
         use std::ffi::CString;
@@ -250,15 +260,15 @@ impl StrictExec {
             ) -> std::ffi::c_int;
         }
         // SAFETY: path and argv are live, NUL-terminated and immutable. execv
-        // is async-signal-safe and inherits the environment configured by Rust
-        // before pre_exec. Success never returns; failure sets errno.
+        // is async-signal-safe and inherits our environment (capture commands
+        // do not override it). Success never returns; failure sets errno.
         unsafe { execv(self.program.as_ptr(), self.argv.as_ptr()) };
         std::io::Error::last_os_error()
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-fn die_with_parent(_command: &mut Command) {}
+#[cfg(not(unix))]
+fn configure_exec(_command: &mut Command) {}
 
 pub fn run(command: &[String]) -> anyhow::Result<Capture> {
     run_shared(command)
@@ -481,7 +491,9 @@ pub fn launch_failure(program: &str, error: &std::io::Error) -> Capture {
     #[cfg(windows)]
     let invalid_image = matches!(error.raw_os_error(), Some(193 | 216));
     #[cfg(unix)]
-    let invalid_image = error.raw_os_error() == Some(8); // ENOEXEC
+    let invalid_image = error.raw_os_error() == Some(8) // ENOEXEC
+        // Darwin also has EBADEXEC, EBADARCH, ESHLIBVERS and EBADMACHO.
+        || (cfg!(target_vendor = "apple") && matches!(error.raw_os_error(), Some(85..=88)));
     #[cfg(not(any(windows, unix)))]
     let invalid_image = false;
     Capture {
